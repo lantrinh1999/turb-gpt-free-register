@@ -5,10 +5,10 @@
 #   i18n/sync_upstream.sh status     show how far behind upstream the fork is
 #   i18n/sync_upstream.sh abort      throw away an unfinished sync
 #
-# How it works (details in docs/UPSTREAM_SYNC.md):
+# How it works (details in UPSTREAM_SYNC.md):
 #   1. fetch upstream, start a merge that records upstream as a parent but keeps our tree
 #   2. replace the working tree with upstream's tree (so there are never merge conflicts)
-#   3. restore the fork-only files (i18n/, docs/UPSTREAM_SYNC.md)
+#   3. restore the fork-only files (i18n/, UPSTREAM_SYNC.md)
 #   4. re-apply the dictionary (i18n/apply.py apply); new Chinese segments that are not in the
 #      dictionary yet are written to i18n/pending.json and the script stops so they can be translated
 #   5. run the checks, commit the merge
@@ -18,7 +18,7 @@ UPSTREAM_REMOTE="${UPSTREAM_REMOTE:-upstream}"
 UPSTREAM_BRANCH="${UPSTREAM_BRANCH:-main}"
 FORK_REMOTE="${FORK_REMOTE:-origin}"
 # Paths that exist only in the fork and must survive the tree replacement.
-FORK_ONLY=(i18n docs/UPSTREAM_SYNC.md)
+FORK_ONLY=(i18n UPSTREAM_SYNC.md)
 
 ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
@@ -54,7 +54,7 @@ finish() {
     cat <<EOF
 
 New or changed Chinese text has no translation yet. They are listed in i18n/pending.json.
-Translate them (see "Translating new text" in docs/UPSTREAM_SYNC.md), e.g.
+Translate them (see "Translating new text" in UPSTREAM_SYNC.md), e.g.
 
     $PY i18n/apply.py show <changed files...> 400      # numbered list
     # write "ID<TAB>English" lines to a file, then
@@ -80,7 +80,7 @@ EOF
   fi
   if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
     "$PY" -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -5 || true
-    echo "(compare with the known baseline in docs/UPSTREAM_SYNC.md)"
+    echo "(compare with the known baseline in UPSTREAM_SYNC.md)"
   fi
 
   say "Committing"
