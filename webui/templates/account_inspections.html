@@ -73,82 +73,82 @@
 <dialog id="inspectionStartDialog" class="inspection-dialog inspection-dialog--start" aria-labelledby="inspectionStartTitle">
   <form onsubmit="submitAccountInspection(event)">
     <div class="inspection-header">
-      <div class="inspection-heading"><h3 id="inspectionStartTitle">启动账号巡检</h3><p>本地检查 AT，按需查活并更新套餐</p></div>
-      <button class="inspection-btn inspection-close" type="button" aria-label="关闭启动巡检弹窗" onclick="document.getElementById('inspectionStartDialog').close()">×</button>
+      <div class="inspection-heading"><h3 id="inspectionStartTitle">Start Account Inspection</h3><p>Check AT locally, run liveness checks as needed and update plans</p></div>
+      <button class="inspection-btn inspection-close" type="button" aria-label="Close start inspection dialog" onclick="document.getElementById('inspectionStartDialog').close()">×</button>
     </div>
     <div class="inspection-body">
-      <div class="inspection-notice"><span>巡检范围：<strong id="inspectionScopeLabel">未归档账号</strong></span><span>该范围内全部账号，不受其他筛选条件影响。</span></div>
-      <label class="inspection-field" for="inspectionWorkers">并发线程数</label>
+      <div class="inspection-notice"><span>Inspection scope:<strong id="inspectionScopeLabel">Unarchived accounts</strong></span><span>All accounts in this scope, regardless of other filters.</span></div>
+      <label class="inspection-field" for="inspectionWorkers">number of concurrent threads</label>
       <input id="inspectionWorkers" name="workers" type="number" min="1" max="32" step="1" value="3" required aria-describedby="inspectionWorkersHint">
-      <p id="inspectionWorkersHint" class="inspection-hint">支持 1–32 个线程，默认 3 个。每个账号在本次任务中只执行一次；已有任务未结束时不能重复启动。</p>
-      <p class="inspection-hint">已废账号直接跳过；AT 失效 → 自动查活 → 同会话查套餐</p>
+      <p id="inspectionWorkersHint" class="inspection-hint">Supports 1–32 threads, default 3. Each account is processed only once per task; a new task cannot be started while another is still running.</p>
+      <p class="inspection-hint">Deactivated accounts are skipped; invalid AT → automatic liveness check → plan check in the same session</p>
     </div>
-    <div class="inspection-footer"><span>执行结果将保存在巡检历史中</span><div class="inspection-footer-actions">
-      <button class="inspection-btn" type="button" onclick="document.getElementById('inspectionStartDialog').close()">取消</button>
-      <button class="inspection-btn inspection-btn--primary" id="btnConfirmInspection" type="submit">开始巡检</button>
+    <div class="inspection-footer"><span>Results are saved in the inspection history</span><div class="inspection-footer-actions">
+      <button class="inspection-btn" type="button" onclick="document.getElementById('inspectionStartDialog').close()">Cancel</button>
+      <button class="inspection-btn inspection-btn--primary" id="btnConfirmInspection" type="submit">Start Inspection</button>
     </div></div>
   </form>
 </dialog>
 <dialog id="inspectionHistoryDialog" class="inspection-dialog" aria-labelledby="inspectionHistoryTitle">
   <div class="inspection-header">
     <span class="inspection-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3"/><rect x="9" y="2" width="6" height="6" rx="2"/><path d="m8 14 3 3 5-6"/></svg></span>
-    <div class="inspection-heading"><h3 id="inspectionHistoryTitle">账号巡检历史</h3><p>查看任务进度与结果 · 每 5 秒自动更新</p></div>
-    <button class="inspection-btn" id="inspectionRefresh" type="button" onclick="refreshInspectionHistory()">刷新</button>
-    <button class="inspection-btn inspection-close" type="button" aria-label="关闭巡检历史" onclick="document.getElementById('inspectionHistoryDialog').close()">×</button>
+    <div class="inspection-heading"><h3 id="inspectionHistoryTitle">Account Inspection History</h3><p>View task progress and results · Auto-refreshes every 5 seconds</p></div>
+    <button class="inspection-btn" id="inspectionRefresh" type="button" onclick="refreshInspectionHistory()">Refresh</button>
+    <button class="inspection-btn inspection-close" type="button" aria-label="Close inspection history" onclick="document.getElementById('inspectionHistoryDialog').close()">×</button>
   </div>
   <div class="inspection-body">
-    <div class="inspection-notice"><strong>本地检查 → 失效查活 → 同会话查套餐</strong><span>范围跟随启动时的归档筛选，不受其他列表筛选影响。</span>
-      <details><summary>统计口径与巡检规则</summary><p>仅本地解析 JWT exp；过期、缺失或无法解析的 AT 视为失效。查活成功后复用同一会话自动查套餐，巡检不会重复查询；入队被拒绝也计入对应失败数。执行前已删除或已标记为已废的账号计为跳过，不计为 AT 失效；已废账号保存到失败详情，但不计为实际查活失败。</p></details>
+    <div class="inspection-notice"><strong>Local check → liveness check for invalid AT → plan check in the same session</strong><span>The scope follows the archive filter at launch and is not affected by other list filters.</span>
+      <details><summary>Statistics and Inspection Rules</summary><p>Only the JWT exp is parsed locally; an expired, missing or unparseable AT is treated as invalid. After a successful liveness check, the same session is reused to check the plan automatically, so the inspection does not query twice; rejected enqueues are also counted in the corresponding failure counts. Accounts deleted or already marked as deactivated before execution are counted as skipped, not as AT invalid; deactivated accounts are saved in the failure details but not counted as actual liveness check failures.</p></details>
     </div>
-    <div id="inspectionHistoryContent" aria-live="polite"><div class="inspection-empty"><strong>正在加载巡检记录…</strong><p>请稍候</p></div></div>
+    <div id="inspectionHistoryContent" aria-live="polite"><div class="inspection-empty"><strong>Loading inspection records…</strong><p>Please wait</p></div></div>
   </div>
-  <div class="inspection-footer"><span id="inspectionPageLabel">正在读取记录…</span><div class="inspection-footer-actions">
-    <button class="inspection-btn" id="inspectionPrev" type="button" onclick="changeInspectionPage(-1)" disabled>上一页</button>
-    <button class="inspection-btn" id="inspectionNext" type="button" onclick="changeInspectionPage(1)" disabled>下一页</button>
+  <div class="inspection-footer"><span id="inspectionPageLabel">Reading records…</span><div class="inspection-footer-actions">
+    <button class="inspection-btn" id="inspectionPrev" type="button" onclick="changeInspectionPage(-1)" disabled>Previous</button>
+    <button class="inspection-btn" id="inspectionNext" type="button" onclick="changeInspectionPage(1)" disabled>Next</button>
   </div></div>
 </dialog>
 <dialog id="inspectionFailuresDialog" class="inspection-dialog" aria-labelledby="inspectionFailuresTitle">
   <div class="inspection-header">
-    <div class="inspection-heading"><h3 id="inspectionFailuresTitle">查活失败详情</h3><p id="inspectionFailuresSubtitle">按巡检任务保存，不受后续查活和账号删除影响</p></div>
-    <button class="inspection-btn" id="inspectionFailuresRefresh" type="button" onclick="refreshInspectionFailures()">刷新</button>
-    <button class="inspection-btn inspection-close" type="button" aria-label="关闭失败详情" onclick="document.getElementById('inspectionFailuresDialog').close()">×</button>
+    <div class="inspection-heading"><h3 id="inspectionFailuresTitle">Liveness Check Failure Details</h3><p id="inspectionFailuresSubtitle">Saved per inspection task, unaffected by later liveness checks or account deletion</p></div>
+    <button class="inspection-btn" id="inspectionFailuresRefresh" type="button" onclick="refreshInspectionFailures()">Refresh</button>
+    <button class="inspection-btn inspection-close" type="button" aria-label="Close failure details" onclick="document.getElementById('inspectionFailuresDialog').close()">×</button>
   </div>
   <div class="inspection-body" id="inspectionFailuresContent" aria-live="polite"></div>
   <div class="inspection-footer"><span id="inspectionFailuresPageLabel"></span><div class="inspection-footer-actions">
-    <button class="inspection-btn" id="inspectionFailuresPrev" type="button" onclick="changeInspectionFailuresPage(-1)" disabled>上一页</button>
-    <button class="inspection-btn" id="inspectionFailuresNext" type="button" onclick="changeInspectionFailuresPage(1)" disabled>下一页</button>
+    <button class="inspection-btn" id="inspectionFailuresPrev" type="button" onclick="changeInspectionFailuresPage(-1)" disabled>Previous</button>
+    <button class="inspection-btn" id="inspectionFailuresNext" type="button" onclick="changeInspectionFailuresPage(1)" disabled>Next</button>
   </div></div>
 </dialog>
 <script>
 let inspectionArchived = '0';
 function inspectionScopeName(archived) {
-  return archived === 'only' ? '已归档' : (archived === 'all' ? '全部账号' : '未归档');
+  return archived === 'only' ? 'Archived' : (archived === 'all' ? 'All accounts' : 'Unarchived');
 }
 let deletingDeactivatedAccounts = false;
 async function deleteDeactivatedAccounts() {
   if (deletingDeactivatedAccounts) return;
   const archived = SHOW_ARCHIVED_ACCOUNTS ? 'only' : '0';
   const scope = inspectionScopeName(archived);
-  if (!confirm(`确定删除「${scope}」范围内全部已废账号吗？\n\n不限当前页，不受搜索或其他筛选条件影响。仅删除本地已废账号及关联 Agent 凭证，保留巡检历史。此操作不可撤销。`)) return;
+  if (!confirm(`Delete all deactivated accounts in “${scope}”?\n\nNot limited to the current page; other search or filter conditions do not apply. Only local deactivated accounts and their linked Agent credentials are deleted; inspection history is kept. This cannot be undone.`)) return;
   deletingDeactivatedAccounts = true;
   const button = document.getElementById('btnDeleteDeactivatedAccounts');
   button.disabled = true;
-  button.textContent = '删除中…';
+  button.textContent = 'Deleting…';
   try {
     const result = await inspectionRequest('/api/accounts/delete-deactivated', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({archived}),
     });
-    // 清理选择，避免跨页选择残留已删除的账号 ID。
+    // Clear the selection so stale IDs of deleted accounts do not linger across pages.
     ACCOUNT_SELECTED.clear();
     loadAccounts(); loadSummary();
-    showToast(`已删除 ${inspectionCount(result.deleted_count)} 个已废账号`);
+    showToast(`Deleted ${inspectionCount(result.deleted_count)} deactivated accounts`);
   } catch (error) {
-    showToast('未能确认删除结果，请刷新账号列表核实：' + error.message);
+    showToast('Could not confirm the deletion result; refresh the account list to verify:' + error.message);
     loadAccounts(); loadSummary();
   } finally {
     deletingDeactivatedAccounts = false;
     button.disabled = false;
-    button.textContent = '一键删除已废';
+    button.textContent = 'Delete All Dead';
   }
 }
 let inspectionPage = 1;
@@ -164,7 +164,7 @@ async function inspectionRequest(url, options = {}) {
   try {
     return await api(url, {...options, signal: controller.signal});
   } catch (error) {
-    if (controller.signal.aborted) throw new Error('请求超时，请刷新确认任务状态');
+    if (controller.signal.aborted) throw new Error('Request timed out, refresh to confirm the task status');
     throw error;
   } finally { clearTimeout(timeout); }
 }
@@ -172,7 +172,7 @@ function inspectionButtonState() {
   const btn = document.getElementById('btnStartInspection');
   if (btn) {
     btn.disabled = inspectionStarting || inspectionActive || inspectionUncertain;
-    btn.textContent = inspectionUncertain ? '状态待确认…' : (inspectionActive ? '巡检进行中…' : (inspectionStarting ? '正在启动…' : '一键巡检'));
+    btn.textContent = inspectionUncertain ? 'Status Unconfirmed…' : (inspectionActive ? 'Inspection Running…' : (inspectionStarting ? 'Starting…' : 'One-Click Inspection'));
   }
   document.getElementById('btnConfirmInspection').disabled = inspectionStarting || inspectionActive || inspectionUncertain;
 }
@@ -187,27 +187,27 @@ async function submitAccountInspection(event) {
   if (inspectionStarting || inspectionActive || inspectionUncertain) return;
   const workers = Number(document.getElementById('inspectionWorkers').value);
   if (!Number.isInteger(workers) || workers < 1 || workers > 32) {
-    showToast('线程数必须为 1–32 的整数');
+    showToast('Thread count must be an integer between 1–32');
     return;
   }
-  inspectionStateVersion++; // 丢弃启动前发出的旧轮询结果，避免错误解锁按钮。
+  inspectionStateVersion++; // Discard stale poll results issued before launch to avoid wrongly unlocking the button.
   inspectionStarting = true;
   inspectionButtonState();
   try {
     await inspectionRequest('/api/accounts/inspections', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({workers, archived:inspectionArchived})});
-    inspectionStateVersion++; // 启动期间发出的 GET 也可能尚未看到新任务。
+    inspectionStateVersion++; // A GET issued during startup may also not have seen the new task yet.
     document.getElementById('inspectionStartDialog').close();
     inspectionActive = true;
     inspectionPage = 1;
     document.getElementById('inspectionHistoryDialog').showModal();
-    showToast('巡检已启动');
+    showToast('Inspection started');
   } catch (e) {
-    // 请求超时/断连不代表服务端没有创建任务；先查明状态，不能盲目再次提交。
+    // A timed-out or dropped request does not mean the server did not create the task; check the status first and do not blindly resubmit.
     inspectionUncertain = true;
-    showToast('未能确认启动结果：' + e.message + '。正在查询任务状态。');
+    showToast('Could not confirm the start result:' + e.message + '. Checking the task status now.');
   }
   finally {
-    inspectionStateVersion++; // 成功或失败都作废提交期间的旧读取快照。
+    inspectionStateVersion++; // Whether it succeeds or fails, invalidate stale read snapshots from during submission.
     inspectionStarting = false;
     inspectionButtonState();
     refreshInspectionHistory();
@@ -235,9 +235,9 @@ function inspectionTime(value) {
 }
 function inspectionResultCounts(success, failed) {
   const good = inspectionCount(success), bad = inspectionCount(failed);
-  return `<span class="inspection-number inspection-success">${good}</span> / <span class="inspection-number ${bad ? 'inspection-failure' : ''}">${bad}</span><span class="inspection-sub">成功 / 失败</span>`;
+  return `<span class="inspection-number inspection-success">${good}</span> / <span class="inspection-number ${bad ? 'inspection-failure' : ''}">${bad}</span><span class="inspection-sub">Success / Failed</span>`;
 }
-// 同页刷新保留阅读位置，内容未变化时不重建 DOM；翻页则回到起点。
+// A same-page refresh keeps the reading position and does not rebuild the DOM when content is unchanged; paging returns to the top.
 const inspectionRenderedViews = new WeakMap();
 function renderInspectionContent(content, markup, viewKey) {
   const sameView = inspectionRenderedViews.get(content) === viewKey;
@@ -261,7 +261,7 @@ async function refreshInspectionHistory() {
   inspectionLoading = true;
   const refreshButton = document.getElementById('inspectionRefresh');
   refreshButton.disabled = true;
-  refreshButton.textContent = '刷新中…';
+  refreshButton.textContent = 'Refreshing…';
   const page = inspectionPage;
   const version = inspectionStateVersion;
   try {
@@ -272,8 +272,8 @@ async function refreshInspectionHistory() {
     inspectionUncertain = false;
     inspectionButtonState();
     if (wasActive && !inspectionActive) { loadAccounts(); loadSummary(); }
-    const names = {queued:'排队中',running:'进行中',completed:'已完成',failed:'失败',interrupted:'已中断'};
-    const heads = ['任务', '账号范围', '开始 / 结束时间', '状态', '线程', '检查进度', 'AT 失效', '查活结果', '套餐结果'];
+    const names = {queued:'Queued',running:'In Progress',completed:'Completed',failed:'failed',interrupted:'Interrupted'};
+    const heads = ['Task', 'Account Scope', 'Start / End Time', 'status', 'Threads', 'Check Progress', 'AT Invalid', 'Liveness Result', 'Plan Result'];
     const rows = data.items.map(r => {
       const checked = inspectionCount(r.checked_count), total = inspectionCount(r.total_count), skipped = inspectionCount(r.skipped_count);
       const progress = total ? Math.min(100, Math.round((checked + skipped) / total * 100)) : (r.status === 'completed' ? 100 : 0);
@@ -281,36 +281,36 @@ async function refreshInspectionHistory() {
       const cells = [
         `<span class="inspection-number">#${esc(r.id)}</span>`,
         `<span class="inspection-pill inspection-scope">${inspectionScopeName(r.archived || '0')}</span>`,
-        `${inspectionTime(r.created_at)}<span class="inspection-sub">结束：${esc(r.finished_at ? String(r.finished_at).replace('T', ' ') : '—')}</span>`,
+        `${inspectionTime(r.created_at)}<span class="inspection-sub">Ended:${esc(r.finished_at ? String(r.finished_at).replace('T', ' ') : '—')}</span>`,
         `<span class="inspection-pill inspection-pill--${statusClass}">${esc(names[r.status] || r.status)}</span>`,
         `<span class="inspection-number">${inspectionCount(r.workers) || 1}</span>`,
-        `<span class="inspection-number">${checked} / ${total}</span><div class="inspection-progress" aria-hidden="true"><span style="width:${progress}%"></span></div><span class="inspection-sub">跳过 ${skipped} 个（已废 ${inspectionCount(r.deactivated_skipped_count)}）</span>`,
+        `<span class="inspection-number">${checked} / ${total}</span><div class="inspection-progress" aria-hidden="true"><span style="width:${progress}%"></span></div><span class="inspection-sub">Skipped ${skipped} (deactivated ${inspectionCount(r.deactivated_skipped_count)})</span>`,
         `<span class="inspection-number ${inspectionCount(r.invalid_count) ? 'inspection-failure' : ''}">${inspectionCount(r.invalid_count)}</span>`,
         inspectionResultCounts(r.live_success_count, r.live_failed_count) +
           ((inspectionCount(r.live_failed_count) + inspectionCount(r.deactivated_skipped_count)) && Number.isSafeInteger(Number(r.id)) && Number(r.id) > 0
-            ? `<button class="inspection-btn inspection-detail-link" type="button" onclick="openInspectionFailures(${Number(r.id)})">失败详情（${inspectionCount(r.live_failed_count) + inspectionCount(r.deactivated_skipped_count)}）</button>` : ''),
+            ? `<button class="inspection-btn inspection-detail-link" type="button" onclick="openInspectionFailures(${Number(r.id)})">Failure Details (${inspectionCount(r.live_failed_count) + inspectionCount(r.deactivated_skipped_count)})</button>` : ''),
         inspectionResultCounts(r.plan_success_count, r.plan_failed_count),
       ];
       return `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>` +
-        (r.error ? `<tr class="inspection-error"><td colspan="9">任务提示：${esc(r.error)}</td></tr>` : '');
+        (r.error ? `<tr class="inspection-error"><td colspan="9">Task note:${esc(r.error)}</td></tr>` : '');
     }).join('');
     renderInspectionContent(document.getElementById('inspectionHistoryContent'), rows
-      ? `<div class="inspection-table-wrap"><table class="inspection-table"><caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)">账号巡检任务记录及各阶段统计</caption><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`
-      : '<div class="inspection-empty"><svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><strong>暂无巡检记录</strong><p>在账号列表点击「一键巡检」，完成后可在这里查看结果。</p></div>', `history:${page}`);
+      ? `<div class="inspection-table-wrap"><table class="inspection-table"><caption style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)">Account inspection task records and per-stage statistics</caption><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<div class="inspection-empty"><svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><strong>No Inspection Records</strong><p>Click “One-Click Inspection” in the account list; results appear here when it finishes.</p></div>', `history:${page}`);
     inspectionHasHistory = true;
-    document.getElementById('inspectionPageLabel').textContent = `共 ${data.total} 条记录 · 第 ${inspectionPage} / ${Math.max(1, Math.ceil(data.total / 20))} 页`;
+    document.getElementById('inspectionPageLabel').textContent = `${data.total} records in total · Page ${inspectionPage} / ${Math.max(1, Math.ceil(data.total / 20))}`;
     document.getElementById('inspectionPrev').disabled = inspectionPage <= 1;
     document.getElementById('inspectionNext').disabled = inspectionPage * 20 >= data.total;
   } catch(e) {
     if (!inspectionHasHistory) {
-      document.getElementById('inspectionHistoryContent').innerHTML = '<div class="inspection-empty"><strong>暂时无法读取巡检记录</strong><p>请点击右上角「刷新」重试。</p></div>';
-      document.getElementById('inspectionPageLabel').textContent = '读取失败';
+      document.getElementById('inspectionHistoryContent').innerHTML = '<div class="inspection-empty"><strong>Unable to read inspection records right now</strong><p>Click “Refresh” at the top right to retry.</p></div>';
+      document.getElementById('inspectionPageLabel').textContent = 'Read failed';
     }
-    if (document.getElementById('inspectionHistoryDialog').open) showToast('读取巡检历史失败：' + e.message);
+    if (document.getElementById('inspectionHistoryDialog').open) showToast('Failed to read inspection history:' + e.message);
   } finally {
     inspectionLoading = false;
     refreshButton.disabled = false;
-    refreshButton.textContent = '刷新';
+    refreshButton.textContent = 'Refresh';
     if (inspectionRefreshPending) {
       inspectionRefreshPending = false;
       void refreshInspectionHistory();
@@ -329,12 +329,12 @@ function openInspectionFailures(taskId) {
   inspectionFailuresPage = 1;
   inspectionFailuresTotal = 0;
   inspectionFailuresVersion++;
-  document.getElementById('inspectionFailuresSubtitle').textContent = '按巡检任务保存，不受后续查活和账号删除影响';
+  document.getElementById('inspectionFailuresSubtitle').textContent = 'Saved per inspection task, unaffected by later liveness checks or account deletion';
   document.getElementById('inspectionFailuresPrev').disabled = true;
   document.getElementById('inspectionFailuresNext').disabled = true;
-  document.getElementById('inspectionFailuresTitle').textContent = `巡检 #${taskId} · 查活失败详情`;
-  document.getElementById('inspectionFailuresContent').innerHTML = '<div class="inspection-empty"><strong>正在加载失败记录…</strong></div>';
-  document.getElementById('inspectionFailuresPageLabel').textContent = '正在读取记录…';
+  document.getElementById('inspectionFailuresTitle').textContent = `Inspection #${taskId} · Liveness Failure Details`;
+  document.getElementById('inspectionFailuresContent').innerHTML = '<div class="inspection-empty"><strong>Loading failure records…</strong></div>';
+  document.getElementById('inspectionFailuresPageLabel').textContent = 'Reading records…';
   document.getElementById('inspectionFailuresDialog').showModal();
   refreshInspectionFailures();
 }
@@ -357,24 +357,24 @@ async function refreshInspectionFailures() {
     if (version !== inspectionFailuresVersion || taskId !== inspectionFailuresTask || page !== inspectionFailuresPage) return;
     const content = document.getElementById('inspectionFailuresContent');
     inspectionFailuresTotal = inspectionCount(data.total);
-    document.getElementById('inspectionFailuresSubtitle').textContent = `${inspectionScopeName(data.task.archived || '0')} · 含已废跳过，原因按本次任务保存，每 5 秒自动更新`;
+    document.getElementById('inspectionFailuresSubtitle').textContent = `${inspectionScopeName(data.task.archived || '0')} · Includes skipped deactivated accounts; reasons are saved per task; auto-updates every 5 seconds`;
     let markup;
     if (!data.details_available) {
-      markup = '<div class="inspection-empty"><strong>该历史任务未保存失败明细</strong><p>旧任务仅保留汇总，无法还原当时的失败原因。新增巡检会保存失败详情。</p></div>';
+      markup = '<div class="inspection-empty"><strong>No failure details were saved for this historical task</strong><p>Older tasks keep only summaries, so the original failure reasons cannot be restored. New inspections save failure details.</p></div>';
     } else if (!data.items.length) {
-      markup = '<div class="inspection-empty"><strong>暂无查活失败或已废跳过记录</strong><p>任务执行期间，失败记录将在处理完成后显示。</p></div>';
+      markup = '<div class="inspection-empty"><strong>No liveness failures or skipped deactivated accounts</strong><p>While the task is running, failure records appear after processing finishes.</p></div>';
     } else {
-      const statuses = {deactivated_skipped:'已废跳过', failed:'查活失败', deactivated:'账号已废', rejected:'未能入队', error:'执行异常'};
+      const statuses = {deactivated_skipped:'Skipped (Deactivated)', failed:'Liveness check failed', deactivated:'Account Deactivated', rejected:'Not Enqueued', error:'Execution Error'};
       const rows = data.items.map(r => `<tr><td>#${esc(r.account_id)}</td><td class="inspection-email">${esc(r.email)}</td><td>${esc(statuses[r.status] || r.status)}</td><td>${inspectionTime(r.failed_at)}</td><td class="inspection-reason">${esc(r.error)}</td></tr>`).join('');
-      markup = `<p class="inspection-scroll-hint">左右滑动表格查看完整失败原因</p><div class="inspection-table-wrap" tabindex="0" role="region" aria-label="查活失败明细，可左右滚动"><table class="inspection-table inspection-failure-table"><thead><tr><th scope="col">账号 ID</th><th scope="col">账号邮箱</th><th scope="col">失败类型</th><th scope="col">记录时间</th><th scope="col">失败原因</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      markup = `<p class="inspection-scroll-hint">Swipe the table sideways to see the full failure reason</p><div class="inspection-table-wrap" tabindex="0" role="region" aria-label="Liveness failure details, scrollable horizontally"><table class="inspection-table inspection-failure-table"><thead><tr><th scope="col">Account ID</th><th scope="col">Account Email</th><th scope="col">Failure Type</th><th scope="col">Recorded At</th><th scope="col">Failure Reason</th></tr></thead><tbody>${rows}</tbody></table></div>`;
     }
     renderInspectionContent(content, markup, `failures:${taskId}:${page}`);
-    document.getElementById('inspectionFailuresPageLabel').textContent = `共 ${inspectionFailuresTotal} 条失败记录 · 第 ${page} / ${Math.max(1, Math.ceil(inspectionFailuresTotal / 20))} 页`;
+    document.getElementById('inspectionFailuresPageLabel').textContent = `${inspectionFailuresTotal} failure records · Page ${page} / ${Math.max(1, Math.ceil(inspectionFailuresTotal / 20))}`;
   } catch (error) {
     if (version !== inspectionFailuresVersion || taskId !== inspectionFailuresTask || page !== inspectionFailuresPage) return;
-    document.getElementById('inspectionFailuresContent').innerHTML = '<div class="inspection-empty"><strong>暂时无法读取失败详情</strong><p>请点击刷新重试。</p></div>';
-    document.getElementById('inspectionFailuresPageLabel').textContent = '读取失败';
-    if (document.getElementById('inspectionFailuresDialog').open) showToast('读取失败详情失败：' + error.message);
+    document.getElementById('inspectionFailuresContent').innerHTML = '<div class="inspection-empty"><strong>Unable to read failure details right now</strong><p>Click Refresh to retry.</p></div>';
+    document.getElementById('inspectionFailuresPageLabel').textContent = 'Read failed';
+    if (document.getElementById('inspectionFailuresDialog').open) showToast('Failed to read failure details:' + error.message);
   } finally {
     inspectionFailuresLoading = false;
     refresh.disabled = false;

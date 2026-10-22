@@ -1,25 +1,25 @@
-# L 取号 API 文档
+# L Take-Number API Documentation
 
-只包含接入端需要的两个接口：获取号码、获取验证码。`service` 和 `country` 由接入端自行配置。
+Only the two endpoints the client needs: get a number and get a verification code. `service` and `country` are configured by the client itself.
 
-## 基础信息
+## Basic information
 
-- API 基础地址：`http://localhost:8788`
-- 请求和响应格式：`application/json`
-- 后台接口需要授权：
+- API base URL:`http://localhost:8788`
+- Request and response format:`application/json`
+- Admin endpoints require authorization:
 
 ```http
 Authorization: Bearer <ADMIN_AUTH_CODE>
 Content-Type: application/json
 ```
 
-## 1. 获取号码
+## 1. Get a number
 
 ```http
 POST /api/admin/l/take-phone
 ```
 
-请求参数：
+Request parameters:
 
 ```json
 {
@@ -29,15 +29,15 @@ POST /api/admin/l/take-phone
 }
 ```
 
-字段说明：
+Field description:
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Description |
 | --- | --- | --- |
-| `service` | 是 | 项目代码，由接入端自行配置 |
-| `country` | 是 | 国家 ID，由接入端自行配置 |
-| `maxPrice` | 否 | 最高可接受价格 |
+| `service` | Yes | Project code, configured by the client itself |
+| `country` | Yes | Country ID, configured by the client itself |
+| `maxPrice` | No | Maximum acceptable price |
 
-请求示例：
+Request example:
 
 ```sh
 curl -s "http://localhost:8788/api/admin/l/take-phone" \
@@ -46,7 +46,7 @@ curl -s "http://localhost:8788/api/admin/l/take-phone" \
   -d '{"service":"facebook","country":"10","maxPrice":"0.05"}'
 ```
 
-成功响应：
+Success response:
 
 ```json
 {
@@ -66,29 +66,29 @@ curl -s "http://localhost:8788/api/admin/l/take-phone" \
 }
 ```
 
-接入端需要保存：
+The client needs to save:
 
-| 字段 | 用途 |
+| Field | Purpose |
 | --- | --- |
-| `item.id` | 调后台获取验证码接口使用 |
-| `item.phone` | 获取到的手机号 |
+| `item.id` | Used when calling the admin get-verification-code endpoint |
+| `item.phone` | The phone number obtained |
 
-常见错误：
+Common errors:
 
 ```json
-{"error":"请选择服务"}
-{"error":"请选择国家"}
-{"error":"取号失败：暂无号码","raw":"NO_NUMBERS"}
-{"error":"取号失败：余额不足","raw":"NO_BALANCE"}
+{"error":"Please select a service"}
+{"error":"Please select a country"}
+{"error":"Failed to get a number: no numbers available","raw":"NO_NUMBERS"}
+{"error":"Failed to get a number: insufficient balance","raw":"NO_BALANCE"}
 ```
 
-## 2. 获取验证码
+## 2. Get verification code
 
 ```http
 POST /api/admin/l/fetch-code
 ```
 
-请求参数：
+Request parameters:
 
 ```json
 {
@@ -96,7 +96,7 @@ POST /api/admin/l/fetch-code
 }
 ```
 
-请求示例：
+Request example:
 
 ```sh
 curl -s "http://localhost:8788/api/admin/l/fetch-code" \
@@ -105,7 +105,7 @@ curl -s "http://localhost:8788/api/admin/l/fetch-code" \
   -d '{"id":"f1b8b315-8c2a-4e23-8a94-fd1c2e4a9d35"}'
 ```
 
-成功响应：
+Success response:
 
 ```json
 {
@@ -116,13 +116,13 @@ curl -s "http://localhost:8788/api/admin/l/fetch-code" \
     "lastCode": "899201"
   },
   "code": "899201",
-  "message": "L 验证码获取成功",
+  "message": "L verification code obtained successfully",
   "raw": "STATUS_OK:899201",
   "fetchedAt": "2026-06-29T03:32:00.000Z"
 }
 ```
 
-暂未收到验证码：
+Verification code not received yet:
 
 ```json
 {
@@ -132,28 +132,28 @@ curl -s "http://localhost:8788/api/admin/l/fetch-code" \
     "status": "active"
   },
   "code": "",
-  "message": "等待验证码",
+  "message": "Waiting for verification code",
   "raw": "STATUS_WAIT_CODE",
   "fetchedAt": "2026-06-29T03:32:00.000Z"
 }
 ```
 
-常见错误：
+Common errors:
 
 ```json
-{"error":"缺少号码 ID"}
-{"error":"号码不存在"}
-{"error":"号码已释放，不能取验证码"}
+{"error":"Missing number ID"}
+{"error":"Number does not exist"}
+{"error":"Number has been released, cannot get verification code"}
 ```
-## 3. 释放号码
+## 3. Release a number
 
 ```http
 POST /api/admin/l/release
 ```
 
-用于取消/释放已获取的 L 号码。释放后该号码状态会变为 `released`，不能再通过获取验证码接口取码。
+Used to cancel/release an acquired L number. After release, the number status becomes `released`, and its code can no longer be fetched through the get-verification-code endpoint.
 
-请求参数支持释放单个号码：
+The request parameters support releasing a single number:
 
 ```json
 {
@@ -161,7 +161,7 @@ POST /api/admin/l/release
 }
 ```
 
-也支持批量释放号码：
+Batch release of numbers is also supported:
 
 ```json
 {
@@ -172,14 +172,14 @@ POST /api/admin/l/release
 }
 ```
 
-字段说明：
+Field description:
 
-| 字段 | 必填 | 说明 |
+| Field | Required | Description |
 | --- | --- | --- |
-| `id` | 否 | 单个号码 ID，即获取号码接口返回的 `item.id` |
-| `ids` | 否 | 批量号码 ID 数组；`id` 和 `ids` 至少传一个 |
+| `id` | No | Single number ID, i.e. the value returned by the get-number endpoint: `item.id` |
+| `ids` | No | Array of number IDs for batch release; at least one of `id` and `ids` must be passed |
 
-请求示例：
+Request example:
 
 ```sh
 curl -s "http://localhost:8788/api/admin/l/release" \
@@ -188,7 +188,7 @@ curl -s "http://localhost:8788/api/admin/l/release" \
   -d '{"id":"f1b8b315-8c2a-4e23-8a94-fd1c2e4a9d35"}'
 ```
 
-成功响应：
+Success response:
 
 ```json
 {
@@ -198,7 +198,7 @@ curl -s "http://localhost:8788/api/admin/l/release" \
 }
 ```
 
-部分失败响应示例：
+Partial failure response example:
 
 ```json
 {
@@ -209,25 +209,25 @@ curl -s "http://localhost:8788/api/admin/l/release" \
       "id": "8d3c6f37-4d77-4c8c-b3df-2b0d6f4f9a11",
       "phone": "9091234662",
       "activationId": "67908f935ab3410bd4c7f758",
-      "message": "订单不存在或已失效",
+      "message": "Order does not exist or has expired",
       "raw": "NO_ACTIVATION"
     }
   ]
 }
 ```
 
-响应字段说明：
+Response field description:
 
-| 字段 | 说明 |
+| Field | Description |
 | --- | --- |
-| `updated` | 本次成功更新为已释放的数量；已释放号码重复释放也计入成功 |
-| `released` | 与 `updated` 相同，兼容前端释放数量展示 |
-| `failed` | 释放失败的号码列表；为空数组表示全部成功 |
+| `updated` | Number of numbers successfully updated to released this time; releasing an already released number again also counts as success |
+| `released` | Same as `updated`, kept for compatibility with the frontend release count display |
+| `failed` | List of numbers that failed to release; an empty array means all succeeded |
 
-常见错误：
+Common errors:
 
 ```json
-{"error":"请选择号码"}
-{"error":"请先配置 LikeSim API Key"}
-{"error":"未找到号码"}
+{"error":"Please select a number"}
+{"error":"Please configure LikeSim API Key"}
+{"error":"Number not found"}
 ```

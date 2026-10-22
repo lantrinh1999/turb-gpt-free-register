@@ -1,47 +1,47 @@
 # -*- coding: utf-8 -*-
 """
-人工操作节奏配置。
+Human-like operation pacing configuration.
 
-协议请求本身很快；真实浏览器人工操作通常会有页面加载、阅读、输入、切换邮箱
-等停顿。这里集中配置轻量随机延迟，避免全流程固定节拍。
+The protocol requests themselves are very fast; a real browser used by a human normally has pauses for page loading, reading, typing, switching mailboxes
+and so on. Lightweight random delays are configured here so the whole flow does not run on a fixed beat.
 """
 from config.env_loader import apply_env_overrides
 
-# 总开关。关闭后 delay() 直接返回。
+# Master switch. When off, delay() returns immediately.
 ENABLE_HUMANIZE_DELAY = True
 
-# 延迟倍率；批量跑得太慢时可调小到 0.5。
+# Delay multiplier; reduce it to 0.5 when batch runs are too slow.
 HUMANIZE_DELAY_FACTOR = 1.0
 
-# Roxy/Cloak 浏览器自动化动作随机化。开启后会使用更接近人工的点击/输入：
-# - 点击前轻微滚动、移动到元素内随机位置、短暂停顿再点击
-# - 输入按字符/小段随机节奏，不再一次性整串 send_keys
-# - 页面打开后做少量随机停顿/鼠标移动
+# Roxy/Cloak Randomization of browser automation actions. When enabled, clicks/typing closer to a human are used:
+# - scroll slightly before clicking, move to a random position inside the element, pause briefly, then click
+# - typing uses a random rhythm per character / small chunk instead of sending the whole string at once send_keys
+# - a few random pauses / mouse movements after the page opens
 ENABLE_HUMANIZE_BROWSER_ACTIONS = True
 
-# 每类动作的随机停顿区间（秒）。
+# Random pause ranges (seconds) for each kind of action.
 HUMANIZE_DELAYS = {
-    # 普通 API 间隔：看起来像页面 JS 发完一个请求后处理状态。
+    # Normal API interval: looks like page JS handling state after finishing a request.
     "api": (0.45, 1.35),
-    # 页面跳转 / 重定向后等页面稳定。
+    # Wait for the page to settle after a page navigation / redirect.
     "navigate": (1.2, 3.2),
-    # Sentinel / Turnstile / PoW 相关，给 SDK 运行和 UI 等待留时间。
+    # Sentinel / Turnstile / PoW related, leaving time for the SDK to run and the UI to wait.
     "challenge": (0.8, 2.4),
-    # 邮箱验证码到达后，模拟用户切回页面和输入。
+    # After the email verification code arrives, simulate the user switching back to the page and typing.
     "otp_input": (2.5, 8.0),
-    # 填写姓名生日等表单。
+    # Filling in forms such as name and birthday.
     "form": (1.8, 5.0),
-    # 注册完成后进入应用、拉 session。
+    # Entering the app and pulling the session after registration completes.
     "post_auth": (1.5, 4.0),
-    # 并发任务错峰。
+    # Staggering of concurrent tasks.
     "job_stagger": (0.4, 1.8),
-    # 点击前观察/移动鼠标。
+    # Observe / move the mouse before clicking.
     "click": (0.15, 0.85),
-    # 单字符输入间隔。
+    # Interval between single-character inputs.
     "keystroke": (0.035, 0.18),
-    # 输入中偶尔停顿。
+    # Occasional pauses while typing.
     "typing_pause": (0.18, 0.75),
-    # 页面打开后的短暂观察。
+    # Short observation after a page opens.
     "page_warmup": (0.7, 2.2),
 }
 

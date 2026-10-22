@@ -80,7 +80,7 @@ class MailCodeClientTests(unittest.TestCase):
     @patch.object(client.requests, "request")
     def test_uncertain_purchase_persists_key_for_next_attempt(self, request, sleep):
         request.side_effect = requests.Timeout()
-        with self.assertRaisesRegex(client.MailCodeError, "已保存幂等键"):
+        with self.assertRaisesRegex(client.MailCodeError, "idempotency key saved"):
             client.pick_account()
         key = request.call_args_list[0].kwargs["headers"]["Idempotency-Key"]
         self.assertEqual(len(list(Path(self.temp.name).glob("purchases/*.json"))), 1)
@@ -110,7 +110,7 @@ class MailCodeClientTests(unittest.TestCase):
 
     @patch.object(client.requests, "request")
     def test_business_failure_is_not_retried(self, request):
-        request.return_value = response(status=409, error={"code": "OUT_OF_STOCK", "message": "库存不足"})
+        request.return_value = response(status=409, error={"code": "OUT_OF_STOCK", "message": "out of stock"})
         with self.assertRaisesRegex(client.MailCodeError, "OUT_OF_STOCK"):
             client.pick_account()
         request.assert_called_once()
@@ -156,7 +156,7 @@ class MailCodeClientTests(unittest.TestCase):
         client._remember(client.MailCodeAccount("a@mail.test", "m"))
         now = time.time()
         get_codes.return_value = codes([record("1", received=now - 600), record("2", expired=True)], "2")
-        with self.assertRaisesRegex(client.MailCodeError, "超时"):
+        with self.assertRaisesRegex(client.MailCodeError, "Timed out"):
             client.fetch_latest_otp("a@mail.test", after_ts=now - 10, max_wait=0)
 
     @patch.object(client, "_request")

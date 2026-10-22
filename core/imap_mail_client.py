@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""通用 IMAP 邮箱池客户端。"""
+"""Generic IMAP email pool client."""
 from __future__ import annotations
 
 import email as email_lib
@@ -50,7 +50,7 @@ def pick_account() -> ImapEmailAccount:
     from core import db
     account = _account_from_row(db.claim_next_imap_email())
     if account is None:
-        raise ImapMailError("通用 IMAP 邮箱池没有可用邮箱，请先在邮箱池导入")
+        raise ImapMailError("The generic IMAP email pool has no available email, please import some into the email pool first")
     _CONTEXT_CACHE[account.email.lower()] = account
     return account
 
@@ -72,7 +72,7 @@ def get_account_context(email: str) -> ImapEmailAccount | None:
 def release_account(email: str, status: str = "available", note: str | None = None) -> None:
     from core import db
     db.release_imap_email(email, status=status, note=note)
-    # 已注册账号后续查活仍需取码，因此只在真正回收为可用时清掉缓存。
+    # Registered accounts still need to fetch codes for later liveness checks, so the cache is cleared only when the email is actually recycled as available.
     if status == "available":
         _CONTEXT_CACHE.pop(str(email or "").lower(), None)
 
@@ -82,7 +82,7 @@ def _operation_timeout(deadline: float | None = None) -> float:
     if deadline is not None:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError("IMAP 取码等待时间已耗尽")
+            raise TimeoutError("IMAP code retrieval wait time exhausted")
         timeout = min(timeout, remaining)
     return timeout
 
@@ -94,7 +94,7 @@ def _set_timeout(mail, deadline: float | None = None) -> None:
 
 
 def _disconnect(mail) -> None:
-    # shutdown 只关闭本地 socket；网络异常时不再阻塞等待 LOGOUT 响应。
+    # shutdown Only close the local socket; on network errors do not block waiting for the LOGOUT response.
     if mail is not None:
         try:
             mail.shutdown()
@@ -104,30 +104,30 @@ def _disconnect(mail) -> None:
 
 def _connect(account: ImapEmailAccount, deadline: float | None = None):
     if not account.server or not account.password:
-        raise ImapMailError(f"{account.email} 的 IMAP 服务器或密码为空")
+        raise ImapMailError(f"{account.email} has an empty IMAP server or password")
     mail = None
-    phase = "连接/TLS"
+    phase = "Connect/TLS"
     try:
         cls = imaplib.IMAP4_SSL if account.use_ssl else imaplib.IMAP4
         mail = cls(account.server, account.port, timeout=_operation_timeout(deadline))
-        phase = "登录"
+        phase = "Log In"
         _set_timeout(mail, deadline)
         mail.login(account.username or account.email, account.password)
-        phase = "打开目录"
+        phase = "open folder"
         _set_timeout(mail, deadline)
         status, _ = mail.select(account.mailbox or "INBOX", readonly=True)
         if status != "OK":
-            raise ImapMailError(f"无法打开邮箱目录 {account.mailbox!r}")
+            raise ImapMailError(f"Cannot open mailbox folder {account.mailbox!r}")
         return mail
     except Exception as exc:
         _disconnect(mail)
         if isinstance(exc, ImapMailError):
             raise
-        raise ImapMailError(f"IMAP {phase}失败: {type(exc).__name__}: {exc}") from exc
+        raise ImapMailError(f"IMAP {phase} failed: {type(exc).__name__}: {exc}") from exc
 
 
 def _search_messages(mail, after_dt: datetime | None, deadline: float | None = None) -> list[dict]:
-    # IMAP 日期月份必须使用英文缩写，不能受服务器 locale 影响。
+    # IMAP IMAP date months must use English abbreviations and must not be affected by the server locale.
     months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     criteria = "ALL" if after_dt is None else (
         f'(SINCE {after_dt.day:02d}-{months[after_dt.month - 1]}-{after_dt.year})'
@@ -135,15 +135,15 @@ def _search_messages(mail, after_dt: datetime | None, deadline: float | None = N
     _set_timeout(mail, deadline)
     status, result = mail.uid("search", None, criteria)
     if status != "OK":
-        raise ImapMailError("IMAP 搜索邮件失败")
+        raise ImapMailError("IMAP search messages failed")
     ids = result[0].split() if result and result[0] else []
     if not ids:
         return []
-    # UID 避免邮件被删除时序号漂移；批量读取最新 20 封，减少网络往返。
+    # UID avoids sequence-number drift when messages are deleted; fetch the latest 20 in a batch to reduce network round trips.
     _set_timeout(mail, deadline)
     status, data = mail.uid("fetch", b",".join(ids[-20:]), "(BODY.PEEK[])")
     if status != "OK":
-        raise ImapMailError("IMAP 读取邮件失败")
+        raise ImapMailError("IMAP fetch messages failed")
     messages: list[dict] = []
     for part in data or []:
         if not isinstance(part, tuple) or len(part) < 2 or not isinstance(part[1], bytes):
@@ -151,7 +151,7 @@ def _search_messages(mail, after_dt: datetime | None, deadline: float | None = N
         try:
             messages.append(_msg_to_dict(email_lib.message_from_bytes(part[1])))
         except Exception as exc:
-            logger.debug("[IMAP] 邮件解析失败: %s", exc)
+            logger.debug("[IMAP] Failed to parse message: %s", exc)
     return messages
 
 
@@ -172,20 +172,20 @@ def fetch_latest_otp(
 ) -> str:
     account = get_account_context(email)
     if account is None:
-        raise ImapMailError(f"邮箱池中找不到 IMAP 账号: {email}")
+        raise ImapMailError(f"IMAP account not found in the email pool: {email}")
     after_ts = float(time.time() if after_ts is None else after_ts)
     max_wait = int(max_wait if max_wait is not None else _email_cfg.OTP_MAX_WAIT)
     interval = int(poll_interval if poll_interval is not None else _email_cfg.OTP_POLL_INTERVAL)
     settle = int(settle_seconds if settle_seconds is not None else _email_cfg.OTP_SETTLE_SECONDS)
     deadline = time.monotonic() + max(0, max_wait)
-    # 显式 0 表示宽松取最近一条，不能被当作当前时间。
+    # An explicit 0 means loosely taking the latest message; it must not be treated as the current time.
     after_dt = datetime.fromtimestamp(after_ts - 30, tz=timezone.utc) if after_ts > 0 else None
     best_otp, best_ts, settle_until = None, 0.0, None
     last_error = None
     mail = None
     rounds = 0
 
-    logger.info("[IMAP] 开始轮询 %s (%s:%s, SSL=%s, mailbox=%s, wait=%ss)",
+    logger.info("[IMAP] Start polling %s (%s:%s, SSL=%s, mailbox=%s, wait=%ss)",
                 email, account.server, account.port, account.use_ssl, account.mailbox, max_wait)
     try:
         while time.monotonic() < deadline:
@@ -198,7 +198,7 @@ def fetch_latest_otp(
                 messages = _search_messages(mail, after_dt, deadline=deadline)
             except (ImapMailError, imaplib.IMAP4.error, OSError, EOFError, TimeoutError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
-                logger.warning("[IMAP] 第 %s 轮取件失败，剩余 %.1fs: %s",
+                logger.warning("[IMAP] round %s fetch failed, remaining %.1fs: %s",
                                rounds, max(0, deadline - time.monotonic()), last_error)
                 _disconnect(mail)
                 mail = None
@@ -225,10 +225,10 @@ def fetch_latest_otp(
                 if ts >= best_ts:
                     if otp != best_otp:
                         best_otp, settle_until = otp, time.monotonic() + max(0, settle)
-                        logger.info("[IMAP] 锁定候选验证码，等待 %ss settle", settle)
+                        logger.info("[IMAP] Candidate code locked, waiting %ss settle", settle)
                     best_ts = ts
                 break
-            logger.debug("[IMAP] 第 %s 轮读取 %s 封，过滤统计=%s", rounds, len(messages), rejected)
+            logger.debug("[IMAP] round %s read %s messages, filter stats=%s", rounds, len(messages), rejected)
             if best_otp and settle_until is not None and time.monotonic() >= settle_until:
                 return best_otp
             remaining = deadline - time.monotonic()
@@ -244,5 +244,5 @@ def fetch_latest_otp(
 
     if best_otp:
         return best_otp
-    detail = f"，最后取件错误: {last_error}" if last_error else "，请检查目录、收件人和邮件时间"
-    raise ImapMailError(f"等待 {email} 的 OTP 超时（>{max_wait}s）{detail}")
+    detail = f", last fetch error: {last_error}" if last_error else ", please check the folder, recipient and message time"
+    raise ImapMailError(f"Timed out waiting for the OTP of {email} (>{max_wait}s){detail}")

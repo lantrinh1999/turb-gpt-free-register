@@ -1,33 +1,33 @@
 # -*- coding: utf-8 -*-
 """
-注册基础信息（默认值）
+Registration basics (defaults)
 
-CLI 走 main.py 时会优先读这里；Web 控制台批量注册时也会用同样的默认值。
-留空字段会触发交互式输入或自动生成（仅 USE_EMAIL_SERVICE=True 时邮箱会从 Outlook 池领取）。
+CLI main.py reads these first; the web console uses the same defaults for batch registration.
+Empty fields trigger interactive input or auto-generation (the email is taken from the Outlook pool only when USE_EMAIL_SERVICE=True).
 """
 from config.env_loader import apply_env_overrides
 
-# 注册邮箱（留空 + USE_EMAIL_SERVICE=True 时从 Outlook 池领取）
+# Registration email (when empty and USE_EMAIL_SERVICE=True, taken from the Outlook pool)
 REGISTER_EMAIL = ""
 
-# 注册密码（OTP-only 流程已不需要，留作备用）
+# Registration password (no longer needed by the OTP-only flow, kept as a fallback)
 REGISTER_PASSWORD = ""
 
-# 用户名（注册完成后设置的显示名称，留空会自动生成 "Foo Bar" 形式）
-# OpenAI 限制：name_invalid_chars —— 只允许字母和空格
+# Username (display name set after registration; when empty one is generated in the form "Foo Bar")
+# OpenAI Restriction: name_invalid_chars - only letters and spaces are allowed
 REGISTER_NAME = ""
 
-# 注册成功落库后是否自动查询套餐/Plus 资格。
-# 关闭后不会在注册完成后立刻访问 backend-api/accounts/check，后续可在账号列表手动查询。
+# Whether to automatically check the plan / Plus eligibility after a successful registration is saved to the database.
+# When disabled, backend-api/accounts/check is not called right after registration; it can be queried manually from the account list later.
 AUTO_PLAN_CHECK_AFTER_REGISTER = False
 
-# 纯协议注册指纹生命周期：
-#   False = 每次注册任务创建全新的 device/session/浏览器画像（默认）
-#   True  = 同一邮箱重复注册或补跑时复用稳定指纹；不同邮箱仍彼此独立
+# Pure-protocol registration fingerprint lifecycle:
+#   False = Every registration job creates a fresh device/session/browser profile (default)
+#   True  = Reuse a stable fingerprint when the same email registers again or is rerun; different emails stay independent
 PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL = False
 
-# 注册成功并拿到 accessToken 后，在浏览器里随机停留一段时间再关闭连接。
-# 格式：最小秒,最大秒。设为 "0,0" 表示不额外停留。
+# After registration succeeds and the accessToken is obtained, stay in the browser for a random time before closing the connection.
+# Format: min seconds,max seconds. Set to "0,0" for no extra stay.
 POST_REGISTER_DWELL_SECONDS_RANGE = "5,15"
 
 # ---- .env overrides for WebUI editable fields ----

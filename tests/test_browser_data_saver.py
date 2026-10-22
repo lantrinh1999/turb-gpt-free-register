@@ -84,7 +84,7 @@ class BrowserDataSaverTests(unittest.TestCase):
         self.assertEqual(stats["data_saver_blocked_count"], 1)
         self.assertEqual(stats["data_saver_blocked_by_type"], {"image": 1})
         self.assertTrue(saver.was_playwright_blocked(image_request))
-        # 这里传入的是另一个对象；只有实际被 route.abort 的 request 才会被标记。
+        # A different object is passed in here; only a request actually aborted by route.abort gets marked.
         self.assertFalse(saver.was_playwright_blocked(_Request("image", "https://cdn.example/avatar.png")))
 
         saver.stop()

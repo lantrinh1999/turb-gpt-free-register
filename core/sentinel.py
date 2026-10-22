@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Sentinel Token 生成模块
-逆向自 sentinel.openai.com 的 sdk.js
+Sentinel Token generation module
+Reverse-engineered from the sdk.js of sentinel.openai.com sdk.js
 
-核心逻辑：
-1. 生成 `p` 字段（浏览器指纹数据，base64编码的 JSON 数组）
-2. 发送 POST 请求到 sentinel.openai.com/backend-api/sentinel/req
-3. 解析响应中的 token、turnstile、proofofwork
-4. 计算 Proof of Work（FNV-1a 哈希）
-5. 组装最终的 openai-sentinel-token 请求头值
+Core logic:
+1. Generate the `p` field (browser fingerprint data, a base64-encoded JSON array)
+2. Send a POST request to sentinel.openai.com/backend-api/sentinel/req
+3. Parse the token, turnstile and proofofwork
+4. Compute the Proof of Work (FNV-1a hash)
+5. Assemble the final openai-sentinel-token request header value
 """
 import json
 import time
@@ -28,42 +28,42 @@ from config import (
 
 def generate_fingerprint_data(device_id: str, attempt: int = 1, elapsed_ms: float = 0, profile: dict | None = None) -> str:
     """
-    生成浏览器指纹数据（p字段）。
-    对应 SDK 中 getConfig() + N() 函数。
+    Generate the browser fingerprint data (the p field).
+    Corresponds to the getConfig() + N() functions in the SDK.
 
-    SDK 中 getConfig() 返回的数组结构：
+    SDK The array structure returned by getConfig() in the SDK:
     [
-        screen.width + screen.height,           # [0] 屏幕宽高之和
-        "" + new Date,                           # [1] 当前时间字符串
-        performance.memory.jsHeapSizeLimit,      # [2] JS堆大小限制
-        Math.random() / attempt,                 # [3] 随机数（PoW时替换为尝试次数）
+        screen.width + screen.height,           # [0] sum of screen width and height
+        "" + new Date,                           # [1] current time string
+        performance.memory.jsHeapSizeLimit,      # [2] JS heap size limit
+        Math.random() / attempt,                 # [3] random number (replaced by the attempt count in PoW)
         navigator.userAgent,                     # [4] UA
-        随机script src,                          # [5] 随机一个script标签的src
-        data-build 属性值,                       # [6] document.documentElement 的 data-build 属性
-        navigator.language,                      # [7] 语言
-        navigator.languages.join(","),            # [8] 语言列表
-        Math.random(),                           # [9] 随机数（PoW时替换为耗时）
-        随机navigator属性,                       # [10] 随机一个navigator原型方法
-        随机document key,                        # [11] 随机一个document的key
-        随机window key,                          # [12] 随机一个window的key
-        performance.now(),                       # [13] 高精度时间
-        sid (UUID),                              # [14] 会话ID
-        URL search params,                       # [15] URL查询参数
-        navigator.hardwareConcurrency,           # [16] CPU核心数
-        performance.timeOrigin,                  # [17] 性能时间原点
-        Number("ai" in window),                  # [18] window.ai 是否存在
-        Number("InstallTrigger" in window),      # [19] Firefox特有 → 0
-        Number("cache" in window),               # [20] window.cache 是否存在
-        Number("data" in window),                # [21] window.data 是否存在
-        Number("solana" in window),              # [22] Solana钱包 → 0
-        Number("dump" in window),                # [23] Firefox特有 → 0
-        Number("requestIdleCallback" in window), # [24] 是否支持 requestIdleCallback
+        a random script src,                          # [5] a random script tag's src
+        data-build attribute value,                       # [6] data-build attribute of document.documentElement
+        navigator.language,                      # [7] Language
+        navigator.languages.join(","),            # [8] language list
+        Math.random(),                           # [9] random number (replaced by the elapsed time in PoW)
+        a random navigator property,                       # [10] a random navigator prototype method
+        a random document key,                        # [11] a random document key
+        a random window key,                          # [12] a random window key
+        performance.now(),                       # [13] high-resolution time
+        sid (UUID),                              # [14] session ID
+        URL search params,                       # [15] URL query parameters
+        navigator.hardwareConcurrency,           # [16] CPU core count
+        performance.timeOrigin,                  # [17] performance time origin
+        Number("ai" in window),                  # [18] window.ai whether it exists
+        Number("InstallTrigger" in window),      # [19] Firefox specific → 0
+        Number("cache" in window),               # [20] window.cache whether it exists
+        Number("data" in window),                # [21] window.data whether it exists
+        Number("solana" in window),              # [22] Solana wallet → 0
+        Number("dump" in window),                # [23] Firefox specific → 0
+        Number("requestIdleCallback" in window), # [24] whether it is supported requestIdleCallback
     ]
 
     Args:
-        device_id: 设备ID
-        attempt: PoW尝试次数（用于替换 [3]）
-        elapsed_ms: PoW耗时毫秒数（用于替换 [9]）
+        device_id: device ID
+        attempt: PoW attempt count (used to replace [3])
+        elapsed_ms: PoW elapsed milliseconds (used to replace [9])
     """
     profile = profile or {}
     screen_width = int(profile.get("screen_width", SCREEN_WIDTH))
@@ -80,7 +80,7 @@ def generate_fingerprint_data(device_id: str, attempt: int = 1, elapsed_ms: floa
     tz_offset = int(profile.get("timezone_offset_minutes", TIMEZONE_OFFSET_MINUTES))
     tz_name = str(profile.get("timezone_name", TIMEZONE_NAME))
 
-    # 模拟 Chrome 浏览器环境；Date.toString 与配置的时区保持一致。
+    # Simulate a Chrome browser environment; Date.toString stays consistent with the configured timezone.
     tz = timezone(timedelta(minutes=tz_offset))
     now = datetime.now(tz)
     sign = "+" if tz_offset >= 0 else "-"
@@ -88,16 +88,16 @@ def generate_fingerprint_data(device_id: str, attempt: int = 1, elapsed_ms: floa
     gmt = f"GMT{sign}{abs_minutes // 60:02d}{abs_minutes % 60:02d}"
     date_str = now.strftime(f"%a %b %d %Y %H:%M:%S {gmt} ({tz_name})")
 
-    # 模拟 performance.now() 与 performance.timeOrigin，保持
-    # timeOrigin + now ≈ Date.now()，避免同一 p 数组内时间自相矛盾。
+    # Simulate performance.now() and performance.timeOrigin, keeping
+    # timeOrigin + now ≈ Date.now(), so the times within the same p array do not contradict each other.
     perf_now = random.uniform(1000, 8000)
     time_origin = time.time() * 1000 - perf_now
 
-    # 生成 sid（SDK内部的会话ID）
+    # Generate the sid (the session ID inside the SDK)
     sid = str(device_id)
 
-    # 与 sentinel-runner.js 的 JS VM 环境共用同一组候选键；
-    # SDK 每次会随机抽样，抽样值可以变，但候选集合必须真实存在。
+    # Shares the same candidate keys with the JS VM environment of sentinel-runner.js;
+    # SDK they are sampled randomly each time; the sampled values may change, but the candidate set must really exist.
     navigator_props = list(profile.get("navigator_proto_samples") or NAVIGATOR_PROTO_SAMPLES)
     document_keys = list(profile.get("document_key_samples") or DOCUMENT_KEY_SAMPLES)
     window_keys = list(profile.get("window_key_samples") or WINDOW_KEY_SAMPLES)
@@ -107,55 +107,55 @@ def generate_fingerprint_data(device_id: str, attempt: int = 1, elapsed_ms: floa
 
     config = [
         screen_width + screen_height,       # [0] screen.width + screen.height
-        date_str,                        # [1] 时间字符串
+        date_str,                        # [1] time string
         js_heap_size_limit,              # [2] jsHeapSizeLimit
-        attempt,                         # [3] PoW尝试次数 / Math.random()
+        attempt,                         # [3] PoW attempt count / Math.random()
         user_agent,                      # [4] UA
         random.choice(script_src_samples),  # [5] script src
         build_id,                        # [6] data-build
         navigator_language,              # [7] navigator.language
         ",".join(navigator_languages),   # [8] navigator.languages
-        round(elapsed_ms) if elapsed_ms else random.randint(1, 100),  # [9] 耗时 / Math.random()
-        random.choice(navigator_props),  # [10] 随机navigator属性
-        random.choice(document_keys + [react_listening_key, react_container_key, react_resources_key]),  # [11] 随机document key / React 注入 key
-        random.choice(window_keys),       # [12] 随机window key
+        round(elapsed_ms) if elapsed_ms else random.randint(1, 100),  # [9] elapsed time / Math.random()
+        random.choice(navigator_props),  # [10] a random navigator property
+        random.choice(document_keys + [react_listening_key, react_container_key, react_resources_key]),  # [11] a random document key / React injected key
+        random.choice(window_keys),       # [12] random window key
         round(perf_now, 10),             # [13] performance.now()
         sid,                             # [14] sid
-        "",                              # [15] URL search params (注册页面通常为空)
+        "",                              # [15] URL search params (usually empty on the registration page)
         hardware_concurrency,            # [16] hardwareConcurrency
         round(time_origin, 1),           # [17] performance.timeOrigin
         int(window_flags.get("ai", 0)),                 # [18] Number("ai" in window)
-        int(window_flags.get("InstallTrigger", 0)),     # [19] Firefox 特有
+        int(window_flags.get("InstallTrigger", 0)),     # [19] Firefox specific
         int(window_flags.get("cache", 0)),              # [20] Number("cache" in window)
         int(window_flags.get("data", 0)),               # [21] Number("data" in window)
-        int(window_flags.get("solana", 0)),             # [22] 钱包扩展
-        int(window_flags.get("dump", 0)),               # [23] Firefox 特有
-        int(window_flags.get("requestIdleCallback", 0)), # [24] Safari 默认不暴露 requestIdleCallback
+        int(window_flags.get("solana", 0)),             # [22] wallet extension
+        int(window_flags.get("dump", 0)),               # [23] Firefox specific
+        int(window_flags.get("requestIdleCallback", 0)), # [24] Safari not exposed by default requestIdleCallback
     ]
     return config
 
 
 def encode_config(config: list) -> str:
     """
-    将 config 数组编码为 base64 字符串。
-    对应 SDK 中的 N() 函数：
+    Encode the config array into a base64 string.
+    Corresponds to the N() function in the SDK:
         JSON.stringify(t) → TextEncoder.encode() → btoa(String.fromCharCode(...))
 
-    注意：SDK 使用 TextEncoder 将 JSON字符串 编码为 UTF-8 字节，然后逐个字节 btoa。
-    这等效于 Python 的：json_str.encode('utf-8') → base64 encode
+    Note: the SDK uses TextEncoder to encode the JSON string into UTF-8 bytes, then applies btoa byte by byte.
+    This is equivalent to the Python:json_str.encode('utf-8') → base64 encode
     """
     json_str = json.dumps(config, ensure_ascii=False, separators=(',', ':'))
-    # 使用 UTF-8 编码再 base64 处理（与 SDK 的 TextEncoder + btoa 一致）
+    # Encode with UTF-8 and then base64 (consistent with TextEncoder + btoa of the SDK)
     encoded = base64.b64encode(json_str.encode('utf-8')).decode('ascii')
     return encoded
 
 
 def fnv1a_hash(text: str) -> str:
     """
-    FNV-1a 哈希算法（32位）。
-    对应 SDK 中的哈希函数，用于 Proof of Work 校验。
+    FNV-1a hash algorithm (32-bit).
+    Corresponds to the hash function in the SDK, used for the Proof of Work check.
 
-    JS 原始代码：
+    JS Original code:
         let e = 2166136261;
         for (let r = 0; r < t.length; r++)
             e ^= t.charCodeAt(r),
@@ -170,7 +170,7 @@ def fnv1a_hash(text: str) -> str:
     h = 2166136261
     for ch in text:
         h ^= ord(ch)
-        # Math.imul 模拟：32位整数乘法
+        # Math.imul Simulation: 32-bit integer multiplication
         h = _imul(h, 16777619) & 0xFFFFFFFF
 
     h ^= (h >> 16)
@@ -185,71 +185,71 @@ def fnv1a_hash(text: str) -> str:
 
 def _imul(a: int, b: int) -> int:
     """
-    模拟 JavaScript 的 Math.imul（32位整数乘法）。
-    Python 的整数没有溢出，需要手动截断为32位。
+    Simulate Math.imul of JavaScript (32-bit integer multiplication).
+    Python integers do not overflow, so they must be truncated to 32 bits manually.
     """
-    # 确保是32位无符号整数
+    # Make sure it is a 32-bit unsigned integer
     a = a & 0xFFFFFFFF
     b = b & 0xFFFFFFFF
-    # 32位整数乘法
+    # 32-bit integer multiplication
     result = (a * b) & 0xFFFFFFFF
     return result
 
 
 def solve_proof_of_work(seed: str, difficulty: str, device_id: str, max_attempts: int = 500000, profile: dict | None = None) -> str:
     """
-    计算 Proof of Work。
+    Compute the Proof of Work.
 
-    SDK 中 _runCheck 的逻辑：
-    1. 将 config[3] 设为尝试次数（nonce）
-    2. 将 config[9] 设为 Math.round(performance.now() - startTime)
-    3. 编码 config → base64 字符串 c
-    4. 计算 fnv1a(seed + c) → 8位hex
-    5. 如果 hex[:len(difficulty)] <= difficulty，则返回 c + "~S"
+    SDK The logic of _runCheck in the SDK:
+    1. Set config[3] to the attempt count (nonce)
+    2. Set config[9] to Math.round(performance.now() - startTime)
+    3. Encode config -> base64 string c
+    4. Compute fnv1a(seed + c) -> 8-digit hex
+    5. Return if hex[:len(difficulty)] <= difficulty, then c + "~S"
 
     Args:
-        seed: 服务端返回的 seed
-        difficulty: 服务端返回的 difficulty（16进制前缀）
-        device_id: 设备ID
-        max_attempts: 最大尝试次数
+        seed: The seed returned by the server seed
+        difficulty: The difficulty returned by the server (hex prefix)
+        device_id: device ID
+        max_attempts: Maximum number of attempts
 
     Returns:
-        PoW答案字符串，格式为 base64_encoded_config + "~S"
+        PoW Answer string, in the format base64_encoded_config + "~S"
     """
-    start_time = time.time() * 1000  # 毫秒
+    start_time = time.time() * 1000  # milliseconds
 
-    # 生成初始 config
+    # Generate the initial config
     config = generate_fingerprint_data(device_id, attempt=0, elapsed_ms=0, profile=profile)
 
     diff_len = len(difficulty)
 
     for i in range(max_attempts):
-        # 更新尝试次数和耗时
+        # Update the attempt count and elapsed time
         config[3] = i
         config[9] = round(time.time() * 1000 - start_time)
 
-        # 编码为 base64
+        # Encode as base64
         encoded = encode_config(config)
 
-        # 计算哈希
+        # Compute the hash
         hash_input = seed + encoded
         hash_result = fnv1a_hash(hash_input)
 
-        # 检查是否满足难度要求
+        # Check whether the difficulty requirement is met
         if hash_result[:diff_len] <= difficulty:
             return encoded + "~S"
 
-    # 如果达到最大尝试次数仍未找到，返回错误前缀
+    # If the maximum number of attempts is reached without finding one, return the error prefix
     return "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + encode_config(["e"])
 
 
 def generate_requirements_token(device_id: str, profile: dict | None = None) -> str:
     """
-    生成 requirements token（p 字段的值）。
-    对应 SDK 中的 getRequirementsToken() / _generateRequirementsTokenAnswerBlocking()
+    Generate the requirements token (the value of the p field).
+    Corresponds to getRequirementsToken() in the SDK / getRequirementsToken() / _generateRequirementsTokenAnswerBlocking()
 
-    这是第一次调用 sentinel/req 时 p 字段的值。
-    它就是简单的 config 编码 + "~S" 后缀，不需要PoW。
+    This is the value of the p field the first time sentinel/req is called.
+    It is simply the config encoding + the "~S" suffix, no PoW needed.
     """
     config = generate_fingerprint_data(device_id, attempt=1, elapsed_ms=0, profile=profile)
     encoded = encode_config(config)
@@ -258,15 +258,15 @@ def generate_requirements_token(device_id: str, profile: dict | None = None) -> 
 
 def build_sentinel_request_body(p: str, device_id: str, flow: str) -> str:
     """
-    构建 sentinel/req 的请求体。
+    Build the request body of sentinel/req.
 
     Args:
-        p: 指纹数据（requirements token）
-        device_id: 设备ID
-        flow: 流程类型
-            - "username_password_create": 步骤6（注册前）
-            - "authorize_continue": 步骤9（验证码验证后）
-            - "oauth_create_account": 步骤11（创建账号前）
+        p: Fingerprint data (requirements token)
+        device_id: device ID
+        flow: flow type
+            - "username_password_create": Step 6 (before registration)
+            - "authorize_continue": Step 9 (after verification code validation)
+            - "oauth_create_account": Step 11 (before creating the account)
     """
     body = {
         "p": p,
@@ -284,9 +284,9 @@ def build_sentinel_token_header(
     flow: str
 ) -> str:
     """
-    构建 openai-sentinel-token 请求头的值。
+    Build the value of the openai-sentinel-token request header.
 
-    最终格式为 JSON 字符串：
+    The final format is a JSON string:
     {"p":"<proof>","t":"<turnstile>","c":"<token>","id":"<device_id>","flow":"<flow>"}
     """
     header_value = {
@@ -301,17 +301,17 @@ def build_sentinel_token_header(
 
 def get_enforcement_token(sentinel_response: dict, seed: str, difficulty: str, device_id: str, profile: dict | None = None) -> str:
     """
-    在有 PoW 要求时，计算 enforcement token（带PoW的p字段）。
-    对应 SDK 中的 getEnforcementToken()。
+    When there is a PoW requirement, compute the enforcement token (the p field with PoW).
+    Corresponds to getEnforcementToken() in the SDK.
 
     Args:
-        sentinel_response: sentinel/req 的响应 JSON
+        sentinel_response: sentinel/req response JSON
         seed: proofofwork.seed
         difficulty: proofofwork.difficulty
-        device_id: 设备ID
+        device_id: device ID
 
     Returns:
-        PoW 结果字符串（base64 + ~S）
+        PoW Result string (base64 + ~S)
     """
     pow_data = sentinel_response.get("proofofwork", {})
 
@@ -321,5 +321,5 @@ def get_enforcement_token(sentinel_response: dict, seed: str, difficulty: str, d
         answer = solve_proof_of_work(pow_seed, pow_difficulty, device_id, profile=profile)
         return "gAAAAAB" + answer
 
-    # 不需要PoW时，返回简单的指纹
+    # When no PoW is needed, return the simple fingerprint
     return generate_requirements_token(device_id, profile=profile)

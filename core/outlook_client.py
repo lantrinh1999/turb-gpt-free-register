@@ -1,23 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Outlook 邮箱客户端（mail.chatai.codes 双协议）
+Outlook mail client (mail.chatai.codes dual protocol)
 
-历史账号文件格式（仅供首次迁移/手动兼容导入，每行一个）：
-    # 4 段格式（基础）
+Historical account file format (only for first migration / manual compatibility import, one per line):
+    # 4 -segment format (basic)
     email----password----clientId----refreshToken
-    例：SorenBarrett5150@outlook.com----oc621409----9e5f94bc-...----M.C529_...
+    Example:SorenBarrett5150@outlook.com----oc621409----9e5f94bc-...----M.C529_...
     
-    # 6 段格式（带恢复信息）
+    # 6 -segment format (with recovery information)
     email----password----clientId----refreshToken----recoveryEmail----recoveryCode
-    例：ChristinLeno5020@outlook.com----3qP3kEjF----9e5f94bc-...----M.C506_...----Dy9bOAnUd@wmhotmail.com----zf4rBS
+    Example:ChristinLeno5020@outlook.com----3qP3kEjF----9e5f94bc-...----M.C506_...----Dy9bOAnUd@wmhotmail.com----zf4rBS
 
-工作流：
-    1. pick_account()       直接从 SQLite 邮箱库挑一个未用过的账号
-    2. fetch_latest_otp()   双协议（Graph / IMAP）轮询取 OTP
-    3. 注册成功后会写入 SQLite 账号表
+Workflow:
+    1. pick_account()       Pick an unused account directly from the SQLite email library
+    2. fetch_latest_otp()   dual protocol (Graph / IMAP) polling to get the OTP
+    3. After a successful registration it is written to the SQLite accounts table
 
-只用 Outlook 提供的 refresh_token 调远端的 mail.chatai.codes 服务，
-不直连 Microsoft Graph，因为后者要 access_token + 复杂 OAuth 协议。
+Only use the refresh_token provided by Outlook to call the remote mail.chatai.codes service,
+without connecting to Microsoft Graph directly, because the latter needs an access_token + a complex OAuth protocol.
 """
 import base64
 import email as email_lib
@@ -44,7 +44,7 @@ from config import (
     USER_AGENT,
     IMPERSONATE,
 )
-# OTP_POLL_INTERVAL / OTP_MAX_WAIT 是 WebUI 可热改的，从模块读
+# OTP_POLL_INTERVAL / OTP_MAX_WAIT are hot-changeable in the WebUI, read from the module
 from config import email as _email_cfg
 from core.otp_utils import looks_like_openai_email, extract_otp
 
@@ -52,10 +52,10 @@ logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-# 邮箱 → account 上下文的内存缓存，fetch_latest_otp 用
+# In-memory cache of email -> account context, used by fetch_latest_otp
 _CONTEXT_CACHE: dict[str, "OutlookAccount"] = {}
 
-# 远端 mail.chatai.codes 被禁用时，本进程内直接跳过远端，走 Microsoft Graph 直连。
+# When the remote mail.chatai.codes is disabled, this process skips the remote directly and goes to a direct Microsoft Graph connection.
 _REMOTE_DISABLED = False
 _MS_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 _MS_TOKEN_FATAL_CACHE: dict[str, tuple[str, float]] = {}
@@ -67,16 +67,16 @@ class OutlookAccount:
     password: str
     client_id: str
     refresh_token: str
-    recovery_email: str = ""  # 可选：恢复邮箱
-    recovery_code: str = ""   # 可选：恢复码
+    recovery_email: str = ""  # optional: recovery email
+    recovery_code: str = ""   # optional: recovery code
 
 
 class OutlookClientError(RuntimeError):
-    """Outlook 邮箱服务相关异常。"""
+    """Outlook email service related exceptions."""
 
 
 def _cache_key(email: str) -> str:
-    """生成邮箱上下文缓存 key，统一按去空格/小写处理。"""
+    """Generate the email context cache key, uniformly handled with whitespace stripped / lowercased."""
     return str(email or "").strip().lower()
 
 
@@ -93,16 +93,16 @@ def _http_session() -> CurlSession:
 
 
 # ============================================================
-# mail.chatai.codes 安全签名层（AES-GCM + HMAC-SHA256）
+# mail.chatai.codes secure signature layer (AES-GCM + HMAC-SHA256)
 #
-# 流程（与前端 JS 完全对应）：
+# Flow (corresponds exactly to the front-end JS):
 #   1. POST /api/security-session {} → { sessionId, sessionToken, sessionKey, expiresAt }
-#   2. 每次 API 请求前构建 secure envelope：
-#      iv(12B) 随机 + nonce(16B) 随机
+#   2. Build a secure envelope before every API request:
+#      iv(12B) random + nonce(16B) random
 #      ciphertext = AES-GCM(key, iv, JSON(payload))   ← key = base64url(sessionKey)
 #      signedText = "{sessionId}.{nonce}.{timestamp}.{iv}.{ciphertext}"
 #      signature  = HMAC-SHA256(key, signedText)
-#   3. 发送 envelope 代替原始 payload
+#   3. send the envelope instead of the original payload
 # ============================================================
 
 def _b64url_enc(data: bytes) -> str:
@@ -115,7 +115,7 @@ def _b64url_dec(s: str) -> bytes:
 
 
 def _aes_gcm_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
-    """AES-GCM 加密，返回 ciphertext || auth_tag（与 WebCrypto 行为一致）。"""
+    """AES-GCM Encrypt and return ciphertext || auth_tag (consistent with WebCrypto behavior)."""
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         return AESGCM(key).encrypt(iv, plaintext, None)
@@ -128,13 +128,13 @@ def _aes_gcm_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
     return ct + tag
 
 
-# 模块级安全 session 缓存（线程安全）
+# Module-level secure session cache (thread-safe)
 _sec_session: dict | None = None
 _sec_session_lock = threading.Lock()
 
 
 def _get_security_session(http: CurlSession) -> dict:
-    """获取或刷新安全会话（有效期内复用，过期自动续期）。"""
+    """Get or refresh the secure session (reused while valid, renewed automatically when expired)."""
     global _sec_session
     now_ms = int(time.time() * 1000)
     with _sec_session_lock:
@@ -147,11 +147,11 @@ def _get_security_session(http: CurlSession) -> dict:
         )
         if resp.status_code != 200:
             raise OutlookClientError(
-                f"security-session 初始化失败 HTTP {resp.status_code}: {resp.text[:200]}"
+                f"security-session initialization failed HTTP {resp.status_code}: {resp.text[:200]}"
             )
         data = resp.json()
         if not data.get("success"):
-            raise OutlookClientError(f"security-session 返回 success=False: {data}")
+            raise OutlookClientError(f"security-session Return success=False: {data}")
         import datetime
         expires_ms = int(
             datetime.datetime.fromisoformat(
@@ -164,14 +164,14 @@ def _get_security_session(http: CurlSession) -> dict:
             "sessionKey":   data["sessionKey"],
             "expiresAtMs":  expires_ms,
         }
-        logger.debug(f"[Outlook] 安全会话已刷新 sessionId={data['sessionId'][:8]}…")
+        logger.debug(f"[Outlook] Secure session refreshed sessionId={data['sessionId'][:8]}…")
         return _sec_session
 
 
 def _secure_post(http: CurlSession, url: str, payload: dict, retry: int = 0) -> dict:
     """
-    用 AES-GCM + HMAC-SHA256 加密请求体后发送到 mail.chatai.codes，
-    返回已解析的 JSON dict。401/403 时自动刷新 session 重试一次。
+    Encrypt the request body with AES-GCM + HMAC-SHA256 and send it to mail.chatai.codes,
+    returning the parsed JSON dict. On 401/403 the session is refreshed automatically and retried once.
     """
     global _sec_session
     session = _get_security_session(http)
@@ -209,7 +209,7 @@ def _secure_post(http: CurlSession, url: str, payload: dict, retry: int = 0) -> 
     )
 
     if resp.status_code in (401, 403) and retry < 1:
-        logger.warning(f"[Outlook] {resp.status_code}，刷新安全会话后重试...")
+        logger.warning(f"[Outlook] {resp.status_code}, retrying after refreshing the secure session...")
         with _sec_session_lock:
             _sec_session = None
         return _secure_post(http, url, payload, retry + 1)
@@ -222,11 +222,11 @@ def _secure_post(http: CurlSession, url: str, payload: dict, retry: int = 0) -> 
 
 
 # ============================================================
-# 账号文件读写
+# Account file read/write
 # ============================================================
 
 def _parse_accounts_file(path: Path) -> list[OutlookAccount]:
-    """从纯文本文件解析账号，仅在 import_to_db 时使用。"""
+    """Parse accounts from a plain text file, only used by import_to_db."""
     if not path.exists():
         return []
     accounts: list[OutlookAccount] = []
@@ -235,7 +235,7 @@ def _parse_accounts_file(path: Path) -> list[OutlookAccount]:
         if not line or line.startswith("#"):
             continue
         parts = line.split("----")
-        # 支持 4 段或 6 段格式
+        # Supports the 4-segment or 6-segment format
         if len(parts) == 4:
             email, password, client_id, refresh_token = (p.strip() for p in parts)
             accounts.append(OutlookAccount(email, password, client_id, refresh_token))
@@ -244,20 +244,20 @@ def _parse_accounts_file(path: Path) -> list[OutlookAccount]:
             accounts.append(OutlookAccount(email, password, client_id, refresh_token, recovery_email, recovery_code))
         else:
             logger.warning(
-                f"[Outlook] {path.name} 第 {lineno} 行格式不符（期望 4 段或 6 段，实际 {len(parts)}），已跳过"
+                f"[Outlook] {path.name} Line {lineno} has the wrong format (expected 4 or 6 segments, got {len(parts)}), skipped"
             )
             continue
     return accounts
 
 
 # ============================================================
-# 公共接口：挑账号 / 取 OTP（统一走 DB）
+# Public interface: pick an account / get the OTP (all through the DB)
 # ============================================================
 
 def pick_account() -> OutlookAccount:
     """
-    原子地挑一个 status='available' 的 Outlook 账号并标记为 'used'（DB 事务）。
-    多线程并发安全。
+    Atomically pick an Outlook account with status='available' and mark it 'used' (DB transaction).
+    Safe for concurrent multi-threading.
     """
     from core.db import claim_next_outlook, outlook_pool_summary
 
@@ -265,8 +265,8 @@ def pick_account() -> OutlookAccount:
     if row is None:
         summary = outlook_pool_summary()
         raise OutlookClientError(
-            f"Outlook 账号池没有可用账号: {summary}. "
-            "请在 WebUI 的邮箱库中导入新邮箱。"
+            f"Outlook The account pool has no available account: {summary}. "
+            "Please import new emails in the email library of the WebUI."
         )
 
     account = OutlookAccount(
@@ -276,16 +276,16 @@ def pick_account() -> OutlookAccount:
         refresh_token=row["refresh_token"],
     )
     _CONTEXT_CACHE[_cache_key(account.email)] = account
-    logger.info(f"[Outlook] 选中账号: {account.email}（DB id={row['id']}）")
+    logger.info(f"[Outlook] Selected account: {account.email} (DB id={row['id']})")
     return account
 
 
 def get_account_context(email: str) -> OutlookAccount | None:
-    """根据邮箱查 OutlookAccount 上下文。
+    """Look up the OutlookAccount context by email.
 
-    优先读取邮箱池记录；已注册账号如果邮箱池记录被清理/迁移，则从账号
-    自身保存的 Outlook 素材凭证恢复。这样查活、Codex Auth 重启后仍能使用
-    注册时的 Outlook 来源取 OTP。
+    The email pool record is read first; if the email pool record of a registered account has been cleaned up/migrated, it is restored from the Outlook
+    material credentials saved with the account itself. This way, after a restart, liveness checks and Codex Auth can still use
+    the Outlook source used at registration to fetch the OTP.
     """
     cache_key = _cache_key(email)
     if not cache_key:
@@ -295,17 +295,17 @@ def get_account_context(email: str) -> OutlookAccount | None:
     from core.db import get_account_by_email, get_outlook_by_email
 
     pool_row = get_outlook_by_email(email)
-    # 已注册账号的来源是权威值。即使本地 Outlook 池里残留了同名记录，
-    # 也不能让一个实际来自 Remail/其它来源的账号误走 Outlook 取码。
+    # The source of a registered account is authoritative. Even if a record with the same name remains in the local Outlook pool,
+    # an account that actually comes from Remail/another source must not wrongly use Outlook for code retrieval.
     registered = get_account_by_email(email)
     registered_source = str((registered or {}).get("email_source") or "").strip().lower()
     registered_source = registered_source.replace(";", ",").replace("|", ",").split(",", 1)[0].strip()
     if registered_source and registered_source != "outlook":
         return None
 
-    # 正常情况下优先使用邮箱池记录；邮箱池被清理、迁移，或记录不完整时，
-    # 用已注册账号保存的同一份 Outlook 素材补齐。注册成功时 insert_account
-    # 会把 password/client_id/refresh_token 持久化在账号记录里。
+    # Normally the email pool record is preferred; when the email pool is cleaned up, migrated, or the record is incomplete,
+    # it is completed with the same Outlook material saved with the registered account. On a successful registration insert_account
+    # the password/client_id/refresh_token are persisted in the account record.
     row = pool_row or registered
     if row is None:
         return None
@@ -339,14 +339,14 @@ def get_account_context(email: str) -> OutlookAccount | None:
 
 
 def release_account(email: str, status: str = "available", note: str | None = None) -> None:
-    """按注册阶段结果更新 Outlook 账号状态：可重试回 available，已消耗则标记 failed。"""
+    """Update the Outlook account state according to the registration phase result: retryable goes back to available, consumed is marked failed."""
     from core.db import release_outlook
     release_outlook(email, status=status, note=note)
     _CONTEXT_CACHE.pop(_cache_key(email), None)
 
 
 def import_outlook_from_file(path: str | Path | None = None) -> tuple[int, int]:
-    """读取一份账号文本文件，全量导入 DB，返回 (新增, 已存在跳过)。"""
+    """Read an account text file and import everything into the DB, returns (added, skipped as existing)."""
     from core.db import import_outlook_accounts
     p = Path(path or OUTLOOK_ACCOUNTS_FILE)
     if not p.is_absolute():
@@ -360,7 +360,7 @@ def import_outlook_from_file(path: str | Path | None = None) -> tuple[int, int]:
 
 
 def import_outlook_from_text(text: str) -> tuple[int, int]:
-    """直接给一段多行文本（粘贴用），导入 DB。"""
+    """Import a multi-line text directly (for pasting) into the DB."""
     from core.db import import_outlook_accounts
     records = []
     for raw in text.splitlines():
@@ -379,7 +379,7 @@ def import_outlook_from_text(text: str) -> tuple[int, int]:
 
 
 # ============================================================
-# 抓取邮件：Graph 失败回退 IMAP
+# Fetch emails: fall back to IMAP when Graph fails IMAP
 # ============================================================
 
 
@@ -426,9 +426,9 @@ def _is_oauth_fatal_error(text: str) -> bool:
 def _compact_oauth_error(text: str) -> str:
     s = str(text or "").replace("\\n", " ").strip()
     if "AADSTS70000" in s:
-        return "AADSTS70000: refresh_token 未授权或授权已过期，无法换取所请求的 Graph/IMAP 读信 scope"
+        return "AADSTS70000: refresh_token Not authorized or the authorization has expired, the requested Graph/IMAP mail reading cannot be obtained scope"
     if "AADSTS65001" in s:
-        return "AADSTS65001: 当前 client_id 未获用户授权，无法访问该资源"
+        return "AADSTS65001: The current client_id has not been authorized by the user, the resource cannot be accessed"
     return s[:240]
 
 
@@ -531,11 +531,11 @@ def _ms_access_token(
     http: CurlSession | None = None,
     preferred_kind: str | None = None,
 ) -> tuple[str, str]:
-    """用 refresh_token 换取可读邮件的 access_token。
+    """Exchange the refresh_token for an access_token that can read mail.
 
-    返回 (token, kind)：
-      - kind="graph"：可访问 graph.microsoft.com（个人 Outlook 账号有时返回 opaque token，不一定是 JWT）
-      - kind="outlook"：Outlook REST token，可访问 outlook.office.com/api/v2.0
+    Returns (token, kind):
+      - kind="graph": can access graph.microsoft.com (personal Outlook accounts sometimes return an opaque token that is not necessarily a JWT)
+      - kind="outlook": Outlook REST token, can access outlook.office.com/api/v2.0
     """
     preferred_kind = str(preferred_kind or "").strip().lower() or None
     if preferred_kind not in (None, "graph", "outlook"):
@@ -543,7 +543,7 @@ def _ms_access_token(
     cache_key = _ms_token_cache_key(account)
     fatal_reason = _ms_token_fatal_reason(account)
     if fatal_reason:
-        raise OutlookClientError(f"Microsoft OAuth refresh_token 换 token 失败: {fatal_reason}")
+        raise OutlookClientError(f"Microsoft OAuth refresh_token token exchange failed: {fatal_reason}")
     cached = _MS_TOKEN_CACHE.get(cache_key)
     now = time.time()
     if cached and cached[1] - now > 120:
@@ -615,27 +615,27 @@ def _ms_access_token(
             if resp.status_code == 200 and isinstance(data, dict) and data.get("access_token"):
                 expires_in = int(data.get("expires_in") or 3600)
                 token = str(data["access_token"])
-                # Microsoft Graph 对个人 Outlook/MSA 账号可能返回 opaque access_token，
-                # 不一定是 JWT；Graph 仍然接受。不能用是否包含 "." 判断是否可用。
+                # Microsoft Graph For personal Outlook/MSA accounts an opaque access_token may be returned,
+                # not necessarily a JWT; Graph still accepts it. Whether it contains "." must not be used to judge if it is usable.
                 _MS_TOKEN_CACHE[cache_key] = (f"{kind}:{token}", now + max(300, expires_in - 60))
-                logger.debug("[Outlook] Microsoft token 获取成功 kind=%s jwt=%s", kind, _token_looks_jwt(token))
+                logger.debug("[Outlook] Microsoft token obtained successfully kind=%s jwt=%s", kind, _token_looks_jwt(token))
                 return token, kind
         if _is_oauth_fatal_error(last_text):
             reason = _compact_oauth_error(last_text)
             _MS_TOKEN_FATAL_CACHE[cache_key] = (reason, time.time() + 600)
-            raise OutlookClientError(f"Microsoft OAuth refresh_token 换 token 失败: {reason}")
-        raise OutlookClientError(f"Microsoft OAuth refresh_token 换 token 失败: {last_text}")
+            raise OutlookClientError(f"Microsoft OAuth refresh_token token exchange failed: {reason}")
+        raise OutlookClientError(f"Microsoft OAuth refresh_token token exchange failed: {last_text}")
     finally:
         if own_http:
             http.close()
 
 
 def _live_imap_access_token(account: OutlookAccount, http: CurlSession | None = None) -> str:
-    """使用 Outlook/Live OAuth 端点刷新 IMAP(New) access_token。
+    """Refresh the IMAP (New) access_token with the Outlook/Live OAuth endpoint.
 
-    一些外购 Outlook 素材的 refresh_token 不能在 login.microsoftonline.com 换取
-    Graph/IMAP scope，但可以通过 login.live.com/oauth20_token.srf 不带 scope
-    换到 IMAP.AccessAsUser.All token；很多工具里叫 “IMAP (New)”。
+    The refresh_token of some purchased Outlook material cannot be exchanged at login.microsoftonline.com
+    Graph/IMAP scope, but through login.live.com/oauth20_token.srf without scope
+    an IMAP.AccessAsUser.All token can be obtained; many tools call it "IMAP (New)".
     """
     cache_key = _ms_token_cache_key(account) + "|live_imap"
     cached = _MS_TOKEN_CACHE.get(cache_key)
@@ -668,9 +668,9 @@ def _live_imap_access_token(account: OutlookAccount, http: CurlSession | None = 
             expires_in = int((data or {}).get("expires_in") or 3600)
             _MS_TOKEN_CACHE[cache_key] = (f"live_imap:{token}", now + max(300, expires_in - 60))
             scope = str((data or {}).get("scope") or "")
-            logger.debug("[Outlook] Live IMAP(New) token 获取成功 scope=%s", scope[:160])
+            logger.debug("[Outlook] Live IMAP(New) token obtained successfully scope=%s", scope[:160])
             return token
-        raise OutlookClientError(f"Live IMAP(New) refresh_token 换 token 失败: {text[:500]}")
+        raise OutlookClientError(f"Live IMAP(New) refresh_token token exchange failed: {text[:500]}")
     finally:
         if own_http:
             http.close()
@@ -716,7 +716,7 @@ def _fetch_graph_messages(http: CurlSession, token: str) -> list[dict]:
     data = resp.json()
     rows = data.get("value") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        raise OutlookClientError(f"Microsoft Graph 响应缺少 value: {str(data)[:300]}")
+        raise OutlookClientError(f"Microsoft Graph response is missing value: {str(data)[:300]}")
     out = [_normalize_ms_message(m) for m in rows if isinstance(m, dict)]
     for item in out:
         item["_fetch_source"] = "graph"
@@ -752,21 +752,21 @@ def _fetch_outlook_rest_messages(http: CurlSession, token: str) -> list[dict]:
         if resp.status_code == 200:
             data = resp.json()
             break
-        # 字段名不兼容时自动降级下一套参数。
+        # When field names are incompatible, automatically downgrade to the next parameter set.
         if resp.status_code == 400 and ("Could not find a property" in text or "ParseUri" in text):
-            logger.debug("[Outlook] Outlook REST 参数不兼容，降级重试: %s", text[:220])
+            logger.debug("[Outlook] Outlook REST parameters incompatible, downgrading and retrying: %s", text[:220])
             continue
         raise OutlookClientError(f"Outlook REST messages HTTP {resp.status_code}: {text[:500]}")
     if data is None:
-        raise OutlookClientError(f"Outlook REST messages 失败: {last_text}")
+        raise OutlookClientError(f"Outlook REST messages failed: {last_text}")
     rows = data.get("value") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        raise OutlookClientError(f"Outlook REST 响应缺少 value: {str(data)[:300]}")
+        raise OutlookClientError(f"Outlook REST response is missing value: {str(data)[:300]}")
     out = []
     for m in rows:
         if not isinstance(m, dict):
             continue
-        # Outlook REST 字段转 Graph 风格；不同版本字段大小写不同。
+        # Outlook REST Convert the fields to Graph style; the field capitalization differs between versions.
         from_obj = m.get("From") or m.get("from") if isinstance(m.get("From") or m.get("from"), dict) else {}
         email_addr = from_obj.get("EmailAddress") or from_obj.get("emailAddress") if isinstance(from_obj, dict) else {}
         if not isinstance(email_addr, dict):
@@ -787,12 +787,12 @@ def _fetch_outlook_rest_messages(http: CurlSession, token: str) -> list[dict]:
             "body": body_obj.get("Content") or body_obj.get("content") or "",
             "html": body_obj.get("Content") or body_obj.get("content") or "",
         })
-    logger.debug(f"[Outlook] Outlook REST 直连拿到 {len(out)} 封邮件")
+    logger.debug(f"[Outlook] Outlook REST Got {len(out)} emails via the direct connection")
     return out
 
 
 def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
-    """本地 IMAP XOAUTH2 读取 Outlook Inbox 最新邮件。"""
+    """Read the latest Outlook Inbox emails via local IMAP XOAUTH2."""
     http = _ms_http()
     mail: imaplib.IMAP4_SSL | None = None
     try:
@@ -800,7 +800,7 @@ def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
             token = _live_imap_access_token(account, http=http)
             token_source = "live_imap_new"
         except Exception as live_exc:
-            logger.debug("[Outlook] Live IMAP(New) token 获取失败，尝试 Entra IMAP token: %s", str(live_exc)[:220])
+            logger.debug("[Outlook] Live IMAP(New) token failed to obtain, trying Entra IMAP token: %s", str(live_exc)[:220])
             token, _kind = _ms_access_token(account, http=http, preferred_kind="outlook")
             token_source = "entra_outlook"
         auth_string = f"user={account.email}\x01auth=Bearer {token}\x01\x01"
@@ -808,14 +808,14 @@ def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
         mail.authenticate("XOAUTH2", lambda _challenge: auth_string.encode("utf-8"))
         status, _data = mail.select("INBOX")
         if status != "OK":
-            raise OutlookClientError(f"IMAP select INBOX 失败: {status}")
+            raise OutlookClientError(f"IMAP select INBOX failed: {status}")
 
         status, msg_ids = mail.search(None, "ALL")
         if status != "OK":
-            raise OutlookClientError(f"IMAP search 失败: {status}")
+            raise OutlookClientError(f"IMAP search failed: {status}")
         ids = msg_ids[0].split() if msg_ids and msg_ids[0] else []
         if not ids:
-            logger.debug("[Outlook] 本地 IMAP 收件箱为空")
+            logger.debug("[Outlook] Local IMAP inbox is empty")
             return []
 
         out = []
@@ -832,14 +832,14 @@ def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
                 item["_fetch_source"] = "imap_new" if token_source == "live_imap_new" else "imap_entra_outlook"
                 out.append(item)
             except Exception as exc:
-                logger.debug("[Outlook] 本地 IMAP 解析邮件失败 mid=%s: %s", mid, exc)
+                logger.debug("[Outlook] Failed to parse the email via local IMAP mid=%s: %s", mid, exc)
         if token_source == "live_imap_new":
-            logger.info("[Outlook] 本地 IMAP(New) 直连拿到 %s 封邮件", len(out))
+            logger.info("[Outlook] Local IMAP(New) direct connection got %s emails", len(out))
         else:
-            logger.info("[Outlook] 本地 IMAP 直连拿到 %s 封邮件 token_source=%s", len(out), token_source)
+            logger.info("[Outlook] Local IMAP direct connection got %s emails token_source=%s", len(out), token_source)
         return out
     except Exception as exc:
-        logger.warning("[Outlook] 本地 IMAP 直连失败: %s: %s", type(exc).__name__, exc)
+        logger.warning("[Outlook] Local IMAP direct connection failed: %s: %s", type(exc).__name__, exc)
         return []
     finally:
         try:
@@ -851,10 +851,10 @@ def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
 
 
 def _fetch_via_graph_direct(account: OutlookAccount) -> list[dict]:
-    """直连 Microsoft API 读取 Inbox 最新邮件；Graph 不兼容时自动 Outlook REST。"""
+    """Read the latest Inbox emails by connecting to the Microsoft API directly; when Graph is incompatible, Outlook REST is used automatically."""
     fatal_reason = _ms_token_fatal_reason(account)
     if fatal_reason:
-        logger.debug("[Outlook] 跳过 Graph/REST：OAuth 已知不可用：%s", fatal_reason)
+        logger.debug("[Outlook] Skipping Graph/REST: OAuth is known to be unusable:%s", fatal_reason)
         return []
     http = _ms_http()
     try:
@@ -862,20 +862,20 @@ def _fetch_via_graph_direct(account: OutlookAccount) -> list[dict]:
         if kind == "graph":
             try:
                 out = _fetch_graph_messages(http, token)
-                logger.debug(f"[Outlook] Microsoft Graph 直连拿到 {len(out)} 封邮件")
+                logger.debug(f"[Outlook] Microsoft Graph Got {len(out)} emails via the direct connection")
                 return out
             except Exception as exc:
-                logger.warning(f"[Outlook] Microsoft Graph 读取失败，尝试 Outlook REST: {type(exc).__name__}: {exc}")
-                # 重新取 Outlook REST token。注意不能继续复用 Graph token；
-                # Graph token 的 audience 是 graph.microsoft.com，拿去请求
-                # outlook.office.com/api/v2.0 会返回 401。
+                logger.warning(f"[Outlook] Microsoft Graph read failed, trying Outlook REST: {type(exc).__name__}: {exc}")
+                # Fetch the Outlook REST token again. Note that the Graph token cannot be reused;
+                # Graph token its audience is graph.microsoft.com, and using it to request
+                # outlook.office.com/api/v2.0 returns 401.
                 _MS_TOKEN_CACHE.pop(f"{account.email}|{account.client_id}|{account.refresh_token[:24]}", None)
                 token, kind = _ms_access_token(account, http=http, preferred_kind="outlook")
         out = _fetch_outlook_rest_messages(http, token)
-        logger.debug(f"[Outlook] Outlook REST 直连拿到 {len(out)} 封邮件")
+        logger.debug(f"[Outlook] Outlook REST Got {len(out)} emails via the direct connection")
         return out
     except Exception as exc:
-        logger.warning(f"[Outlook] Microsoft/Outlook 直连失败: {type(exc).__name__}: {exc}")
+        logger.warning(f"[Outlook] Microsoft/Outlook direct connection failed: {type(exc).__name__}: {exc}")
         return []
     finally:
         http.close()
@@ -883,11 +883,11 @@ def _fetch_via_graph_direct(account: OutlookAccount) -> list[dict]:
 
 def _fetch_via(session: CurlSession, protocol: str, account: OutlookAccount) -> list[dict]:
     """
-    拉收件箱，返回 emails 列表。
+    Fetch the inbox and return the emails list.
 
     - remote: mail.chatai.codes /api/fetch-graph|imap
-    - direct: Microsoft Graph 直连
-    - auto: 远端可用时用远端；远端 402/DEPLOYMENT_DISABLED 后自动直连 Graph
+    - direct: Microsoft Graph direct connection
+    - auto: Use the remote when available; after the remote returns 402/DEPLOYMENT_DISABLED, connect directly automatically Graph
     """
     global _REMOTE_DISABLED
     mode = _outlook_fetch_mode()
@@ -918,15 +918,15 @@ def _fetch_via(session: CurlSession, protocol: str, account: OutlookAccount) -> 
     try:
         data = _secure_post(session, url, payload)
     except OutlookClientError as exc:
-        logger.warning(f"[Outlook] {protocol} 请求失败: {exc}")
+        logger.warning(f"[Outlook] {protocol} Request failed: {exc}")
         if mode == "auto" and _is_remote_disabled_error(exc):
             _REMOTE_DISABLED = True
-            logger.warning("[Outlook] 远端取件服务已禁用，自动切换为 Microsoft Graph 直连模式")
+            logger.warning("[Outlook] The remote mail retrieval service is disabled, automatically switching to the direct Microsoft Graph mode")
             if protocol == "graph":
                 return _fetch_via_graph_direct(account)
         return []
     except Exception as exc:
-        logger.warning(f"[Outlook] {protocol} 请求异常: {type(exc).__name__}: {exc}")
+        logger.warning(f"[Outlook] {protocol} Request error: {type(exc).__name__}: {exc}")
         return []
 
     if not data.get("success"):
@@ -938,13 +938,13 @@ def _fetch_via(session: CurlSession, protocol: str, account: OutlookAccount) -> 
     for item in emails:
         if isinstance(item, dict):
             item.setdefault("_fetch_source", source)
-    logger.debug(f"[Outlook] {protocol} 拿到 {len(emails)} 封邮件 source={source}")
+    logger.debug(f"[Outlook] {protocol} Got {len(emails)} emails source={source}")
     return emails
 
 
-# settle 机制默认值改为从 config 读取（OTP_SETTLE_SECONDS）
-# 抓到第一封 OTP 后，再多等多少秒看是否有更晚到的邮件。
-# 看到更晚的就重置 settle 计时；连续无新邮件 settle 秒后才返回。
+# settle The mechanism default is now read from config (OTP_SETTLE_SECONDS)
+# After the first OTP is caught, wait this many more seconds to see whether a later email arrives.
+# When a later one is seen the settle timer is reset; it only returns after settle seconds without new emails.
 
 
 def fetch_otp_with_account(
@@ -957,8 +957,8 @@ def fetch_otp_with_account(
     settle_seconds: int | None = None,
 ) -> str:
     """
-    直接给定 OutlookAccount（含 client_id / refresh_token）拉 OTP。
-    适用于 account 不在 DB / 不在内存缓存的场景（如外部脚本调用）。
+    Fetch the OTP for a directly given OutlookAccount (containing client_id / refresh_token).
+    Suitable for scenarios where the account is neither in the DB nor in the in-memory cache (e.g. an external script call).
     """
     _CONTEXT_CACHE[_cache_key(account.email)] = account
     return fetch_latest_otp(
@@ -982,23 +982,23 @@ def fetch_latest_otp(
     settle_seconds: int | None = None,
 ) -> str:
     """
-    双协议轮询取 OTP，规则：
-        - 先试 Graph，失败/为空时回退 IMAP
-        - 把两边返回的邮件合并去重，按时间降序排序
-        - 取**最新**一封 OpenAI 邮件抽 OTP
-        - **settle 机制**：抓到第一封后再等 settle_seconds 看是否有更晚到的，
-          有就用最新的；无新邮件后才返回。避免抓到途中那封被服务端更新的旧 OTP。
+    Dual-protocol polling to get the OTP, rules:
+        - Try Graph first, fall back to IMAP
+        - Merge and deduplicate the emails returned by both sides, sorted by time descending
+        - Take the **latest** OpenAI email and extract the OTP
+        - **settle mechanism**: after the first one is caught, wait settle_seconds more to see whether a later one arrives,
+          and use the latest if so; only return after no new emails. This avoids catching an old OTP that is updated by the server midway.
 
     Args:
-        email: 目标邮箱
-        after_ts: UTC 时间戳。只看比这个时间新的邮件
-        max_wait / poll_interval: 默认走 config 里的值
-        subject_includes / subject_excludes: 可选 subject 过滤
-        settle_seconds: 抓到第一封后再等多少秒看有没有更新的（默认 8s）
+        email: target email
+        after_ts: UTC timestamp. Only emails newer than this are considered
+        max_wait / poll_interval: By default the value in config is used
+        subject_includes / subject_excludes: Optional subject filter
+        settle_seconds: How many seconds to wait after the first one is caught to see whether a newer one exists (default 8s)
     """
     account = get_account_context(email)
     if account is None:
-        raise OutlookClientError(f"未找到 {email} 的账号上下文，无法取 OTP")
+        raise OutlookClientError(f"Account context of {email} not found, cannot get OTP")
 
     deadline = time.time() + (max_wait or _email_cfg.OTP_MAX_WAIT)
     interval = poll_interval or _email_cfg.OTP_POLL_INTERVAL
@@ -1006,21 +1006,21 @@ def fetch_latest_otp(
     session = _http_session()
 
     logger.info(
-        f"[Outlook] 开始轮询 {email} 的收件箱（mode={_outlook_fetch_mode()}, Graph + IMAP 本地直连，REST 兜底），"
-        f"最长 {max_wait or _email_cfg.OTP_MAX_WAIT}s, settle={settle}s..."
+        f"[Outlook] Starting to poll the inbox of {email} (mode={_outlook_fetch_mode()}, Graph + IMAP local direct connection, REST as a fallback),"
+        f"up to {max_wait or _email_cfg.OTP_MAX_WAIT}s, settle={settle}s..."
     )
 
-    # settle 状态机
-    best_otp: str | None = None       # 当前看到的最新 OTP
-    best_ts: float = 0.0              # 它的邮件时间戳
+    # settle state machine
+    best_otp: str | None = None       # the latest one currently seen OTP
+    best_ts: float = 0.0              # its email timestamp
     best_subject: str = ""
     best_protocol: str = ""
     best_source: str = ""
-    settle_until: float | None = None # 抓到第一封后，等到这个时刻才返回
+    settle_until: float | None = None # After the first one is caught, only return once this moment is reached
     last_diag_log = 0.0
 
     while time.time() < deadline:
-        # 每轮都重新拉，因为可能有新邮件，也可能旧邮件因延迟才出现
+        # Pull again every round, because there may be new emails, or old emails may appear late due to delay
         all_candidates: list[tuple[str, dict, float, str]] = []
         for protocol in ("graph", "imap"):
             emails = _fetch_via(session, protocol, account)
@@ -1029,7 +1029,7 @@ def fetch_latest_otp(
                 source = str(item.get("_fetch_source") or protocol) if isinstance(item, dict) else protocol
                 all_candidates.append((protocol, item, ts, source))
 
-        # 按时间降序，最新的在前
+        # Sorted by time descending, the latest first
         all_candidates.sort(key=lambda x: x[2], reverse=True)
 
         if all_candidates and not best_otp and time.time() - last_diag_log > 12:
@@ -1048,10 +1048,10 @@ def fetch_latest_otp(
                     "otp": bool(otp),
                     "subject": subject,
                 })
-            logger.info("[Outlook] 邮件诊断 top=%s", diag)
+            logger.info("[Outlook] Email diagnostics top=%s", diag)
             last_diag_log = time.time()
 
-        # 找出本轮"最新一封通过过滤的 OpenAI 邮件"
+        # Find the "latest OpenAI email that passed the filter" in this round"
         for protocol, item, ts, source in all_candidates:
             if not looks_like_openai_email(item):
                 continue
@@ -1069,17 +1069,17 @@ def fetch_latest_otp(
             if not otp:
                 continue
 
-            # 已锁定一个候选；如果新看到的更晚，则替换并重置 settle 倒计时
+            # A candidate is already locked; if a newly seen one is later, replace it and reset the settle countdown
             if ts > best_ts:
                 if best_otp:
                     logger.info(
-                        f"[Outlook] 发现更晚的 OTP={otp} (ts={item.get('date') or item.get('receivedDateTime')}, source={source}), "
-                        f"替换之前的 {best_otp}, 重置 settle 计时"
+                        f"[Outlook] Found a later OTP={otp} (ts={item.get('date') or item.get('receivedDateTime')}, source={source}), "
+                        f"Replacing the earlier {best_otp}, resetting the settle timer"
                     )
                 else:
                     logger.info(
-                        f"[Outlook] 首次锁定 OTP={otp}, source={source}, ts={item.get('date') or item.get('receivedDateTime')}, "
-                        f"subject={subject!r}, 等 {settle}s 看是否有更晚邮件..."
+                        f"[Outlook] First lock OTP={otp}, source={source}, ts={item.get('date') or item.get('receivedDateTime')}, "
+                        f"subject={subject!r}, Waiting {settle}s to see whether a later email arrives..."
                     )
                 best_otp = otp
                 best_ts = ts
@@ -1087,13 +1087,13 @@ def fetch_latest_otp(
                 best_protocol = protocol
                 best_source = source
                 settle_until = time.time() + settle
-            break  # 只关心本轮最新那一封
+            break  # Only care about the latest one of this round
 
-        # 判断是否可以返回
+        # Judge whether it can return
         now = time.time()
         if best_otp and settle_until is not None and now >= settle_until:
             logger.info(
-                f"[Outlook] settle 完成，返回 OTP={best_otp}, source={best_source or best_protocol}, protocol={best_protocol}, "
+                f"[Outlook] settle completed, returning OTP={best_otp}, source={best_source or best_protocol}, protocol={best_protocol}, "
                 f"subject={best_subject!r}"
             )
             return best_otp
@@ -1101,35 +1101,35 @@ def fetch_latest_otp(
         remaining = int(deadline - now)
         if best_otp:
             logger.info(
-                f"[Outlook] 已锁定候选 OTP={best_otp}，等 settle 中"
-                f"（剩余 settle ~{int(settle_until - now)}s, 总剩余 {remaining}s）..."
+                f"[Outlook] Candidate OTP={best_otp} locked, waiting in settle"
+                f"(settle remaining ~{int(settle_until - now)}s, total remaining {remaining}s)..."
             )
         else:
             logger.info(
-                f"[Outlook] 暂未收到符合条件的 OpenAI 邮件，{interval}s 后重试（剩余 {remaining}s）..."
+                f"[Outlook] No qualifying OpenAI email received yet, retrying in {interval}s (remaining {remaining}s)..."
             )
         time.sleep(interval)
 
-    # 超时但已经锁定过候选（settle 没等到结束就到 deadline 了）
+    # Timed out but a candidate was already locked (the deadline arrived before settle finished waiting)
     if best_otp:
         logger.warning(
-            f"[Outlook] 总超时但已有候选，返回 OTP={best_otp}, source={best_source or best_protocol} (subject={best_subject!r})"
+            f"[Outlook] Overall timeout but a candidate exists, returning OTP={best_otp}, source={best_source or best_protocol} (subject={best_subject!r})"
         )
         return best_otp
 
     raise OutlookClientError(
-        f"等待 {email} 的 OTP 超时（>{max_wait or _email_cfg.OTP_MAX_WAIT}s）。"
-        f"可能：refresh_token 失效 / 邮箱被 OpenAI 黑名单 / IP 风控未通过。"
+        f"Timed out waiting for the OTP of {email} (>{max_wait or _email_cfg.OTP_MAX_WAIT}s)."
+        f"Possible causes: refresh_token invalid / the email blacklisted by OpenAI / IP risk control not passed."
     )
 
 
-# 时差容忍：只保留极小容忍。
-# 重发 OTP 时上一封旧码常常只早 10~20 秒；若容忍 30 秒，会把上一轮旧码误判为新码。
+# Time skew tolerance: keep only a very small tolerance.
+# When an OTP is resent the previous old code is often only 10~20 seconds earlier; with a 30-second tolerance the old code of the last round would be mistaken for the new one.
 _OTP_CLOCK_SKEW_TOLERANCE = 2
 
 
 def _parse_email_ts(item: dict) -> float | None:
-    """把邮件的时间字段解析成 UTC 时间戳；解析不出返回 None。"""
+    """Parse the time field of an email into a UTC timestamp; returns None if it cannot be parsed."""
     import calendar
     raw = (
         item.get("date")
@@ -1143,8 +1143,8 @@ def _parse_email_ts(item: dict) -> float | None:
 
     formats = (
         "%Y-%m-%dT%H:%M:%SZ",       # Graph: 2026-05-08T02:47:00Z
-        "%Y-%m-%dT%H:%M:%S.%fZ",    # Graph 含微秒
-        "%Y-%m-%d %H:%M:%S",        # IMAP / 自定义
+        "%Y-%m-%dT%H:%M:%S.%fZ",    # Graph with microseconds
+        "%Y-%m-%d %H:%M:%S",        # IMAP / custom
         "%a, %d %b %Y %H:%M:%S %z", # RFC 2822 with tz
     )
     for fmt in formats:
@@ -1160,9 +1160,9 @@ def _parse_email_ts(item: dict) -> float | None:
 
 
 def _is_after(item: dict, after_ts: float) -> bool:
-    """判断邮件时间是否晚于 after_ts。容忍仅 30 秒以避免吃到旧 OTP。"""
+    """Judge whether the email time is later than after_ts. The tolerance is only 30 seconds to avoid picking up an old OTP."""
     ts = _parse_email_ts(item)
     if ts is None:
-        # 时间字段缺失/解析不出 → 放过（不要因解析失败就丢邮件）
+        # Time field missing / cannot be parsed -> let it pass (do not drop the email just because parsing failed)
         return True
     return ts >= after_ts - _OTP_CLOCK_SKEW_TOLERANCE

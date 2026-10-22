@@ -22,7 +22,7 @@ class PlanPromoDetailsTests(unittest.TestCase):
                 "duration": {"num_periods": 1, "period": "month"},
                 "no_auto_renewal_at_discount_end": False,
             }},
-            "go": {"id": "go-discount", "metadata": {"custom_field": "保留未知字段"}},
+            "go": {"id": "go-discount", "metadata": {"custom_field": "preserve unknown field"}},
         }
         result = self.parse(campaigns)
         self.assertTrue(result["plus_trial_eligible"])

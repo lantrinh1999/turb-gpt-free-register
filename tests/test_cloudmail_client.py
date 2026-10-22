@@ -15,9 +15,9 @@ class CloudMailClientTests(unittest.TestCase):
             cloudmail_client._email_cfg, "CLOUDMAIL_AUTH_TOKEN", "token", create=True
         ), patch.object(cloudmail_client._email_cfg, "CLOUDMAIL_DOMAINS", [], create=True), patch(
             "core.cloudmail_client.fetch_domains",
-            side_effect=cloudmail_client.CloudMailError("CloudMail 自动获取域名失败：域名列表为空"),
+            side_effect=cloudmail_client.CloudMailError("CloudMail failed to fetch domains automatically: domain list is empty"),
         ):
-            with self.assertRaisesRegex(cloudmail_client.CloudMailError, "自动获取域名失败"):
+            with self.assertRaisesRegex(cloudmail_client.CloudMailError, "failed to fetch domains automatically"):
                 cloudmail_client.pick_account()
 
     @patch("core.cloudmail_client.requests.get")

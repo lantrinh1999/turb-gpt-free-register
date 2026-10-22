@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""域名邮箱 MailCode：幂等购买、通道初始化及按邮箱游标取码。"""
+"""Domain email MailCode: idempotent purchase, channel initialization, and code retrieval by email cursor."""
 from __future__ import annotations
 
 import hashlib
@@ -32,14 +32,14 @@ class MailCodeError(RuntimeError):
 
 
 def _base():
-    # 固定官方服务；不接受旧 .env 或运行时配置重定向 API Key。
+    # Fixed official service; does not accept old .env or runtime config redirecting the API Key.
     return "https://mailcode.bzb.qzz.io"
 
 
 def _key():
     key = str(getattr(_cfg, "MAILCODE_API_KEY", "") or "").strip()
     if not key:
-        raise MailCodeError("MailCode API Key 未配置（配置 → 邮箱 / OTP → 域名邮箱 MailCode）")
+        raise MailCodeError("MailCode API Key not configured (Settings, Email / OTP, Domain Email MailCode)")
     return key
 
 
@@ -54,8 +54,8 @@ def _request(method, path, *, params=None, body=None, idempotency_key=None):
                                     headers=headers, timeout=max(1, int(_cfg.MAILCODE_REQUEST_TIMEOUT)),
                                     allow_redirects=False)
     except requests.RequestException as exc:
-        # 不输出完整 URL/请求头，避免泄漏凭据。
-        raise MailCodeError(f"MailCode 网络请求失败：{type(exc).__name__}") from exc
+        # Do not output the full URL/request headers, to avoid leaking credentials.
+        raise MailCodeError(f"MailCode network request failed:{type(exc).__name__}") from exc
     try:
         delay = max(0, float(response.headers.get("Retry-After", 0)))
     except (TypeError, ValueError):
@@ -63,10 +63,10 @@ def _request(method, path, *, params=None, body=None, idempotency_key=None):
     try:
         payload = response.json()
     except ValueError as exc:
-        raise MailCodeError(f"MailCode 响应不是 JSON，HTTP {response.status_code}",
+        raise MailCodeError(f"MailCode response is not JSON,HTTP {response.status_code}",
                             status=response.status_code, retry_after=delay) from exc
     if not isinstance(payload, dict):
-        raise MailCodeError("MailCode 响应结构无效", status=response.status_code)
+        raise MailCodeError("MailCode invalid response structure", status=response.status_code)
     error = payload.get("error") or {}
     if not 200 <= response.status_code < 300 or error:
         code = str(error.get("code", "")) if isinstance(error, dict) else ""
@@ -74,7 +74,7 @@ def _request(method, path, *, params=None, body=None, idempotency_key=None):
         raise MailCodeError(f"MailCode HTTP {response.status_code} {code}: {message}; request_id={payload.get('request_id', '-')}",
                             status=response.status_code, code=code, retry_after=delay)
     if "data" not in payload:
-        raise MailCodeError("MailCode 响应缺少 data", status=response.status_code)
+        raise MailCodeError("MailCode response is missing data", status=response.status_code)
     return payload["data"]
 
 
@@ -83,7 +83,7 @@ def _pages(path):
     while True:
         rows = _request("GET", path, params={"offset": offset, "limit": 100})
         if not isinstance(rows, list):
-            raise MailCodeError("MailCode 分页响应 data 不是数组")
+            raise MailCodeError("MailCode paged response data is not an array")
         yield from rows
         if len(rows) < 100:
             break
@@ -124,7 +124,7 @@ def get_codes(mailbox_id, after_sequence=None):
         params["after_sequence"] = str(after_sequence)
     data = _request("GET", _mailbox_path(mailbox_id, "/codes"), params=params)
     if not isinstance(data, dict) or not isinstance(data.get("records"), list):
-        raise MailCodeError("MailCode 取码响应缺少 records 数组")
+        raise MailCodeError("MailCode code retrieval response is missing the records array")
     return data
 
 
@@ -171,16 +171,16 @@ def _save_context(account):
 def _cursor(data, current):
     value = str(data.get("next_sequence", current))
     if not re.fullmatch(r"[0-9]+", value) or int(value) > 9000000000000000000:
-        raise MailCodeError("MailCode 返回了无效 next_sequence")
-    return value  # 服务端游标原样使用，不能 +1，也不能按验证码数字去重。
+        raise MailCodeError("MailCode returned an invalid next_sequence")
+    return value  # Use the server cursor as is: do not add 1, and do not deduplicate by verification code digits.
 
 
 def _prepare(account):
-    """首次取码按需初始化 IMAP；READY 后才将地址交给注册流程。"""
+    """Initialize IMAP on demand at the first code retrieval; the address is handed to the registration flow only after READY."""
     deadline = time.monotonic() + max(1, int(_cfg.MAILCODE_CHANNEL_WAIT_SECONDS))
     while True:
         try:
-            data = get_codes(account.mailbox_id)  # 不传游标取得最新水位，不读取全部历史。
+            data = get_codes(account.mailbox_id)  # Get the latest watermark without passing a cursor; do not read the entire history.
         except MailCodeError as exc:
             if exc.status not in {0, 429, 500, 502, 503, 504}:
                 raise
@@ -194,15 +194,15 @@ def _prepare(account):
             _save_context(account)
             return
         if data.get("channel_status") in {"PAUSED", "CLOSED"}:
-            raise MailCodeError(f"MailCode 通道不可用：{data.get('channel_status')}")
+            raise MailCodeError(f"MailCode channel unavailable:{data.get('channel_status')}")
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise MailCodeError("MailCode 取码通道初始化超时；已购邮箱保留，下次领取继续初始化，不重新购买")
+            raise MailCodeError("MailCode Code retrieval channel initialization timed out; the purchased email is kept, initialization continues on the next claim, and it is not purchased again")
         time.sleep(min(5, remaining))
 
 
 def _pending_path(product):
-    # 不保存 API Key；待确认购买持久化，断网/重启也继续使用原幂等键。
+    # The API Key is not saved; the pending purchase is persisted, so the original idempotency key keeps being used even after network loss or restart.
     identity = hashlib.sha256((_base() + "\0" + _key() + "\0" + product).encode()).hexdigest()
     return _STATE_DIR / "purchases" / (identity + ".json")
 
@@ -217,20 +217,20 @@ def _save_pending(path, pending):
 def pick_account():
     product = str(getattr(_cfg, "MAILCODE_PRODUCT_ID", "product_a3783a0ead074b4091631b9ad04153f9") or "").strip()
     if not product:
-        raise MailCodeError("MailCode 商品 ID 未配置，请填写 MAILCODE_PRODUCT_ID")
+        raise MailCodeError("MailCode Product ID is not configured, fill in MAILCODE_PRODUCT_ID")
     with _PURCHASE_LOCK:
         path = _pending_path(product)
         pending = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"key": "turb-mailcode-" + uuid.uuid4().hex}
-        _save_pending(path, pending)  # 必须在发起扣款前保存。
+        _save_pending(path, pending)  # Must be saved before the charge is initiated.
         if "item" not in pending:
             for attempt in range(3):
                 try:
                     data = _request("POST", "/orders", body={"product_id": product, "count": 1}, idempotency_key=pending["key"])
                     if not isinstance(data, dict) or data.get("status") != "COMPLETED" or len(data.get("items") or []) != 1:
-                        raise MailCodeError("MailCode 购买响应结构无效；保留原幂等键，勿重新下单")
+                        raise MailCodeError("MailCode Invalid purchase response structure; keep the original idempotency key and do not place a new order")
                     item = data["items"][0]
                     if not item.get("mailbox_id") or "@" not in str(item.get("email", "")) or item.get("status") != "ACTIVE":
-                        raise MailCodeError("MailCode 购买响应缺少有效邮箱，保留原幂等键")
+                        raise MailCodeError("MailCode Purchase response is missing a valid email; keep the original idempotency key")
                     pending.update(item=item, order_id=data.get("order_id", ""))
                     _save_pending(path, pending)
                     break
@@ -241,13 +241,13 @@ def pick_account():
                             path.unlink(missing_ok=True)
                         raise
                     if attempt == 2:
-                        raise MailCodeError(f"{exc}；购买结果未确认，已保存幂等键，下次继续原请求") from exc
+                        raise MailCodeError(f"{exc}; purchase result not confirmed, idempotency key saved, the original request will continue next time") from exc
                     time.sleep(max(1, exc.retry_after))
         item = pending["item"]
         account = _remember(MailCodeAccount(item["email"], item["mailbox_id"], pending.get("order_id", "")))
         _prepare(account)
         path.unlink(missing_ok=True)
-    logger.info("[MailCode] 邮箱通道 READY：%s", account.email)
+    logger.info("[MailCode] Email channel READY:%s", account.email)
     return account
 
 
@@ -256,7 +256,7 @@ def get_email():
 
 
 def release_account(email, status="available", note=None):
-    # 平台没有用户退款 API；释放本地上下文不能退款/撤销已购邮箱。
+    # The platform has no user refund API; releasing the local context cannot refund/revoke the purchased email.
     with _LOCK:
         _CONTEXT_CACHE.pop(str(email or "").strip().lower(), None)
 
@@ -268,9 +268,9 @@ def _restore(email):
         return _remember(MailCodeAccount(**saved))
     for row in _pages("/mailboxes"):
         if str(row.get("email", "")).lower() == email.lower() and row.get("id"):
-            # 恢复时从历史游标 0 开始，并通过 after_ts/有效期过滤，不重新购买。
+            # On recovery, start from historical cursor 0 and filter by after_ts/validity period, without purchasing again.
             return _remember(MailCodeAccount(row["email"], row["id"]))
-    raise MailCodeError(f"MailCode 已购邮箱不存在或使用权失效：{email}")
+    raise MailCodeError(f"MailCode Purchased email does not exist or its usage right has expired:{email}")
 
 
 def fetch_latest_otp(email, after_ts=None, max_wait=None, poll_interval=None, settle_seconds=None):
@@ -279,7 +279,7 @@ def fetch_latest_otp(email, after_ts=None, max_wait=None, poll_interval=None, se
     interval = max(5, int(_cfg.OTP_POLL_INTERVAL if poll_interval is None else poll_interval))
     settle = max(0, int(_cfg.OTP_SETTLE_SECONDS if settle_seconds is None else settle_seconds))
     best, best_order, settle_until = None, (-1, -1), None
-    last_error = "尚无新验证码"
+    last_error = "No new verification code yet"
     with account.lock:
         while True:
             delay = interval
@@ -301,13 +301,13 @@ def fetch_latest_otp(email, after_ts=None, max_wait=None, poll_interval=None, se
                 _save_context(account)
                 if data.get("has_more"):
                     if account.next_sequence == previous:
-                        raise MailCodeError("MailCode 分页游标未前进")
+                        raise MailCodeError("MailCode pagination cursor did not advance")
                     if time.monotonic() < deadline:
                         continue
                 if best and time.monotonic() >= settle_until:
                     return best
                 if data.get("channel_status") in {"CLOSED", "PAUSED"}:
-                    raise MailCodeError("MailCode 取码通道已关闭/暂停", status=404)
+                    raise MailCodeError("MailCode code retrieval channel closed/paused", status=404)
             except MailCodeError as exc:
                 if exc.status in {400, 401, 403, 404}:
                     raise
@@ -319,4 +319,4 @@ def fetch_latest_otp(email, after_ts=None, max_wait=None, poll_interval=None, se
             time.sleep(min(delay, remaining))
     if best:
         return best
-    raise MailCodeError(f"等待 MailCode 验证码超时：{email}；{last_error}")
+    raise MailCodeError(f"Timed out waiting for MailCode verification code: {email};{last_error}")

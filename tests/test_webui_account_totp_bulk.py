@@ -50,7 +50,7 @@ class WebUiAccountTotpBulkTests(unittest.TestCase):
 
                 def enqueue(**kwargs):
                     if kwargs["account_id"] == 4:
-                        return {"accepted": False, "busy": True, "error": "该账号正在设置 2FA", "future": object()}
+                        return {"accepted": False, "busy": True, "error": "This account is currently setting up 2FA", "future": object()}
                     return {"accepted": True, "busy": False, "log_path": "/tmp/twofa.log", "future": object()}
 
                 with patch("core.twofa_service.enqueue_account_totp_setup", side_effect=enqueue) as mocked:
@@ -70,10 +70,10 @@ class WebUiAccountTotpBulkTests(unittest.TestCase):
                 self.assertEqual(
                     {(item["id"], item["reason"]) for item in body["skipped"]},
                     {
-                        (2, "该账号已经开启 2FA"),
-                        (3, "缺少 access_token"),
-                        (99, "账号不存在"),
-                        ("bad", "ID 非法"),
+                        (2, "The account has already enabled 2FA"),
+                        (3, "missing access_token"),
+                        (99, "Account does not exist"),
+                        ("bad", "ID invalid"),
                     },
                 )
                 self.assertEqual([call.kwargs["account_id"] for call in mocked.call_args_list], [1, 4])

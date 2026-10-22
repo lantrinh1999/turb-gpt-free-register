@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""WebUI 授权码登录与接口鉴权。"""
+"""WebUI authorization code login and API authentication."""
 from __future__ import annotations
 
 import hmac
@@ -20,7 +20,7 @@ _AUTH_CODE: str | None = None
 _GENERATED = False
 
 def init_auth(app: Any, *, auth_code: str | None = None) -> str:
-    """初始化授权码和 Flask session。未显式配置时生成临时授权码。"""
+    """Initialize the authorization code and Flask session. Generate a temporary authorization code when not explicitly configured."""
     global _AUTH_CODE, _GENERATED
 
     code = (auth_code or "").strip()
@@ -47,7 +47,7 @@ def init_auth(app: Any, *, auth_code: str | None = None) -> str:
     _AUTH_CODE = code
     session_secret = os.getenv("WEBUI_SESSION_SECRET") or os.getenv("FLASK_SECRET_KEY")
     if not session_secret:
-        # 授权码来自 .env 时，用带命名空间的摘要生成稳定签名密钥；修改授权码会自然注销旧会话。
+        # When the authorization code comes from .env, a namespaced digest is used to derive a stable signing key; changing the authorization code naturally logs out old sessions.
         session_secret = hashlib.sha256(f"turb-gpt-webui-session:{code}".encode("utf-8")).hexdigest()
     app.secret_key = session_secret
     app.config.update(
@@ -67,7 +67,7 @@ def expected_auth_code() -> str:
 
 
 def _extract_auth_code() -> str:
-    # 非登录接口只接受 Header 授权码，避免 query/body 中的授权码进入日志、Referer 或业务数据。
+    # Non-login endpoints accept only the Header authorization code, so that authorization codes in query/body do not end up in logs, Referer or business data.
     header_code = (request.headers.get("X-Auth-Code") or request.headers.get("X-Authorization-Code") or "").strip()
     if header_code:
         return header_code
@@ -97,7 +97,7 @@ def _wants_json() -> bool:
 
 def _unauthorized_response():
     if _wants_json():
-        return jsonify({"ok": False, "error": "未授权：请先登录或提供授权码"}), 401
+        return jsonify({"ok": False, "error": "Unauthorized: please log in or provide the authorization code"}), 401
     return redirect(url_for("auth_login", next=request.path))
 
 
@@ -126,7 +126,7 @@ def register_auth_routes(app: Any) -> None:
                 session.permanent = remember
                 session[_SESSION_KEY] = True
                 return redirect(next_url)
-            error = "授权码错误"
+            error = "Incorrect authorization code"
         return render_template("login.html", error=error, next_url=next_url, login_url=url_for("auth_login"))
 
     @app.post("/logout", endpoint="auth_logout")

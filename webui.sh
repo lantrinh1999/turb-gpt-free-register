@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Turb GPT Free Register WebUI 管理脚本
+# Turb GPT Free Register WebUI management script
 #
-# 用法：
-#   ./webui.sh start      启动 WebUI
-#   ./webui.sh stop       关闭 WebUI
-#   ./webui.sh restart    重启 WebUI
-#   ./webui.sh status     查看状态
-#   ./webui.sh logs       实时查看日志
+# Usage:
+#   ./webui.sh start      start WebUI
+#   ./webui.sh stop       stop WebUI
+#   ./webui.sh restart    restart WebUI
+#   ./webui.sh status     Show status
+#   ./webui.sh logs       Follow logs in real time
 #
-# 可选环境变量：
+# Optional environment variables:
 #   HOST=127.0.0.1
 #   PORT=5000
 #   OPEN_BROWSER=1
@@ -37,19 +37,19 @@ mkdir -p "$RUN_DIR" "$LOG_DIR"
 
 usage() {
   cat <<EOF
-用法：$0 <command>
+Usage:$0 <command>
 
 commands:
-  start      启动 WebUI
-  stop       关闭 WebUI
-  restart    重启 WebUI
-  status     查看运行状态
-  logs       实时查看日志
+  start      start WebUI
+  stop       stop WebUI
+  restart    restart WebUI
+  status     Show running status
+  logs       Follow logs in real time
 
-环境变量：
+Environment variables:
   HOST=127.0.0.1 PORT=5000 OPEN_BROWSER=1 VERBOSE=1 AUTH_CODE=xxx EXTRA_ARGS="..."
 
-示例：
+Example:
   ./webui.sh start
   PORT=8000 OPEN_BROWSER=1 ./webui.sh start
   HOST=0.0.0.0 PORT=5000 ./webui.sh restart
@@ -74,8 +74,8 @@ get_python() {
   if [[ -x "$venv_python" ]] && "$venv_python" -c 'import sys; print(sys.executable)' >/dev/null 2>&1; then
     echo "$venv_python"
   elif [[ -e "$venv_python" ]]; then
-    echo "检测到 .venv 存在，但虚拟环境中的 Python 已失效。" >&2
-    echo "请重新创建虚拟环境并安装依赖：" >&2
+    echo "Detected .venv, but the Python in the virtual environment is no longer valid." >&2
+    echo "Please recreate the virtual environment and install dependencies:" >&2
     echo "  rm -rf .venv && python3 -m venv .venv" >&2
     echo "  .venv/bin/python -m pip install -r requirements.txt" >&2
     return 1
@@ -85,11 +85,11 @@ get_python() {
     if "$system_python" -c 'import flask' >/dev/null 2>&1; then
       echo "$system_python"
     else
-      echo "未找到可用 Python 环境：系统 Python 缺少 Flask，请先创建 .venv 并安装 requirements.txt" >&2
+      echo "No usable Python environment found: system Python lacks Flask, please create .venv first and install requirements.txt" >&2
       return 1
     fi
   else
-    echo "未找到 Python：请先创建 .venv 或安装 python3" >&2
+    echo "Python not found: please create .venv first or install python3" >&2
     return 1
   fi
 }
@@ -124,7 +124,7 @@ cmd_start() {
   local old_pid py pid
   old_pid="$(read_pid)"
   if is_running "$old_pid"; then
-    echo "WebUI 已在运行：PID=${old_pid}，地址：http://${HOST}:${PORT}"
+    echo "WebUI is already running: PID=${old_pid}, address:http://${HOST}:${PORT}"
     return 0
   fi
   rm -f "$PID_FILE"
@@ -147,17 +147,17 @@ cmd_start() {
     args+=("${extra_parts[@]}")
   fi
 
-  echo "启动 WebUI：http://${HOST}:${PORT}"
-  echo "日志文件：$LOG_FILE"
+  echo "Starting WebUI:http://${HOST}:${PORT}"
+  echo "Log file:$LOG_FILE"
   nohup "$py" "${args[@]}" >> "$LOG_FILE" 2>&1 &
   pid=$!
   echo "$pid" > "$PID_FILE"
 
   sleep 1
   if is_running "$pid"; then
-    echo "启动成功：PID=$pid"
+    echo "Started successfully:PID=$pid"
   else
-    echo "启动失败，请查看日志：$LOG_FILE" >&2
+    echo "Start failed, please check the log:$LOG_FILE" >&2
     rm -f "$PID_FILE"
     return 1
   fi
@@ -171,12 +171,12 @@ cmd_stop() {
   done < <(collect_running_pids)
 
   if [[ "${#pids[@]}" -eq 0 ]]; then
-    echo "WebUI 未运行"
+    echo "WebUI is not running"
     rm -f "$PID_FILE"
     return 0
   fi
 
-  echo "正在关闭 WebUI：PID=${pids[*]}"
+  echo "Stopping WebUI:PID=${pids[*]}"
   for pid in "${pids[@]}"; do
     kill "$pid" >/dev/null 2>&1 || true
   done
@@ -196,13 +196,13 @@ cmd_stop() {
 
   for pid in "${pids[@]}"; do
     if is_running "$pid"; then
-      echo "进程未退出，强制结束：PID=$pid"
+      echo "Process did not exit, force killing:PID=$pid"
       kill -9 "$pid" >/dev/null 2>&1 || true
     fi
   done
 
   rm -f "$PID_FILE"
-  echo "已关闭 WebUI"
+  echo "Stopped WebUI"
 }
 
 cmd_restart() {
@@ -219,13 +219,13 @@ cmd_status() {
   done < <(collect_running_pids)
 
   if [[ "${#pids[@]}" -eq 0 ]]; then
-    echo "WebUI 未运行"
+    echo "WebUI is not running"
     return 1
   fi
 
-  echo "WebUI 运行中：PID=${pids[*]}"
-  echo "地址：http://${HOST}:${PORT}"
-  echo "日志：$LOG_FILE"
+  echo "WebUI is running:PID=${pids[*]}"
+  echo "Address:http://${HOST}:${PORT}"
+  echo "Log:$LOG_FILE"
 }
 
 cmd_logs() {
@@ -242,7 +242,7 @@ case "$cmd" in
   logs|log) cmd_logs ;;
   -h|--help|help|"") usage ;;
   *)
-    echo "未知命令：$cmd" >&2
+    echo "Unknown command:$cmd" >&2
     usage >&2
     exit 2
     ;;

@@ -1,126 +1,126 @@
 # -*- coding: utf-8 -*-
 """
-RoxyBrowser 指纹浏览器自动化注册配置。
+RoxyBrowser fingerprint browser automated registration configuration.
 
-官方文档：
-- API 默认 host: http://127.0.0.1:50000
-- 所有接口请求头必须带 token
-- 可配合 Selenium / Puppeteer / Playwright 自动化
+Official docs:
+- API default host: http://127.0.0.1:50000
+- All API request headers must carry the token
+- Can be driven by Selenium / Puppeteer / Playwright automation
 """
 from config.env_loader import env_str, apply_env_overrides
 
 
-# 注册驱动：
-#   "protocol"     = 原有 curl_cffi 纯协议注册（容易封号，不建议）
-#   "roxy"         = 调用 RoxyBrowser 指纹浏览器 + Selenium 自动化注册
-#   "cloak"        = 调用 CloakBrowser + Playwright/Selenium 适配层注册
+# Registration driver:
+#   "protocol"     = Original curl_cffi pure-protocol registration (accounts get banned easily, not recommended)
+#   "roxy"         = Call the RoxyBrowser fingerprint browser + Selenium automated registration
+#   "cloak"        = Call the CloakBrowser + Playwright/Selenium adapter layer registration
 #   "browser_use"  = Browser Use Cloud stealth Chromium + Playwright
 #   "skyvern"      = Skyvern Browser Sessions + Playwright
 REGISTRATION_DRIVER: str = "roxy"
 
-# RoxyBrowser 本地 API
+# RoxyBrowser local API
 ROXY_API_BASE: str = "http://127.0.0.1:50100"
 ROXY_API_TOKEN: str = env_str("ROXY_API_TOKEN", "")
 
-# Roxy 环境/Profile ID；留空时使用 ROXY_PROFILE_CREATE_* 先创建临时环境（如果接口支持）
+# Roxy Environment/Profile ID; when empty, a temporary environment is created first using ROXY_PROFILE_CREATE_* (if the API supports it)
 ROXY_PROFILE_ID: str = ""
 
-# Roxy 工作区 ID。Roxy 创建 Profile 时接口要求 workspaceId，必须填写。
-# 可在 Roxy 工作区/团队页面或 API 返回中查看。
+# Roxy Workspace ID. Roxy requires workspaceId when creating a Profile, so it must be filled in.
+# It can be found on the Roxy workspace/team page or in the API response.
 ROXY_WORKSPACE_ID: str = "90143"
 
-# Roxy 项目 ID。/browser/workspace 返回 project_details.projectId；创建 Profile 时一并提交。
+# Roxy Project ID. /browser/workspace returns project_details.projectId; it is submitted together when creating a Profile.
 ROXY_PROJECT_ID: str = "97471"
 
-# 获取团队/工作区列表接口路径。不同版本若不同，可在 WebUI 修改；客户端也会自动尝试多个常见路径。
+# Path of the team/workspace list endpoint. If it differs between versions it can be changed in the WebUI; the client also tries several common paths automatically.
 ROXY_WORKSPACE_LIST_PATH: str = "/browser/workspace"
 ROXY_WORKSPACE_LIST_METHOD: str = "GET"
 
-# 接口路径模板。不同版本如有差异，只改这里即可。
-# {profile_id} 会替换为 ROXY_PROFILE_ID。
+# Endpoint path templates. If your version differs, only change them here.
+# {profile_id} will be replaced with ROXY_PROFILE_ID.
 ROXY_OPEN_PATH: str = "/browser/open"
 ROXY_CLOSE_PATH: str = "/browser/close"
 ROXY_CREATE_PATH: str = "/browser/create"
 
-# 接口方法：常见 open/close 为 GET；若你的版本要求 POST，可在 WebUI/配置里改。
+# Endpoint methods: open/close are usually GET; if your version requires POST, change it in the WebUI / config.
 ROXY_OPEN_METHOD: str = "POST"
 ROXY_CLOSE_METHOD: str = "POST"
 ROXY_CREATE_METHOD: str = "POST"
 
-# 打开浏览器时是否无头启动：
-#   False = 显示 Roxy 浏览器窗口（便于观察/调试）
-#   True  = 无头启动，不显示窗口（如果当前 Roxy 版本支持 headless）
+# Whether to start headless when opening the browser:
+#   False = Show the Roxy browser window (convenient for observing/debugging)
+#   True  = Start headless without showing a window (if the current Roxy version supports headless)
 ROXY_OPEN_HEADLESS: bool = False
 
-# 打开浏览器时附加参数；会合并到 /browser/open 请求体，优先级高于默认值。
+# Extra arguments when opening the browser; merged into the /browser/open request body and take precedence over the defaults.
 ROXY_OPEN_EXTRA_PARAMS: dict = {}
 
-# Selenium 行为
+# Selenium behavior
 ROXY_SELENIUM_TIMEOUT: int = 90
 ROXY_KEEP_BROWSER_OPEN: bool = False
 
-# Roxy 跨 Profile 本地静态资源缓存（仅缓存 JS/CSS/font/image，认证/API 始终联网）。
-# 开启 config.browser.BROWSER_DATA_SAVER_MODE 后会自动启用，无需单独修改此开关。
+# Roxy Cross-Profile local static resource cache (only caches JS/CSS/font/image; auth/API always go online).
+# It is enabled automatically once config.browser.BROWSER_DATA_SAVER_MODE is on, so this switch does not need to be changed separately.
 ROXY_LOCAL_ASSET_CACHE_ENABLED: bool = False
 ROXY_LOCAL_ASSET_CACHE_MODE: str = "auto"
 ROXY_LOCAL_ASSET_CACHE_DIR: str = "./cache/roxy-assets"
 ROXY_LOCAL_ASSET_CACHE_MAX_AGE: int = 86400
 ROXY_LOCAL_ASSET_CACHE_MAX_ITEM_BYTES: int = 25 * 1024 * 1024
 
-# Roxy API transient 错误重试。create 接口默认不重试，避免超时后重复创建孤儿环境；open/close/delete 会重试。
+# Roxy API transient Error retry. The create endpoint is not retried by default, to avoid creating orphan environments again after a timeout; open/close/delete are retried.
 ROXY_API_RETRIES: int = 3
 ROXY_API_RETRY_DELAY: int = 2
 ROXY_CREATE_RETRIES: int = 3
 ROXY_CREATE_RETRY_DELAY: int = 3
 
-# 多线程注册时，所有 worker 共用的 /browser/create 请求起始间隔（秒）。
-# Roxy 在上一个环境仍处于创建中时可能返回“正在创建中”，默认错开 1.5 秒。
+# With multi-threaded registration, the start interval (seconds) of /browser/create requests shared by all workers.
+# Roxy While the previous environment is still being created it may return "creating in progress"; staggered by 1.5 seconds by default.
 ROXY_CREATE_INTERVAL: float = 1.5
 
-# 环境生命周期：
-#   True  = 一号一环境：每个账号强制创建新 Profile，用完关闭并删除，不允许复用 ROXY_PROFILE_ID
-#   False = 可复用 ROXY_PROFILE_ID 或只关闭不删除
+# Environment lifecycle:
+#   True  = One account per environment: every account is forced to create a new Profile, which is closed and deleted after use and never reused ROXY_PROFILE_ID
+#   False = ROXY_PROFILE_ID can be reused, or the profile is only closed and not deleted
 ROXY_ONE_PROFILE_PER_ACCOUNT: bool = True
 
-# 一号一环境结束后是否删除 Profile。建议保持 True。
+# Whether to delete the Profile after one-account-per-environment finishes. Keeping True is recommended.
 ROXY_DELETE_PROFILE_AFTER_RUN: bool = True
 
-# 删除环境接口路径/方法；如你的 Roxy 版本不同，只改这里。
+# Path/method of the delete-environment endpoint; if your Roxy version differs, only change it here.
 ROXY_DELETE_PATH: str = "/browser/delete"
 ROXY_DELETE_METHOD: str = "POST"
 
-# 创建 Roxy 环境时随机系统指纹；开启后每次 /browser/create 在 Windows / macOS 里随机选一个，
-# 避免固定 macOS 指纹。
+# Random OS fingerprint when creating a Roxy environment; when enabled every /browser/create picks one of Windows / macOS at random,
+# avoiding a fixed macOS fingerprint.
 ROXY_RANDOM_OS_ON_CREATE: bool = True
 ROXY_RANDOM_OS_CHOICES: str = "Windows,macOS"
 
-# 创建 Roxy 环境时随机名称；开启后会覆盖 ROXY_PROFILE_CREATE_PAYLOAD 里的固定 name。
+# Random name when creating a Roxy environment; when enabled it overrides the fixed name in ROXY_PROFILE_CREATE_PAYLOAD.
 ROXY_RANDOM_PROFILE_NAME_ON_CREATE: bool = True
 ROXY_PROFILE_NAME_PREFIX: str = "rb"
 
-# 创建 Roxy 环境时默认系统指纹。仅在 ROXY_RANDOM_OS_ON_CREATE=False 时使用。
-# Roxy 官方 os 枚举：Windows / macOS / Linux / IOS / Android。
+# Default OS fingerprint when creating a Roxy environment. Only used when ROXY_RANDOM_OS_ON_CREATE=False.
+# Roxy Official os enum: Windows / macOS / Linux / IOS / Android.
 ROXY_DEFAULT_OS: str = "macOS"
-# 留空则使用 Roxy 对应系统的默认/最大版本；如需固定可填 15.3.2、14.7 等。
+# Leave empty to use the default/latest version of the corresponding Roxy OS; fill in 15.3.2, 14.7 etc. to pin one.
 ROXY_DEFAULT_OS_VERSION: str = ""
 
-# 创建 Roxy 环境时是否使用 config/proxy.py 的 PROXY_POOL：
-#   False = 不主动给 Roxy 环境设置代理
-#   True  = 每次创建环境时从 PROXY_POOL 随机取一个代理写入 proxyInfo
+# Whether to use PROXY_POOL of config/proxy.py when creating a Roxy environment:
+#   False = Do not set a proxy for the Roxy environment
+#   True  = On every environment creation pick one proxy from PROXY_POOL at random and write it into proxyInfo
 ROXY_CREATE_USE_PROXY_POOL: bool = False
 
-# Roxy 代理检测通道；留空则不传 checkChannel。
+# Roxy proxy check channel; leave empty to omit checkChannel.
 ROXY_PROXY_CHECK_CHANNEL: str = "IPRust.io"
 
-# 没有 ROXY_PROFILE_ID 时创建环境的最小 payload；按你的 Roxy 版本字段调整。
-# 默认开启 ROXY_RANDOM_PROFILE_NAME_ON_CREATE，因此这里的 name 只是兜底值。
+# Minimal payload for creating an environment when there is no ROXY_PROFILE_ID; adjust the fields to your Roxy version.
+# ROXY_RANDOM_PROFILE_NAME_ON_CREATE is on by default, so the name here is only a fallback value.
 ROXY_PROFILE_CREATE_PAYLOAD: dict = {
     "name": "gpt-free-register",
     "os": "macOS",
 }
 
 
-# Roxy Codex 授权等待 callback 的最长秒数
+# Roxy Codex maximum seconds to wait for the authorization callback
 ROXY_CODEX_CALLBACK_TIMEOUT: int = 180
 
 # ---- .env overrides for WebUI editable fields ----

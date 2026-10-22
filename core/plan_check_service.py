@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""套餐/Plus 资格查询后台队列。"""
+"""Plan/Plus eligibility query background queue."""
 from __future__ import annotations
 
 import logging
@@ -44,7 +44,7 @@ _NEXT_REQUEST_AT = 0.0
 
 
 def _wait_for_rate_slot() -> None:
-    """为所有查询线程分配错开的请求启动时间。"""
+    """Assign staggered request start times to all query threads."""
     global _NEXT_REQUEST_AT
     min_interval = _float_setting("PLAN_CHECK_MIN_INTERVAL", 0.4, 0.0, 30.0)
     jitter = _float_setting("PLAN_CHECK_JITTER", 0.3, 0.0, 30.0)
@@ -77,7 +77,7 @@ def _run_plan_check(
     try:
         _wait_for_rate_slot()
         if not db.mark_account_plan_check_running(account_id, run_id=run_id, expected_account=expected_account):
-            return {"ok": False, "error": "账号已删除、邮箱/AT 已变更或套餐任务已被重置"}
+            return {"ok": False, "error": "Account deleted, email/AT changed, or plan task was reset"}
         session_options = {"session": session} if session is not None else {}
         result = check_account_plan(
             access_token,
@@ -95,11 +95,11 @@ def _run_plan_check(
             and not bool(result.get("plus_trial_eligible"))
         )
         if should_recheck:
-            logger.info("[Plan] 新账号暂未发现 Plus 试用资格，%.1fs 后复查一次: %s", recheck_delay, email)
+            logger.info("[Plan] No Plus trial eligibility found for the new account yet, rechecking once in %.1fs: %s", recheck_delay, email)
             time.sleep(recheck_delay)
             _wait_for_rate_slot()
             if not db.mark_account_plan_check_running(account_id, run_id=run_id, expected_account=expected_account):
-                return {"ok": False, "error": "账号已变更，取消套餐复查"}
+                return {"ok": False, "error": "Account changed, canceling plan recheck"}
             recheck_result = check_account_plan(
                 access_token,
                 proxy=proxy,
@@ -111,16 +111,16 @@ def _run_plan_check(
                 result = recheck_result
             else:
                 logger.warning(
-                    "[Plan] 新账号资格复查失败，保留首次成功结果: %s, %s",
+                    "[Plan] New account eligibility recheck failed, keeping the first successful result: %s, %s",
                     email,
-                    recheck_result.get("error") or "未知错误",
+                    recheck_result.get("error") or "Unknown error",
                 )
 
         if not db.update_account_plan_check(acc_id=account_id, result=result, expected_account=expected_account, expected_run_id=run_id):
-            return {"ok": False, "error": "账号已删除或邮箱/AT 已变更，丢弃旧套餐结果"}
+            return {"ok": False, "error": "Account deleted or email/AT changed, discarding the old plan result"}
         if result.get("ok"):
             logger.info(
-                "[Plan] 后台查询成功: %s, plan=%s, plus_trial=%s, trigger=%s",
+                "[Plan] Background query succeeded: %s, plan=%s, plus_trial=%s, trigger=%s",
                 email,
                 result.get("current_plan_type") or "unknown",
                 bool(result.get("plus_trial_eligible")),
@@ -128,10 +128,10 @@ def _run_plan_check(
             )
         else:
             logger.warning(
-                "[Plan] 后台查询失败: %s, trigger=%s, error=%s",
+                "[Plan] Background query failed: %s, trigger=%s, error=%s",
                 email,
                 trigger,
-                result.get("error") or "未知错误",
+                result.get("error") or "Unknown error",
             )
         return result
     except Exception as exc:
@@ -143,8 +143,8 @@ def _run_plan_check(
         try:
             db.update_account_plan_check(acc_id=account_id, result=result, expected_account=expected_account, expected_run_id=run_id)
         except Exception:
-            logger.exception("[Plan] 写入后台查询异常状态失败: account_id=%s", account_id)
-        logger.exception("[Plan] 后台查询异常: %s", email)
+            logger.exception("[Plan] Failed to write background query error status: account_id=%s", account_id)
+        logger.exception("[Plan] Background query error: %s", email)
         return result
     finally:
         with _LOCK:
@@ -153,15 +153,15 @@ def _run_plan_check(
 
 
 def _release_cancelled_check(future, account_id: int, run_id: str | None = None) -> None:
-    # 被取消且尚未执行的 Future 不会进入 worker 的 finally，必须单独归还占用。
+    # A canceled Future that has not run never enters the worker finally, so the claim must be returned separately.
     if not future.cancelled():
         return
-    result = {"ok": False, "status": "failed", "error": "任务在开始执行前被取消",
+    result = {"ok": False, "status": "failed", "error": "Task was canceled before it started running",
               "checked_at": datetime.now().isoformat(timespec="seconds")}
     try:
         db.update_account_plan_check(acc_id=account_id, result=result, expected_run_id=run_id)
     except Exception:
-        logger.exception("写入取消状态失败: account_id=%s", account_id)
+        logger.exception("Failed to write cancel status: account_id=%s", account_id)
     finally:
         with _LOCK:
             _RUNNING.discard(account_id)
@@ -169,15 +169,15 @@ def _release_cancelled_check(future, account_id: int, run_id: str | None = None)
 
 
 def _claim_plan_slot(account_id: int, trigger: str, *, run_id: str) -> dict | None:
-    """同一占用逻辑用于手动队列与查活会话内同步查询。"""
+    """The same claim logic is used for the manual queue and for synchronous queries within a liveness check session."""
     with _LOCK:
         if account_id in _RUNNING:
-            return {"accepted": False, "busy": True, "error": "该账号正在查询套餐"}
+            return {"accepted": False, "busy": True, "error": "A plan query is already running for this account"}
         _RUNNING.add(account_id)
     if not _QUEUE_SLOTS.acquire(blocking=False):
         with _LOCK:
             _RUNNING.discard(account_id)
-        return {"accepted": False, "busy": False, "queue_full": True, "error": "套餐查询队列已满，请稍后重试"}
+        return {"accepted": False, "busy": False, "queue_full": True, "error": "Plan query queue is full, please retry later"}
 
     try:
         claimed = db.claim_account_plan_check(acc_id=account_id, trigger=trigger, run_id=run_id)
@@ -190,18 +190,18 @@ def _claim_plan_slot(account_id: int, trigger: str, *, run_id: str) -> dict | No
         with _LOCK:
             _RUNNING.discard(account_id)
         _QUEUE_SLOTS.release()
-        return {"accepted": False, "busy": True, "error": "该账号正在查询套餐"}
+        return {"accepted": False, "busy": True, "error": "A plan query is already running for this account"}
 
     return None
 
 
 def check_account_plan_in_session(*, account_id: int, email: str, access_token: str, session) -> dict:
-    """直接在查活线程内执行，不能提交到同一个阶段池后等待（避免线程池死锁）。"""
+    """Run directly in the liveness check thread; it must not be submitted to the same stage pool and waited on (avoids thread pool deadlock)."""
     account_id = int(account_id)
     if session is None:
-        return {"ok": False, "error": "查活会话不存在，未查询套餐"}
+        return {"ok": False, "error": "Liveness check session does not exist, plan not queried"}
     if not str(access_token or "").strip():
-        return {"ok": False, "error": "账号缺少 access_token"}
+        return {"ok": False, "error": "The account has no access_token"}
     run_id = uuid.uuid4().hex
     rejected = _claim_plan_slot(account_id, "live_auto", run_id=run_id)
     if rejected is not None:
@@ -221,12 +221,12 @@ def enqueue_account_plan_check(
     return_future: bool = False,
     executor: ThreadPoolExecutor | None = None,
 ) -> dict:
-    """把查询放入统一线程池；重复查询或队列满时不提交。"""
+    """Put the query into the unified thread pool; do not submit on duplicate queries or a full queue."""
     account_id = int(account_id)
     email = str(email or "").strip()
     access_token = str(access_token or "").strip()
     if not access_token:
-        return {"accepted": False, "busy": False, "error": "账号缺少 access_token"}
+        return {"accepted": False, "busy": False, "error": "The account has no access_token"}
     run_id = uuid.uuid4().hex
     rejected = _claim_plan_slot(account_id, trigger, run_id=run_id)
     if rejected is not None:
@@ -251,7 +251,7 @@ def enqueue_account_plan_check(
         result = {
             "ok": False,
             "checked_at": datetime.now().isoformat(timespec="seconds"),
-            "error": f"套餐查询入队失败: {type(exc).__name__}: {str(exc)[:160]}",
+            "error": f"Failed to enqueue plan query: {type(exc).__name__}: {str(exc)[:160]}",
         }
         db.update_account_plan_check(acc_id=account_id, result=result, expected_run_id=run_id)
         return {"accepted": False, "busy": False, "error": result["error"]}

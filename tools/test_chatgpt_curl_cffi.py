@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ChatGPT backend-api 指纹环境请求测试脚本。
+ChatGPT backend-api fingerprint environment request test script.
 
-用途：
-    先创建项目统一 BrowserSession 指纹环境（curl_cffi TLS 指纹 + UA/语言/时区画像 + oai-did cookie），
-    再用该环境测试 ChatGPT backend-api 的 Bearer token 请求。
+Purpose:
+    First create the unified BrowserSession fingerprint environment of the project (curl_cffi TLS fingerprint + UA/language/timezone profile + oai-did cookie),
+    then use that environment to test Bearer token requests to the ChatGPT backend-api.
 
-用法：
-    # 方式1：直接参数传 token
+Usage:
+    # Method 1: directly pass the token
     python3 tools/test_chatgpt_curl_cffi.py --token '<JWT>' --verbose
 
-    # 方式2：从文件读取 token（默认取第一条非空行；允许有 Bearer 前缀）
+    # Method 2: read the token from a file (the first non-empty line by default; a Bearer prefix is allowed)
     python3 tools/test_chatgpt_curl_cffi.py --token-file 注册成功的token.txt
 
-    # 方式3：测试 subscriptions，需要传 account_id
+    # Method 3: test subscriptions, which requires passing account_id
     python3 tools/test_chatgpt_curl_cffi.py --token '<JWT>' --endpoint subscriptions --account-id '<account_id>'
 
-    # 代理：不传则沿用项目 pick_proxy()；传空字符串禁用代理；传具体地址使用指定代理
+    # Proxy: if not passed, the project pick_proxy() is used; pass an empty string to disable the proxy; pass a specific address to use that proxy
     python3 tools/test_chatgpt_curl_cffi.py --token '<JWT>' --proxy ''
 
-说明：
-    - 本脚本不会把 token 落盘。
-    - 默认 endpoint=accounts-check。
+Notes:
+    - This script does not persist the token to disk.
+    - Default endpoint=accounts-check.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote
 
-# 让 tools/ 脚本能 import 到项目根的 core / config
+# Let tools/ scripts import from the project root: core / config
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
@@ -77,7 +77,7 @@ def _read_token_file(path: str, index: int = 0) -> str:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        # 兼容常见格式：纯 token / email----token / email:token / JSON 行
+        # Compatible with common formats: bare token / email----token / email:token / JSON line
         token = ""
         if line.startswith("{"):
             try:
@@ -96,14 +96,14 @@ def _read_token_file(path: str, index: int = 0) -> str:
         if token:
             lines.append(token)
     if not lines:
-        raise RuntimeError(f"token 文件没有可用内容: {p}")
+        raise RuntimeError(f"token file has no usable content: {p}")
     if index < 0 or index >= len(lines):
-        raise RuntimeError(f"--token-index 越界：{index}，文件内可用 token 数={len(lines)}")
+        raise RuntimeError(f"--token-index out of range: {index}, number of usable tokens in the file={len(lines)}")
     return lines[index]
 
 
 def _decode_jwt_payload_unverified(token: str) -> dict:
-    """仅用于本地解析 account_id/plan/email；不校验签名。"""
+    """Only used to parse account_id/plan/email locally; the signature is not verified."""
     try:
         import base64
 
@@ -131,15 +131,15 @@ def _build_url(endpoint: str, token: str, account_id: Optional[str], timezone_of
     if endpoint == "subscriptions":
         account_id = account_id or _extract_account_id(token)
         if not account_id:
-            raise RuntimeError("endpoint=subscriptions 需要 --account-id，或 token payload 内包含 chatgpt_account_id")
+            raise RuntimeError("endpoint=subscriptions requires --account-id, or the token payload to contain chatgpt_account_id")
         path = "/backend-api/subscriptions"
         url = f"https://chatgpt.com{path}?account_id={quote(account_id)}"
         return url, path, path
-    raise RuntimeError(f"未知 endpoint: {endpoint}")
+    raise RuntimeError(f"unknown endpoint: {endpoint}")
 
 
 def _build_headers(env: BrowserSession, token: str, target_path: str, target_route: str) -> Dict[str, str]:
-    headers = env._get_common_headers()  # 复用项目统一指纹画像头
+    headers = env._get_common_headers()  # Reuse the unified fingerprint profile headers of the project
     headers.update(
         {
             "accept": "*/*",
@@ -166,34 +166,34 @@ def _try_json(text: str) -> Any:
 
 def _print_profile(env: BrowserSession) -> None:
     p = env.browser_profile or {}
-    logger.info("[指纹] proxy=%s", env.proxy if env.proxy else "<direct>")
-    logger.info("[指纹] device_id=%s", env.device_id)
-    logger.info("[指纹] ua=%s", p.get("user_agent"))
-    logger.info("[指纹] accept_language=%s", p.get("accept_language"))
-    logger.info("[指纹] navigator_language=%s", p.get("navigator_language"))
-    logger.info("[指纹] timezone=%s offset=%s", p.get("timezone_iana"), p.get("timezone_offset_minutes"))
-    logger.info("[指纹] screen=%sx%s dpr=%s", p.get("screen_width"), p.get("screen_height"), p.get("device_pixel_ratio"))
+    logger.info("[Fingerprint] proxy=%s", env.proxy if env.proxy else "<direct>")
+    logger.info("[Fingerprint] device_id=%s", env.device_id)
+    logger.info("[Fingerprint] ua=%s", p.get("user_agent"))
+    logger.info("[Fingerprint] accept_language=%s", p.get("accept_language"))
+    logger.info("[Fingerprint] navigator_language=%s", p.get("navigator_language"))
+    logger.info("[Fingerprint] timezone=%s offset=%s", p.get("timezone_iana"), p.get("timezone_offset_minutes"))
+    logger.info("[Fingerprint] screen=%sx%s dpr=%s", p.get("screen_width"), p.get("screen_height"), p.get("device_pixel_ratio"))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="ChatGPT backend-api curl_cffi 指纹环境请求测试",
+        description="ChatGPT backend-api curl_cffi fingerprint environment request test",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--token", default=None, help="Bearer JWT；可带或不带 Bearer 前缀")
-    parser.add_argument("--token-file", default=None, help="从文件读取 token，默认第一条非空行")
-    parser.add_argument("--token-index", type=int, default=0, help="读取 token 文件时使用第几个 token，默认 0")
+    parser.add_argument("--token", default=None, help="Bearer JWT; with or without the Bearer prefix")
+    parser.add_argument("--token-file", default=None, help="Read the token from a file, default to the first non-empty line")
+    parser.add_argument("--token-index", type=int, default=0, help="Which token to use when reading the token file, default 0")
     parser.add_argument(
         "--endpoint",
         choices=["accounts-check", "subscriptions"],
         default="accounts-check",
-        help="要测试的接口，默认 accounts-check",
+        help="Endpoint to test, default accounts-check",
     )
-    parser.add_argument("--account-id", default=None, help="subscriptions 接口 account_id；不传则尝试从 JWT payload 提取")
-    parser.add_argument("--timezone-offset-min", default="-", help="accounts-check 参数，默认 -")
-    parser.add_argument("--proxy", default=None, help="代理；不传随机抽项目代理池；传空字符串禁用代理")
-    parser.add_argument("--verbose", action="store_true", help="显示 DEBUG 日志")
+    parser.add_argument("--account-id", default=None, help="subscriptions Endpoint account_id; if not passed, try to extract it from the JWT payload")
+    parser.add_argument("--timezone-offset-min", default="-", help="accounts-check parameter, default -")
+    parser.add_argument("--proxy", default=None, help="Proxy; if not passed, a random one is picked from the project proxy pool; pass an empty string to disable the proxy")
+    parser.add_argument("--verbose", action="store_true", help="Show DEBUG logs")
     args = parser.parse_args()
 
     _setup_logging(args.verbose)
@@ -202,11 +202,11 @@ def main() -> int:
     if not token and args.token_file:
         token = _read_token_file(args.token_file, args.token_index)
     if not token:
-        logger.error("缺少 token：请传 --token 或 --token-file")
+        logger.error("Missing token: pass --token or --token-file")
         return 2
 
     logger.info("=" * 70)
-    logger.info("[测试] 创建 BrowserSession 指纹环境")
+    logger.info("[test] Creating the BrowserSession fingerprint environment")
     logger.info("=" * 70)
     env = BrowserSession(proxy=args.proxy)
     _print_profile(env)
@@ -230,32 +230,32 @@ def main() -> int:
             args.timezone_offset_min,
         )
     except Exception as exc:
-        logger.error("构建 URL 失败：%s", exc)
+        logger.error("Failed to build URL:%s", exc)
         return 2
 
     headers = _build_headers(env, token, target_path, target_route)
 
     logger.info("-" * 70)
-    logger.info("[请求] GET %s", url)
+    logger.info("[Requesting] GET %s", url)
     if args.verbose:
         safe_headers = dict(headers)
         safe_headers["authorization"] = f"Bearer {_mask(token)}"
-        logger.debug("[请求头] %s", json.dumps(safe_headers, ensure_ascii=False, indent=2))
+        logger.debug("[request headers] %s", json.dumps(safe_headers, ensure_ascii=False, indent=2))
 
     started = time.time()
     try:
         resp = env.session.get(url, headers=headers, allow_redirects=False)
     except Exception as exc:
-        logger.exception("[请求] 异常：%s: %s", type(exc).__name__, exc)
+        logger.exception("[request] Exception:%s: %s", type(exc).__name__, exc)
         return 1
     elapsed = time.time() - started
 
     logger.info("-" * 70)
-    logger.info("[响应] HTTP %s %s，耗时 %.2fs", resp.status_code, getattr(resp, "reason", ""), elapsed)
-    logger.info("[响应] content-type=%s", resp.headers.get("content-type"))
+    logger.info("[response] HTTP %s %s, elapsed %.2fs", resp.status_code, getattr(resp, "reason", ""), elapsed)
+    logger.info("[response] content-type=%s", resp.headers.get("content-type"))
 
     if args.verbose:
-        logger.debug("[响应头]")
+        logger.debug("[response headers]")
         for k, v in resp.headers.items():
             if k.lower() == "set-cookie":
                 v = "<redacted>"
@@ -269,12 +269,12 @@ def main() -> int:
     else:
         print(text[:4000])
         if len(text) > 4000:
-            print(f"\n... 已截断，原始长度 {len(text)} 字符")
+            print(f"\n... truncated, original length {len(text)} characters")
 
     if 200 <= resp.status_code < 300:
-        logger.info("✅ [PASS] 请求成功")
+        logger.info("✅ [PASS] request succeeded")
         return 0
-    logger.error("❌ [FAIL] 请求失败 status=%s", resp.status_code)
+    logger.error("❌ [FAIL] Request failed status=%s", resp.status_code)
     return 1
 
 

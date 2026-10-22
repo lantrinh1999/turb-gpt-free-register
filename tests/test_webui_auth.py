@@ -12,7 +12,7 @@ class WebUiAuthTests(unittest.TestCase):
     def test_api_requires_auth_code(self):
         r = self.client.get("/api/summary")
         self.assertEqual(r.status_code, 401)
-        self.assertIn("未授权", r.get_json()["error"])
+        self.assertIn("Unauthorized", r.get_json()["error"])
 
     def test_api_accepts_auth_header(self):
         r = self.client.get("/api/summary", headers={"X-Auth-Code": "test-auth"})

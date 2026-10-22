@@ -12,7 +12,7 @@ class CFTempMailClientTests(unittest.TestCase):
 
     def test_pick_account_requires_api_base(self):
         with patch.object(client._email_cfg, "CLOUDFLARE_API_BASE", "", create=True):
-            with self.assertRaisesRegex(client.CFTempMailError, "请填写 CLOUDFLARE_API_BASE"):
+            with self.assertRaisesRegex(client.CFTempMailError, "fill in CLOUDFLARE_API_BASE"):
                 client.pick_account()
 
     @patch("core.cf_temp_mail_client.requests.request")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""从 Reqorder/HAR JSON 抽取纯协议链路、指纹 p 数组、JS 入口与接口清单。"""
+"""Extract the pure-protocol chain, fingerprint p arrays, JS entrypoints and API list from Reqorder/HAR JSON."""
 from __future__ import annotations
 
 import argparse
@@ -143,14 +143,14 @@ def main():
                     if len(arr) > 5 and isinstance(arr[5], str) and arr[5] not in js_seen:
                         js_seen.add(arr[5]); summary["js_entrypoints"].append(arr[5])
 
-    # Counter 转普通 dict
+    # Counter converted to plain dict
     summary["domains"] = dict(summary["domains"].most_common())
     summary["classes"] = dict(summary["classes"].most_common())
 
     out = pathlib.Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"已输出 {out}，请求 {len(summary['requests'])} 条，指纹 {len(summary['fingerprints'])} 组，JS 入口 {len(summary['js_entrypoints'])} 个")
+    print(f"Wrote {out}, requests {len(summary['requests'])} total, fingerprints {len(summary['fingerprints'])} groups, JS entrypoints {len(summary['js_entrypoints'])} items")
 
 
 if __name__ == "__main__":

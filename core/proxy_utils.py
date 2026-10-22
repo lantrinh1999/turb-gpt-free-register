@@ -22,22 +22,22 @@ class ProxySpec:
 def parse_proxy_url(value: str, *, allow_bare: bool = False) -> ProxySpec:
     text = str(value or "").strip()
     if not text:
-        raise ValueError("代理地址为空")
+        raise ValueError("Proxy address is empty")
     text = text.replace("\\@", "@")
     if allow_bare and "://" not in text:
         text = f"socks5://{text}"
     parsed = urlsplit(text)
     scheme = (parsed.scheme or "").lower()
     if scheme not in SUPPORTED_PROXY_SCHEMES:
-        raise ValueError(f"不支持的代理协议: {scheme or '-'}")
+        raise ValueError(f"Unsupported proxy protocol: {scheme or '-'}")
     if not parsed.hostname:
-        raise ValueError("代理格式缺少 host")
+        raise ValueError("Proxy format is missing host")
     try:
         port = parsed.port
     except ValueError as exc:
-        raise ValueError("代理端口无效") from exc
+        raise ValueError("Invalid proxy port") from exc
     if not port or not 1 <= port <= 65535:
-        raise ValueError("代理格式缺少有效 port")
+        raise ValueError("Proxy format is missing a valid port")
     return ProxySpec(
         raw=text,
         scheme=scheme,
@@ -65,7 +65,7 @@ def validate_proxy_lines(lines) -> None:
         try:
             parse_proxy_url(line)
         except ValueError as exc:
-            raise ValueError(f"代理池第 {index} 行格式错误: {exc}") from exc
+            raise ValueError(f"Proxy pool line {index} has an invalid format: {exc}") from exc
 
 
 def diagnose_proxy_endpoint(value: str, *, timeout: float = 2.0) -> str:
@@ -79,7 +79,7 @@ def diagnose_proxy_endpoint(value: str, *, timeout: float = 2.0) -> str:
         return ""
     if response.startswith(b"HTTP/"):
         first_line = response.splitlines()[0].decode("latin1", errors="replace")
-        return f"代理端口返回 {first_line}，当前端口可能不是 SOCKS5 或授权/白名单不匹配"
+        return f"Proxy port returned {first_line}; the current port may not be SOCKS5, or authorization/whitelist does not match"
     if response[:1] == b"\x05":
-        return "SOCKS5 握手响应正常，可能是账号密码或目标地址被拒绝"
-    return "代理端口返回了非 SOCKS5 响应，请确认协议和端口"
+        return "SOCKS5 handshake response is normal; the username/password or target address may have been rejected"
+    return "Proxy port returned a non-SOCKS5 response, confirm the protocol and port"

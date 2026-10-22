@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Skyvern 云端浏览器注册入口。"""
+"""Skyvern cloud browser registration entry point."""
 from __future__ import annotations
 
 from pathlib import Path

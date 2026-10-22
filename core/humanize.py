@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""随机化操作节奏，让协议流程更接近人工浏览器操作。"""
+"""Randomize operation pacing so the protocol flow looks closer to a human browser session."""
 import logging
 import random
 import time
@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 def delay(kind: str = "api", *, minimum: float | None = None, maximum: float | None = None) -> float:
     """
-    按配置随机 sleep，返回实际 sleep 秒数。
+    Sleep for a random duration according to the config, and return the actual number of seconds slept.
 
     Args:
-        kind: HUMANIZE_DELAYS 的 key。
-        minimum/maximum: 临时覆盖区间。
+        kind: HUMANIZE_DELAYS key.
+        minimum/maximum: Temporarily override the range.
     """
     try:
         from config import humanize as _cfg

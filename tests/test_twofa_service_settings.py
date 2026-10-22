@@ -17,7 +17,7 @@ class TwofaServiceSettingsTests(unittest.TestCase):
         self.assertGreaterEqual(twofa_service._EXECUTOR._max_workers, settings["workers"])
 
     def test_actual_workers_obey_limit_and_runtime_increase(self):
-        # 在网络入口前截停真实 worker，验证逻辑门控而不是线程池容量。
+        # Intercept the real worker before the network entry point, to verify the logic gate rather than the thread pool capacity.
         entered = []
         changed = threading.Condition()
         release = threading.Event()
@@ -45,7 +45,7 @@ class TwofaServiceSettingsTests(unittest.TestCase):
                 with changed:
                     self.assertTrue(changed.wait_for(lambda: len(entered) == 2, timeout=3))
                     self.assertFalse(changed.wait_for(lambda: len(entered) > 2, timeout=0.1))
-                # 降低并发不强杀已运行 worker；剩余任务等它们退出后再领取。
+                # Lowering the concurrency does not forcibly kill running workers; the remaining tasks are claimed after they exit.
                 with patch.object(twofa_service._twofa_cfg, "TWOFA_WORKERS", 1):
                     twofa_service.apply_settings()
                 with changed:

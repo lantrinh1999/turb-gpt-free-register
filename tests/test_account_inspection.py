@@ -47,7 +47,7 @@ class AccountInspectionTests(unittest.TestCase):
         self.patches = patch.multiple(db, **paths)
         self.patches.start()
         self.addCleanup(self.patches.stop)
-        # 测试中 mock 的 executor 不执行 finally，显式跟踪并释放真实进程锁。
+        # The executor mocked in the test does not run finally, so explicitly track and release the real process lock.
         acquire = service.acquire_inspection_lease
         def tracked_acquire():
             lease = acquire()
@@ -91,7 +91,7 @@ class AccountInspectionTests(unittest.TestCase):
             for account_id in (1, 2, 5):
                 conn.execute("UPDATE accounts SET payload=json_set(payload, '$.live_check_status', 'deactivated') WHERE id=?", (account_id,))
                 conn.execute("INSERT INTO codex_agent_accounts(account_id,payload) VALUES (?, '{}')", (account_id,))
-            # 恢复正常的账号不能因曾经已废而被删除。
+            # An account that has recovered to normal must not be deleted just because it was once dead.
             conn.execute("UPDATE accounts SET payload=json_set(payload, '$.live_check_status', 'ok') WHERE id=1")
             unchanged = conn.execute('SELECT payload FROM accounts WHERE id=1').fetchone()[0]
         with patch.object(db, '_load_accounts', side_effect=AssertionError('must not load all accounts')), \
@@ -123,7 +123,7 @@ class AccountInspectionTests(unittest.TestCase):
     def test_delete_deactivated_waits_for_writer_and_rechecks_committed_status(self):
         db._ensure_sqlite()
         db.update_account_liveness(2, {'ok': False, 'status': 'deactivated', 'error': 'old failure'})
-        # 外部连接代表另一个进程先恢复正常但尚未提交的账号状态。
+        # The external connection represents the account state that another process has already recovered to normal but not yet committed.
         original_conn = db._sqlite_conn
         deleting = threading.Event()
         def traced_conn():
@@ -181,7 +181,7 @@ class AccountInspectionTests(unittest.TestCase):
         run, _ = db.create_account_inspection([2, 3, 4], workers=1)
         def enqueue(**kwargs):
             if kwargs['account_id'] == 2:
-                return {'accepted': False, 'error': '该账号正在查活'}
+                return {'accepted': False, 'error': 'This account is being liveness-checked'}
             if kwargs['account_id'] == 3:
                 raise RuntimeError('mailbox unavailable')
             future = Future()
@@ -354,7 +354,7 @@ class AccountInspectionTests(unittest.TestCase):
                 {'id': 2, 'email': 'k@example.test'},
                 {'id': 3, 'email': 'Élodie@example.test'},
             ])
-        # Kelvin 符号的小写为 ASCII k；必须仍选择原 Python 匹配语义下 ID 最小者。
+        # Kelvin sign lowercases to ASCII k; it must still select the one with the smallest ID under the original Python matching semantics.
         self.assertEqual(db.get_account_by_email('K@EXAMPLE.TEST')['id'], 1)
         self.assertTrue(db.claim_account_plan_check(email='K@EXAMPLE.TEST', run_id='unicode-ascii'))
         self.assertEqual(db.get_account(1)['plan_check_run_id'], 'unicode-ascii')
@@ -531,7 +531,7 @@ class AccountInspectionTests(unittest.TestCase):
         self.assertTrue(db.claim_account_plan_check(email='EXPIRED@EXAMPLE.TEST', run_id='email'))
         self.assertEqual(db.get_account(2)['plan_check_run_id'], 'email')
         self.assertFalse(db.claim_account_plan_check(email='missing@example.invalid', run_id='none'))
-        # 历史 API 同时给 ID 和邮箱时按 ID 升序匹配首行，保留兼容行为。
+        # When the legacy API gives both ID and email, match the first row by ascending ID, keeping the compatible behavior.
         self.assertTrue(db.update_account_plan_check(3, email='VALID@EXAMPLE.TEST', result={'ok': True, 'current_plan_type': 'plus'}))
         self.assertEqual(db.get_account(1)['current_plan_type'], 'plus')
         self.assertNotIn('current_plan_type', db.get_account(3))
@@ -551,7 +551,7 @@ class AccountInspectionTests(unittest.TestCase):
                 db.update_account_liveness(kw['account_id'], {'ok': True, 'access_token': 'fresh-token'})
             return completed(ok, kw['account_id'] == 2)
         with patch.object(service.live_check_service, 'enqueue_account_live_check', side_effect=live) as live_mock, \
-             patch.object(plan_service, 'enqueue_account_plan_check', side_effect=AssertionError('巡检不应重复查套餐')) as plan_mock:
+             patch.object(plan_service, 'enqueue_account_plan_check', side_effect=AssertionError('Inspection must not check the plan again')) as plan_mock:
             service._run(run)
         self.assertEqual(live_mock.call_count, 3)
         plan_mock.assert_not_called()
@@ -578,7 +578,7 @@ class AccountInspectionTests(unittest.TestCase):
     def test_real_queue_workers_persist_refreshed_at_and_plan(self):
         run, _ = db.create_account_inspection([1, 2, 3, 4, 2, 3], workers=4)
         self.assertEqual(run['total_count'], 4)
-        run['account_ids'].extend([2, 3])  # 执行层也要防御重复 ID。
+        run['account_ids'].extend([2, 3])  # The execution layer must also guard against duplicate IDs.
         barrier = threading.Barrier(4, timeout=10)
         seen = []
         seen_lock = threading.Lock()
@@ -586,7 +586,7 @@ class AccountInspectionTests(unittest.TestCase):
         def live(email, **kwargs):
             with seen_lock:
                 seen.append(email)
-            # 必须真正同时执行四个查活，才能通过；不能被全局查活池限制为 3。
+            # All four liveness checks must really run at the same time to pass; they must not be limited to 3 by the global liveness pool.
             barrier.wait()
             return kwargs['on_authenticated']({'ok': True, 'access_token': fresh_token}, sessions[email])
         sessions = {db.get_account(i)['email']: object() for i in (1, 2, 3, 4)}
@@ -615,7 +615,7 @@ class AccountInspectionTests(unittest.TestCase):
         self.assertEqual(plan.call_args.args[0], fresh_token)
 
     def test_atomic_start_and_recovery_keep_history(self):
-        # 先初始化，之后让多个线程竞争同一条唯一索引。
+        # Initialize first, then let multiple threads compete for the same unique index.
         db.list_account_inspections()
         with ThreadPoolExecutor(max_workers=6) as executor:
             results = list(executor.map(lambda _: db.create_account_inspection([1]), range(6)))
@@ -713,7 +713,7 @@ class AccountInspectionTests(unittest.TestCase):
             self.assertEqual(response.status_code, 202)
             self.assertEqual(response.get_json()['task']['archived'], 'only')
             self.assertEqual(response.get_json()['task']['total_count'], 1)
-            # 不同归档范围也不能绕过全局未完成任务防重。
+            # Different archive scopes must also not bypass the global dedup of unfinished tasks.
             duplicate = client.post('/api/accounts/inspections', json={'archived': '0'}, headers=headers)
             self.assertEqual(duplicate.status_code, 409)
             self.assertEqual(duplicate.get_json()['task']['archived'], 'only')
@@ -730,7 +730,7 @@ class AccountInspectionTests(unittest.TestCase):
             self.assertEqual(task['total_count'], 5)
             self.assertEqual(task['archived'], 'all')
             self.assertEqual(set(submit.call_args.args[1]['account_ids']), {1, 2, 3, 4, 5})
-            submit.call_args.args[2].close()  # 模拟旧进程退出，OS 释放锁。
+            submit.call_args.args[2].close()  # Simulate the old process exiting, with the OS releasing the lock.
             db.recover_interrupted_account_inspections()
             task, _ = service.start_inspection()
             self.assertEqual(task['total_count'], 4)
@@ -741,7 +741,7 @@ class AccountInspectionTests(unittest.TestCase):
     def test_snapshot_reads_ids_once_without_offset_pagination(self):
         db._save_accounts([{'id': i, 'email': f'{i}@example.test', 'archived': i % 2 == 0}
                            for i in range(1, 1202)])
-        with patch.object(db, 'list_accounts', side_effect=AssertionError('不得使用 OFFSET 分页快照')), \
+        with patch.object(db, 'list_accounts', side_effect=AssertionError('Must not use an OFFSET pagination snapshot')), \
              patch.object(service._EXECUTOR, 'submit') as submit:
             run, created = service.start_inspection(archived='only')
         self.assertTrue(created)
@@ -921,7 +921,7 @@ class AccountInspectionTests(unittest.TestCase):
                 task, created = service.start_inspection(workers=1)
                 self.assertTrue(created)
                 self.assertTrue(entered.wait(5))
-                # app 的其他恢复例程也不能破坏巡检阶段的账号状态。
+                # app level: other recovery routines must also not break the account state during the inspection phase.
                 db.claim_account_live_check(4)
                 db.mark_account_live_check_running(4)
                 create_app(auth_code='inspection-test')
@@ -948,7 +948,7 @@ class AccountInspectionTests(unittest.TestCase):
         create_app(auth_code='inspection-test')
         self.assertEqual(db.list_account_inspections()['active']['id'], task['id'])
         self.assertEqual(db.list_account_inspections()['active']['status'], 'queued')
-        # 模拟进程退出释放锁，随后新实例可以正常恢复遗留任务。
+        # Simulate the process exiting and releasing the lock; a new instance can then recover the leftover task normally.
         lease.close()
         create_app(auth_code='inspection-test')
         self.assertIsNone(db.list_account_inspections()['active'])
@@ -982,7 +982,7 @@ print('acquired' if lease else 'busy', flush=True)
     def test_successful_live_check_is_not_failed_by_completion_log_error(self):
         run, _ = db.create_account_inspection([2], workers=1)
         def append_log(email, line, **kwargs):
-            if '完成' in line:
+            if 'done' in line:
                 raise OSError('log disk is full')
         module = service.live_check_service
         with patch.object(module, 'check_account_liveness', return_value={'ok': True, 'access_token': 'fresh-token', 'plan_result': {'ok': True}}), \
@@ -1191,7 +1191,7 @@ print('acquired' if lease else 'busy', flush=True)
         def query(token, **kwargs):
             self.assertIs(kwargs['session'], owner)
             self.assertEqual(token, 'fresh-token')
-            # 登录 token 在发起套餐请求前已写回；后续变化不会被旧查活结果覆盖。
+            # The login token is written back before the plan request is issued; later changes are not overwritten by the old liveness result.
             self.assertEqual(db.get_account(2)['access_token'], 'fresh-token')
             self.assertTrue(module.is_checking('expired@example.test'))
             db.update_account_liveness(2, {'ok': True, 'access_token': 'even-newer-token'})
@@ -1255,7 +1255,7 @@ print('acquired' if lease else 'busy', flush=True)
         self.assertTrue(db.claim_account_plan_check(2, run_id='old-run'))
         self.assertTrue(db.mark_account_plan_check_running(2, run_id='old-run'))
         old = db.get_account(2)
-        # 模拟另一执行者恢复后成功领取了同账号的新查询。
+        # Simulate another executor successfully claiming a new query for the same account after recovery.
         db.update_account_plan_check(acc_id=2, result={'ok': False, 'error': 'interrupted'})
         self.assertTrue(db.claim_account_plan_check(2, run_id='new-run'))
         queued = db.get_account(2)
@@ -1276,7 +1276,7 @@ print('acquired' if lease else 'busy', flush=True)
         def auth(email, **kwargs):
             attempts.append(email)
             if len(attempts) == 1:
-                # 与真实底层查活相同：回调异常转成失败结果，由上层选择另一个出口。
+                # Same as the real underlying liveness check: a callback exception is turned into a failed result, and the upper layer chooses another egress.
                 try:
                     return kwargs['on_authenticated']({'ok': True, 'access_token': 'fresh-token'}, object())
                 except OSError as exc:
@@ -1357,7 +1357,7 @@ print('acquired' if lease else 'busy', flush=True)
             queued = module.enqueue_account_live_check(account_id=2, email='expired@example.test', return_future=True)
             self.assertTrue(queued['accepted'])
             db.recover_interrupted_live_checks()
-            # 模拟别的执行者领取新任务，本进程仍持有旧 Future。
+            # Simulate another executor claiming a new task while this process still holds the old Future.
             self.assertTrue(db.claim_account_live_check(2))
             before = db.get_account(2)
             self.assertTrue(future.cancel())

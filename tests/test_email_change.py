@@ -111,7 +111,7 @@ class EmailChangeTests(unittest.TestCase):
                  (direct_session, "https://auth.example/direct"),
              ]) as preflight, \
              patch("core.openai_auth.follow_authorize", side_effect=[
-                 RuntimeError("当前 BrowserSession 已熔断冷却：HTTP 403 from callback/openai"),
+                 RuntimeError("The current BrowserSession is in circuit breaker cooldown:HTTP 403 from callback/openai"),
                  "https://auth.example/login",
              ]), \
              patch("core.account_liveness._login_via_password_or_otp", return_value={
@@ -134,7 +134,7 @@ class EmailChangeTests(unittest.TestCase):
         self.assertEqual(preflight.call_args_list[1].kwargs["fingerprint_state"], {})
         proxy_session.session.close.assert_called_once_with()
         self.assertIs(login.call_args.args[0], direct_session)
-        self.assertTrue(any("独立直连兜底" in call.args[1] for call in append_log.call_args_list))
+        self.assertTrue(any("independent direct fallback" in call.args[1] for call in append_log.call_args_list))
 
     def test_post_change_live_check_reuses_current_session(self):
         session = MagicMock()
@@ -198,7 +198,7 @@ class EmailChangeTests(unittest.TestCase):
     def test_begin_reauths_only_after_server_requires_it(self):
         session = MagicMock()
         error = RuntimeError(
-            "/backend-api/accounts/change_email/begin 返回 401: "
+            "/backend-api/accounts/change_email/begin Return 401: "
             "{'code': 'reauth_required', 'message': 'Recent login required'}"
         )
         with patch.object(
@@ -241,7 +241,7 @@ class EmailChangeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td, patch.multiple(db, **self.storage(Path(td))):
             account_id = db.insert_account(email="old@example.com", access_token="token", email_source="outlook")
             log_file = Path(td) / "change.log"
-            log_file.write_text("12:00:00 [INFO] 换绑任务已入队\n", encoding="utf-8")
+            log_file.write_text("12:00:00 [INFO] Email change task queued\n", encoding="utf-8")
             client = create_app(auth_code="test-auth").test_client()
             with patch("core.email_change_service.log_path", return_value=log_file), \
                  patch("core.email_change_service.is_running", return_value=False):
@@ -250,7 +250,7 @@ class EmailChangeTests(unittest.TestCase):
                     headers={"X-Auth-Code": "test-auth"},
                 )
             self.assertEqual(response.status_code, 200)
-            self.assertIn("换绑任务已入队", response.get_json()["log"])
+            self.assertIn("Email change task queued", response.get_json()["log"])
 
 
 if __name__ == "__main__":

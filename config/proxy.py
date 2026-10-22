@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-代理池配置
+Proxy pool configuration
 
-每次注册随机抽取一个代理，保证不同 sid 之间彼此独立，避免风控关联。
+Each registration picks one random proxy, so different sids stay independent of each other and risk control cannot link them.
 
-协议说明：
-    - http:// / https://   HTTP(S) 代理
-    - socks5://            SOCKS5（DNS 本地解析，可能泄漏）
-    - socks5h://           SOCKS5（DNS 在代理端解析，推荐，避免 DNS-IP 错配）
+Protocol notes:
+    - http:// / https://   HTTP(S) proxy
+    - socks5://            SOCKS5(DNS resolved locally, may leak)
+    - socks5h://           SOCKS5(DNS resolved on the proxy side, recommended, avoids DNS/IP mismatch)
 """
 import random
 from urllib.parse import quote, urlparse
@@ -15,42 +15,42 @@ from urllib.parse import quote, urlparse
 from config.env_loader import apply_env_overrides
 
 
-# 本地代理入口；实际出口地区以代理/分流规则为准。
-# 推荐使用 socks5h://（DNS 在代理端解析），避免本地 DNS 与出口 IP 地区错配。
+# Local proxy entry point; the actual exit region is determined by the proxy / routing rules.
+# socks5h:// is recommended (DNS resolved on the proxy side) to avoid a mismatch between local DNS and the exit IP region.
 PROXY_POOL = [
     "socks5://127.0.0.1:7897",
 ]
 
-# 代理池使用的本地上游代理。填写后形成：本地上游 -> 代理池目标代理 -> ChatGPT；
-# 留空则直接使用代理池中的目标代理，不启动链式中继。
+# Local upstream proxy used by the proxy pool. When set, the chain becomes: local upstream -> proxy-pool target proxy -> ChatGPT;
+# Leave empty to use the proxy-pool target proxy directly, without starting the chained relay.
 PROXY_POOL_UPSTREAM_PROXY = ""
 
-# 套餐/Plus 试用资格查询与 Codex Agent Token 生成共用这组独立网络策略，
-# 避免批量请求被注册代理池中的临时本地代理拖垮，也避免无条件直连造成出口策略失控。
-#   auto   = 优先使用 PLAN_CHECK_PROXY 或代理池；没有代理时才按 direct 运行
-#   proxy  = 强制使用 PLAN_CHECK_PROXY 或代理池，失败直接报错
-#   direct = 始终直连
+# Plan / Plus trial eligibility checks and Codex Agent Token generation share this independent network policy,
+# so batch requests are not dragged down by the temporary local proxy of the registration proxy pool, and an unconditional direct connection cannot make the exit policy spin out of control.
+#   auto   = Prefer PLAN_CHECK_PROXY or the proxy pool; run direct only when no proxy is available
+#   proxy  = Force PLAN_CHECK_PROXY or the proxy pool; fail with an error if they fail
+#   direct = always connect directly
 PLAN_CHECK_PROXY_MODE = "auto"
 
-# 套餐查询 / Codex Agent Token 生成专用代理。留空时 auto/proxy 模式从 PROXY_POOL 选择。
-# 代理可能包含账号密码，因此 WebUI 会把它保存到 .env。
+# Dedicated proxy for plan checks / Codex Agent Token generation. When empty, auto/proxy mode picks one from PROXY_POOL.
+# The proxy may contain a username and password, so the WebUI saves it to .env.
 PLAN_CHECK_PROXY = []
 
-# 套餐查询 / Codex Agent Token 生成的上游代理。填写后形成：本地代理 -> 动态代理 -> ChatGPT。
-# 例如 http://127.0.0.1:7897；留空则直接连接 PLAN_CHECK_PROXY。
+# Upstream proxy for plan checks / Codex Agent Token generation. When set, the chain becomes: local proxy -> dynamic proxy -> ChatGPT.
+# For example http://127.0.0.1:7897; leave empty to connect to PLAN_CHECK_PROXY directly.
 PLAN_CHECK_UPSTREAM_PROXY = ""
 
-# 查套餐 / 生成 Codex Agent Token 使用独立的短超时和有限重试，避免后台任务长时间卡住。
+# Plan checks / Codex Agent Token generation use their own short timeout and limited retries so background jobs do not hang for long.
 PLAN_CHECK_TIMEOUT = 15.0
 PLAN_CHECK_MAX_ATTEMPTS = 3
 PLAN_CHECK_RETRY_DELAY = 2.0
 
-# 新注册账号的权益可能存在短暂同步延迟。首次查询失败，或返回 free 且暂未发现
-# Plus 试用资格时，等待该秒数后再复查一次；设为 0 可关闭复查。
+# Entitlements of a newly registered account may sync with a short delay. If the first check fails, or returns free with no trial
+# Plus eligibility found yet, wait this many seconds and check once more; set to 0 to disable the recheck.
 PLAN_CHECK_REGISTRATION_RECHECK_DELAY = 2.0
 
-# 自动、手动和批量套餐查询共用同一个后台队列；Codex Agent Token 使用独立队列，
-# 但复用这里的网络模式、请求启动间隔与随机抖动，避免批量后台请求过于集中。
+# Automatic, manual and batch plan checks share one background queue; Codex Agent Token uses a separate queue,
+# but reuses the network mode, request start interval and random jitter configured here, so batch background requests are not too concentrated.
 PLAN_CHECK_WORKERS = 3
 PLAN_CHECK_QUEUE_LIMIT = 500
 PLAN_CHECK_MIN_INTERVAL = 1.0
@@ -97,11 +97,11 @@ def normalize_proxy_list(values, default_scheme: str = "http") -> list[str]:
 
 
 def pick_proxy() -> str:
-    """从代理池中随机抽取一个代理 URL；池为空时返回空串（即不使用代理）。"""
+    """Pick a random proxy URL from the proxy pool; returns an empty string if the pool is empty (meaning no proxy)."""
     return random.choice(PROXY_POOL) if PROXY_POOL else ""
 
 
-# 兼容入口：默认每次进程启动随机选一个，作为本次注册全程的固定代理
+# Compatibility entry point: by default one proxy is picked at random per process start and used as the fixed proxy for the whole registration run
 PROXY = pick_proxy()
 
 # ---- .env overrides for WebUI editable fields ----

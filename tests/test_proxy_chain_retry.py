@@ -19,7 +19,7 @@ class ProxyChainRetryTests(unittest.TestCase):
                 relay._target_socks_connect(remote, "chatgpt.com", 443)
         self.assertEqual(caught.exception.code, 1)
         self.assertTrue(caught.exception.retryable)
-        self.assertIn("代理服务器一般性失败", str(caught.exception))
+        self.assertIn("Proxy server general failure", str(caught.exception))
 
     def test_transient_handshake_retries_with_new_socket_and_recovers(self):
         relay = self.make_relay()
@@ -40,11 +40,11 @@ class ProxyChainRetryTests(unittest.TestCase):
         self.assertEqual(item["connect_retry_count"], 1)
         self.assertEqual(item["recovered_connection_count"], 1)
         self.assertEqual(item["failed_connection_count"], 0)
-        self.assertTrue(any("代理重连已恢复 destination=chatgpt.com:443" in line for line in logs.output))
+        self.assertTrue(any("Proxy reconnect recovered destination=chatgpt.com:443" in line for line in logs.output))
         self.assertEqual(relay.last_error, "")
 
     def test_permanent_socks_errors_are_not_retried(self):
-        for error in (SocksConnectError(2), SocksConnectError(5), SocksConnectError(7), SocksConnectError(8), PermissionError("认证失败")):
+        for error in (SocksConnectError(2), SocksConnectError(5), SocksConnectError(7), SocksConnectError(8), PermissionError("authentication failed")):
             with self.subTest(error=error):
                 relay = self.make_relay()
                 remote = Mock()
@@ -160,5 +160,5 @@ class ProxyChainRetryTests(unittest.TestCase):
             client.close_proxy_pool_relay()
         relay.close.assert_called_once()
         self.assertIsNone(client._proxy_pool_relay)
-        self.assertTrue(any("握手重试=2，重试恢复=1，失败连接=1" in line for line in logs.output))
-        self.assertFalse(any("WARNING" in line or "最后一次错误" in line for line in logs.output))
+        self.assertTrue(any("handshake retries=2, recovered retries=1, failed connections=1" in line for line in logs.output))
+        self.assertFalse(any("WARNING" in line or "last error" in line for line in logs.output))

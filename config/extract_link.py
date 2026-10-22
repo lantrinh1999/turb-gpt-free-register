@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Plus 试用提链服务配置。"""
+"""Plus trial link extraction service configuration."""
 from config.env_loader import apply_env_overrides
 
-# 提链服务地址
+# Link extraction service address
 EXTRACT_LINK_API_BASE: str = ""
 
-# 提链 CDK；创建任务和监听事件都需要。
+# Link extraction CDK; required both for creating tasks and for listening to events.
 EXTRACT_LINK_CDK: str = ""
 
-# 提链类型：pix / upi / kakao_pay / ideal
+# link extraction type:pix / upi / kakao_pay / ideal
 EXTRACT_LINK_TYPE: str = "pix"
 
-# 后台提链并发与超时
+# Background link extraction concurrency and timeout
 EXTRACT_LINK_WORKERS: int = 3
 EXTRACT_LINK_QUEUE_LIMIT: int = 500
 EXTRACT_LINK_REQUEST_TIMEOUT: int = 30

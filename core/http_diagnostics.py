@@ -1,4 +1,4 @@
-"""仅记录响应元数据，不记录正文、Cookie、URL 查询参数或认证信息。"""
+"""Only records response metadata, not the body, Cookies, URL query parameters or authentication info."""
 import re
 
 

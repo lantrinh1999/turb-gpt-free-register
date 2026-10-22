@@ -1,115 +1,115 @@
 # -*- coding: utf-8 -*-
 """
-邮箱服务配置。
+Email service configuration.
 
-Outlook 注册邮箱与 OTP 的默认池行为：
-    1. 首次启动会把旧的 `用于注册的邮箱.txt` 迁移到 SQLite
-    2. 运行期间通过 WebUI「邮箱库」导入和管理邮箱
-    3. 注册时直接从 SQLite 邮箱库领取可用邮箱
+Outlook Default pool behavior for registration emails and OTPs:
+    1. On first start the legacy `用于注册的邮箱.txt` is migrated to SQLite
+    2. While running, import and manage emails through the WebUI "Email library"
+    3. Registration takes an available email directly from the SQLite email library
 """
 from config.env_loader import env_str, apply_env_overrides
 
 
-# True: REGISTER_EMAIL 留空时从 Outlook 账号池自动获取邮箱，OTP 自动收取
-# False: 走人工输入邮箱 + 人工填 OTP 的流程
+# True: REGISTER_EMAIL When empty, the email is obtained automatically from the Outlook account pool and the OTP is received automatically
+# False: Use the flow of manual email input + manual OTP entry
 USE_EMAIL_SERVICE = False
 
-# 可选值（也可以用英文逗号配置多个，按顺序兜底，例如 "outlook,generic_api,mailnest,remail,xigua"）：
-#   "outlook"           — 外购 Outlook 账号池 + mail.chatai.codes 远端取信
-#   "cloudflare_domain" — Cloudflare 域名邮箱（转发到 QQ 邮箱），通过 IMAP 取信
-#   "cloudflare" — Cloudflare Worker 临时邮箱（cloudflare_temp_email），API 创建并取码
-#   "generic_api"       — 通用 API 取码邮箱池（邮箱----取码地址）
-#   "imap"              — 通用 IMAP 邮箱池（每条素材包含服务器和登录凭证）
-#   "gptmail"           — GPTMail 临时邮箱 API（运行时随机生成邮箱并自动收码）
-#   "mailnest"          — MailNest/迈巢临时邮箱 API（运行时购买邮箱并自动收码）
-#   "cloudmail"         — CloudMail/Cloud Mail API（自动从平台获取域名并随机生成邮箱）
-#   "remail"            — Remail 开放 API（按项目下单并自动收取验证码）
-#   "mailcode"          — 域名邮箱 MailCode（幂等购买、准备取码通道、按游标收码）
-#   "xigua"             — 西瓜邮箱接码平台（按项目下单并自动收取验证码）
+# Allowed values (several can be configured separated by English commas, used as fallbacks in order, e.g. "outlook,generic_api,mailnest,remail,xigua"):
+#   "outlook"           — Purchased Outlook account pool + remote mail retrieval via mail.chatai.codes
+#   "cloudflare_domain" — Cloudflare Domain email (forwarded to a QQ mailbox), mail retrieved via IMAP
+#   "cloudflare" — Cloudflare Worker Temporary email (cloudflare_temp_email), created and codes fetched via API
+#   "generic_api"       — Generic API code-retrieval email pool (email----code-retrieval URL)
+#   "imap"              — Generic IMAP email pool (each item contains the server and login credentials)
+#   "gptmail"           — GPTMail Temporary email API (emails are generated randomly at runtime and codes are received automatically)
+#   "mailnest"          — MailNest/MailNest temporary email API (emails are purchased at runtime and codes are received automatically)
+#   "cloudmail"         — CloudMail/Cloud Mail API(domains are obtained from the platform automatically and emails are generated randomly)
+#   "remail"            — Remail Open API (orders by project and receives verification codes automatically)
+#   "mailcode"          — Domain email MailCode (idempotent purchase, prepares the code-retrieval channel, receives codes by cursor)
+#   "xigua"             — Xigua email code-receiving platform (orders by project and receives verification codes automatically)
 EMAIL_SOURCE = "outlook,generic_api,mailnest"
 
 
 # ============================================================
-# Outlook 模式（外购账号池 + 取信服务）
+# Outlook mode (purchased account pool + mail retrieval service)
 # ============================================================
 
 OUTLOOK_ACCOUNTS_FILE = "用于注册的邮箱.txt"
 
-# Outlook 取件模式：
-#   "auto"   = 先用远端 mail.chatai.codes；远端 402/DEPLOYMENT_DISABLED 时自动切 Microsoft Graph 直连
-#   "remote" = 只用远端 mail.chatai.codes
-#   "direct" = 只用 Microsoft Graph 直连（使用 clientId + refreshToken 换 access_token）
+# Outlook retrieval mode:
+#   "auto"   = Use the remote mail.chatai.codes first; when the remote returns 402/DEPLOYMENT_DISABLED, automatically switch to a direct Microsoft Graph connection
+#   "remote" = use the remote only mail.chatai.codes
+#   "direct" = Use only a direct Microsoft Graph connection (exchange clientId + refreshToken for an access_token)
 OUTLOOK_FETCH_MODE = "auto"
 
-# 取邮件 API 的根 URL（远端模式使用）
+# Root URL of the mail retrieval API (used in remote mode)
 OUTLOOK_API_BASE = "https://mail.chatai.codes"
 
 
 # ============================================================
-# OTP 轮询参数
+# OTP polling parameters
 # ============================================================
 
 OTP_POLL_INTERVAL = 3
 OTP_MAX_WAIT = 90
 
-# Outlook 双协议取件：抓到一封 OTP 后再多等多少秒看是否有更晚到达的邮件。
+# Outlook Dual-protocol retrieval: after one OTP is caught, wait this many more seconds to see whether a later email arrives.
 OTP_SETTLE_SECONDS = 5
 
-# 通用 API 取码专用代理；不读取代理池，也不套用代理池上游链式。
-# 需要时填写例如 http://127.0.0.1:7897；留空则直连。
+# Dedicated proxy for generic API code retrieval; it does not read the proxy pool and does not apply the proxy-pool upstream chain.
+# Fill in when needed, e.g. http://127.0.0.1:7897; leave empty for a direct connection.
 GENERIC_API_PROXY: str = ""
 
-# 通用 IMAP 邮箱默认收件箱目录；服务器、端口和凭证随邮箱素材导入。
+# Default inbox folder for generic IMAP emails; the server, port and credentials are imported together with the email material.
 IMAP_MAILBOX = "INBOX"
-# 单次 IMAP 网络操作超时；失败后在 OTP 总等待预算内重新连接。
+# Timeout of a single IMAP network operation; after a failure it reconnects within the total OTP wait budget.
 IMAP_SOCKET_TIMEOUT = 10
 
 
 # ============================================================
-# Cloudflare 域名邮箱模式（转发到 QQ 邮箱，通过 IMAP 取信）
+# Cloudflare Domain email mode (forwarded to a QQ mailbox, mail retrieved via IMAP)
 # ============================================================
 
-# 你的 Cloudflare 域名，如 "mydomain.com"
-# 注册时会自动生成 random@mydomain.com 作为注册邮箱
+# Your Cloudflare domain, e.g. "mydomain.com"
+# Registration automatically generates random@mydomain.com as the registration email
 EMAIL_DOMAIN = ""
 
-# QQ 邮箱 IMAP 服务器地址（固定为 imap.qq.com）
+# QQ IMAP server address of the mailbox (fixed to imap.qq.com)
 QQ_IMAP_SERVER = "imap.qq.com"
 
-# QQ 邮箱 IMAP 端口（SSL）
+# QQ mailbox IMAP port (SSL)
 QQ_IMAP_PORT = 993
 
-# QQ 邮箱地址（接收 Cloudflare 转发的邮件），如 "123456@qq.com"
+# QQ mailbox address (receives the emails forwarded by Cloudflare), e.g. "123456@qq.com"
 QQ_EMAIL = ""
 
-# QQ 邮箱 IMAP 授权码（在 QQ 邮箱网页版 → 设置 → 账户 → POP3/IMAP/SMTP 服务 中生成）
-# 注意：这是 16 位授权码，不是 QQ 密码
+# QQ IMAP authorization code of the mailbox (generated in the QQ Mail web version -> Settings -> Account -> POP3/IMAP/SMTP service)
+# Note: this is the 16-character authorization code, not the QQ password
 QQ_IMAP_PASSWORD = env_str("QQ_IMAP_PASSWORD", "")
 
 
 # ============================================================
-# GPTMail 临时邮箱 API（固定地址：https://mail.chatgpt.org.uk）
+# GPTMail Temporary email API (fixed address: https://mail.chatgpt.org.uk)
 # ============================================================
 
-# 选择 EMAIL_SOURCE="gptmail" 时必填；请在 WebUI「配置 → 邮箱 / OTP」填写。
+# Required when EMAIL_SOURCE="gptmail" is selected; fill it in at WebUI "Config -> Email / OTP".
 GPTMAIL_API_KEY = env_str("GPTMAIL_API_KEY", "")
 
 
 # ============================================================
-# Cloudflare Worker 临时邮箱（cloudflare_temp_email 兼容）
-# EMAIL_SOURCE 含 "cloudflare" 时启用；与 cloudflare_domain（QQ IMAP）不同。
+# Cloudflare Worker Temporary email (cloudflare_temp_email compatible)
+# EMAIL_SOURCE Enabled when it contains "cloudflare"; different from cloudflare_domain (QQ IMAP).
 # ============================================================
 
-# Worker API 根地址，例如 https://mail.example.com
+# Worker API root address, e.g. https://mail.example.com
 CLOUDFLARE_API_BASE = env_str("CLOUDFLARE_API_BASE", "")
 
-# 匿名模式可留空；admin 模式填 ADMIN_PASSWORD
+# May be left empty in anonymous mode; in admin mode fill in ADMIN_PASSWORD
 CLOUDFLARE_API_KEY = env_str("CLOUDFLARE_API_KEY", "")
 
 # none / bearer / x-api-key / x-admin-auth / query-key
 CLOUDFLARE_AUTH_MODE = "none"
 
-# Worker 全局密码（PASSWORDS），注入请求头 x-custom-auth
+# Worker global password (PASSWORDS), injected into the request header x-custom-auth
 CLOUDFLARE_CUSTOM_AUTH = env_str("CLOUDFLARE_CUSTOM_AUTH", "")
 
 CLOUDFLARE_PATH_DOMAINS = "/api/domains"
@@ -117,7 +117,7 @@ CLOUDFLARE_PATH_ACCOUNTS = "/api/new_address"
 CLOUDFLARE_PATH_TOKEN = "/api/token"
 CLOUDFLARE_PATH_MESSAGES = "/api/mails"
 
-# 默认收信域名，多个可用换行或逗号分隔；留空则由 Worker 决定
+# Default receiving domains; several can be separated by newlines or commas; leave empty to let the Worker decide
 CLOUDFLARE_DEFAULT_DOMAINS = []
 
 CLOUDFLARE_REQUEST_TIMEOUT = 20
@@ -125,72 +125,72 @@ CLOUDFLARE_NAME_LENGTH = 10
 
 
 # ============================================================
-# MailNest-迈巢 Outlook 临时邮箱：https://mailnest.top/
+# MailNest-MailNest Outlook temporary email:https://mailnest.top/
 # ============================================================
 
-# 选择 EMAIL_SOURCE="mailnest" 时必填；请在 WebUI「配置 → 邮箱 / OTP」填写。
+# Required when EMAIL_SOURCE="mailnest" is selected; fill it in at WebUI "Config -> Email / OTP".
 MAIL_NEST_API_KEY = env_str("MAIL_NEST_API_KEY", "")
 
-# MailNest 项目代码；OpenAI/ChatGPT 默认 chatgpt001。
+# MailNest Project code; OpenAI/ChatGPT defaults to chatgpt001.
 MAIL_NEST_PROJECT_CODE = "chatgpt001"
 
 # ============================================================
-# CloudMail API 文档：https://doc.skymail.ink/api/api-doc
+# CloudMail API docs:https://doc.skymail.ink/api/api-doc
 # ============================================================
 
-# Cloud Mail Worker/API 地址，例如：https://mail.example.com
+# Cloud Mail Worker/API address, e.g.:https://mail.example.com
 CLOUDMAIL_API_BASE = ""
 
-# CloudMail 管理员邮箱/密码；用于手动生成 Token，也用于域名被隐藏时自动登录获取域名。
+# CloudMail Admin email/password; used to generate the Token manually, and to log in automatically to obtain domains when domains are hidden.
 CLOUDMAIL_ADMIN_EMAIL = env_str("CLOUDMAIL_ADMIN_EMAIL", "")
 CLOUDMAIL_PASSWORD = env_str("CLOUDMAIL_PASSWORD", "")
 
-# CloudMail 生成 Token 接口路径；默认按 Cloud Mail 公共 API 风格。
+# CloudMail Path of the token generation endpoint; follows the Cloud Mail public API style by default.
 CLOUDMAIL_TOKEN_PATH = "/api/public/genToken"
 
-# CloudMail/Cloud Mail API Authorization Token；可手动填写，也可由账号密码自动获取。
+# CloudMail/Cloud Mail API Authorization Token; can be filled in manually or obtained automatically from the account and password.
 CLOUDMAIL_AUTH_TOKEN = env_str("CLOUDMAIL_AUTH_TOKEN", "")
 
-# 邮箱域名列表，每行一个或用英文逗号分隔；可留空，运行时会从 CloudMail 平台自动获取。
+# Email domain list, one per line or separated by English commas; may be left empty and is then obtained automatically from the CloudMail platform at runtime.
 CLOUDMAIL_DOMAINS = []
 
-# 生成邮箱后是否调用 /api/public/addUser 创建邮箱用户。
+# Whether to call /api/public/addUser to create the mailbox user after generating an email.
 CLOUDMAIL_AUTO_ADD_USER = True
 
-# 随机邮箱 local-part 长度。
+# Length of the random email local-part.
 CLOUDMAIL_RANDOM_LOCAL_LENGTH = 12
 
 
 # ============================================================
-# Remail 开放 API：https://remail.aishop6.com/docs
+# Remail Open API:https://remail.aishop6.com/docs
 # ============================================================
 
-# API 根地址；也兼容填写 https://remail.aishop6.com/docs，客户端会自动规范化。
+# API Root address; https://remail.aishop6.com/docs is also accepted and the client normalizes it automatically.
 REMAIL_API_BASE = "https://remail.aishop6.com"
 
-# Remail 控制台生成的 rk- 开头 API Key。
+# Remail API Key generated in the console, starting with rk-.
 REMAIL_API_KEY = env_str("REMAIL_API_KEY", "")
 
-# 在 Remail 项目列表中选择用于 ChatGPT/OpenAI 验证码的项目 ID，默认使用项目 2。
+# Pick, in the Remail project list, the project ID used for ChatGPT/OpenAI verification codes; project 2 is used by default.
 REMAIL_PROJECT_ID = 2
 
-# 项目下单的邮箱后缀；outlook.com 为微软邮箱商品的常用选择。
+# Email suffix to order for the project; outlook.com is the usual choice for Microsoft mailbox products.
 REMAIL_EMAIL_SUFFIX = "outlook.com"
 
-# code 为短效接码；purchase 为可重复收件的长效购买，默认使用 purchase。
+# code is short-lived code receiving; purchase is a long-lived purchase that can receive repeatedly, and purchase is used by default.
 REMAIL_SERVICE_MODE = "purchase"
 
-# private_first 优先使用自己的库存；public_only 只使用公开库存，默认使用 public_only。
+# private_first Prefer your own stock; public_only uses only public stock, and public_only is used by default.
 REMAIL_SUPPLY_POLICY = "public_only"
 
-# 下单响应未立即返回 service token 时，等待订单详情补齐凭证的最长秒数。
+# Maximum seconds to wait for the order details to supply the credentials when the order response does not return a service token immediately.
 REMAIL_ORDER_WAIT_SECONDS = 30
 
-# Remail HTTP 请求超时。
+# Remail HTTP request timeout.
 REMAIL_REQUEST_TIMEOUT = 20
 
 # ============================================================
-# 西瓜邮箱接码平台：https://xigua.dasiqo.com/
+# Xigua email code-receiving platform:https://xigua.dasiqo.com/
 # ============================================================
 XIGUA_API_BASE = "https://xigua.dasiqo.com"
 XIGUA_API_KEY = env_str("XIGUA_API_KEY", "")
@@ -200,7 +200,7 @@ XIGUA_REQUEST_TIMEOUT = 20
 XIGUA_POLL_ATTEMPTS = 10
 XIGUA_POLL_INTERVAL = 5
 
-# 域名邮箱 MailCode（固定官网地址，不接受 .env 覆盖）
+# Domain email MailCode (fixed official address, not overridable via .env)
 MAILCODE_API_BASE = "https://mailcode.bzb.qzz.io"
 MAILCODE_API_KEY = env_str("MAILCODE_API_KEY", "")
 MAILCODE_PRODUCT_ID = "product_a3783a0ead074b4091631b9ad04153f9"

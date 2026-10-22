@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-浏览器指纹与 HTTP 客户端配置。
+Browser fingerprint and HTTP client configuration.
 
-这里集中维护同一个“浏览器环境画像”，供三层同时使用：
-1. curl_cffi TLS / HTTP 头；
-2. Python 端生成 Sentinel 初始 p；
-3. Node VM 端运行 sdk.js。
+One single browser environment profile is maintained here and used by three layers at the same time:
+1. curl_cffi TLS / HTTP headers;
+2. Python side generates the initial Sentinel p;
+3. Node VM side runs sdk.js.
 
-原则：同一 BrowserSession 内稳定，不同 BrowserSession 可自然分散；协议头、JS
-navigator/screen/timezone/client hints 不能互相打架。
+Principle: stable within one BrowserSession, naturally spread across different BrowserSessions; protocol headers,JS
+navigator/screen/timezone/client hints must not contradict each other.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 
 def _latest_chrome_major(default: str = "146") -> str:
-    """兼容旧模块导入；必须与 curl_cffi 实际 TLS impersonate 版本一致。"""
+    """Kept for legacy module imports; must match the TLS impersonate version curl_cffi actually uses."""
     return default
 
 
@@ -32,15 +32,15 @@ SAFARI_VERSION = ""
 SAFARI_WEBKIT_VERSION = "537.36"
 MAC_OS_UA_VERSION = "10_15_7"
 
-# ---------- curl_cffi 模拟浏览器 ----------
-# curl_cffi 0.15 当前最高内置到 chrome146。UA、Client Hints、JS navigator
-# 必须同步为 146；不能出现 TLS=146、HTTP/JS=149 的跨版本拼接指纹。
+# ---------- curl_cffi impersonated browser ----------
+# curl_cffi 0.15 The highest built-in version is currently chrome146. UA, Client Hints,JS navigator
+# must be synchronized to 146; a cross-version fingerprint such as TLS=146 with HTTP/JS=149 must never appear.
 IMPERSONATE = "chrome146"
 
-# ---------- 桌面 Chrome 画像 ----------
+# ---------- Desktop Chrome profile ----------
 BROWSER_FAMILY = "chrome"
 BROWSER_OS = "macOS"
-# OS 相关字段必须和 UA / Client Hints / JS navigator 三方一致。
+# OS The related fields must agree across UA / Client Hints / JS navigator.
 NAVIGATOR_PLATFORM = "MacIntel"
 NAVIGATOR_VENDOR = "Google Inc."
 USER_AGENT_DATA_PLATFORM = "macOS"
@@ -50,9 +50,9 @@ USER_AGENT = (
     f"Chrome/{CHROME_FULL_VERSION} Safari/{SAFARI_WEBKIT_VERSION}"
 )
 
-# 必须与 curl_cffi chrome146 实际发出的品牌顺序和 GREASE 品牌完全一致。
-# 旧值使用 HAR 中 Chrome149 的 Google Chrome/Chromium/Not)A;Brand 顺序，
-# 但 TLS impersonate 已切到 chrome146，造成网络栈与显式 Client Hints 冲突。
+# Must exactly match the brand order and GREASE brand that curl_cffi chrome146 really sends.
+# The old value used the Google Chrome/Chromium/Not)A;Brand order of Chrome149 from the HAR,
+# but the TLS impersonate had already switched to chrome146, which made the network stack conflict with the explicit Client Hints.
 SEC_CH_UA = '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"'
 SEC_CH_UA_FULL_VERSION_LIST = '"Chromium";v="146.0.0.0", "Not-A.Brand";v="24.0.0.0", "Google Chrome";v="146.0.0.0"'
 SEC_CH_UA_PLATFORM = '"macOS"'
@@ -64,7 +64,7 @@ SEC_CH_UA_MODEL = '""'
 SEND_CLIENT_HINTS = True
 SEND_HIGH_ENTROPY_CLIENT_HINTS = False
 
-# ---------- 语言 / 时区 ----------
+# ---------- Language / timezone ----------
 BROWSER_LOCALE_PROFILE = "jp"
 AUTO_BROWSER_LOCALE_FROM_IP = True
 IP_GEO_TIMEOUT = 6.0
@@ -74,8 +74,8 @@ IP_GEO_ENDPOINTS = [
     "https://ipwho.is/",
 ]
 
-# 代理出口质量诊断：默认不拦截，只在手动开启时拒绝云厂商/DC ASN。
-# 用户可能明确使用固定云出口复现实验抓包，因此默认 False。
+# Proxy exit quality diagnostics: not blocked by default, only rejects cloud-vendor/DC ASNs when manually enabled.
+# Users may deliberately use a fixed cloud exit to reproduce captures, so the default is False.
 REJECT_CLOUD_PROXY = False
 CLOUD_PROXY_ORG_KEYWORDS = [
     "amazon", "aws", "google cloud", "google llc", "microsoft", "azure",
@@ -84,30 +84,30 @@ CLOUD_PROXY_ORG_KEYWORDS = [
     "data center", "datacenter", "hosting", "host", "server", "cloud",
 ]
 
-# ---------- Roxy/Cloak 浏览器省流量模式 ----------
-# 默认关闭。开启后拦截可选的图片/媒体、明确列出的统计 URL，
-# 并在本地浏览器代理中继层阻断下列下载域名；
-# 不拦截登录所需的 document、核心 script、stylesheet、xhr/fetch、websocket；
-# Playwright 会放行带验证码/challenge 关键词的 URL。
-# 该模式仅应用于 Roxy/Cloak，本地浏览器才需要节省带宽；Browser Use/Skyvern 云端
-# 浏览器不会安装省流量拦截器。Selenium/CDP 只能按 URL 后缀拦截，若验证码异常可关闭。
+# ---------- Roxy/Cloak browser traffic-saving mode ----------
+# Off by default. When enabled it blocks optional images/media and explicitly listed analytics URLs,
+# and blocks the download domains below in the local browser proxy relay layer;
+# it does not block the document, core script, stylesheet, xhr/fetch and websocket needed for login;
+# Playwright URLs containing captcha/challenge keywords are allowed through.
+# This mode only applies to Roxy/Cloak, where a local browser needs to save bandwidth; Browser Use/Skyvern cloud
+# browsers do not install the traffic-saving interceptor. Selenium/CDP can only block by URL suffix; turn it off if captchas misbehave.
 BROWSER_DATA_SAVER_MODE: bool = False
-# 代理连接前按目标主机拦截，包含子域名，覆盖启动阶段及后台组件下载。
-# 仅本地浏览器使用计量中继且开启省流量模式时生效；[] 关闭域名拦截。
+# Blocked by target host before the proxy connects, including subdomains, covering startup and background component downloads.
+# Only effective when a local browser uses the metered relay and traffic-saving mode is on; [] disables domain blocking.
 BROWSER_DATA_SAVER_BLOCKED_PROXY_HOSTS: list[str] = ["dl.google.com", "gvt1.com"]
-# 注册已经拿到 accessToken 后，阻断不再需要的 ChatGPT 应用壳/遥测资源。
-# 仅在 Roxy/Cloak 注册后阶段生效，不影响邮箱、验证码和登录页面。
+# After registration has obtained the accessToken, block ChatGPT app-shell/telemetry resources that are no longer needed.
+# Only effective in the post-registration phase of Roxy/Cloak; does not affect email, verification codes or the login page.
 BROWSER_DATA_SAVER_DEEP_MODE: bool = True
-# 每行一个 Playwright resource_type。可选 image/media/font/manifest/texttrack 等；
-# 默认只拦截 image、media；也可配置 stylesheet/font 等资源；Roxy 还会通过 Chromium 启动参数关闭图片加载，
-# 遇到页面布局或验证码异常时可关闭模式。
+# One Playwright resource_type per line. Options include image/media/font/manifest/texttrack etc.;
+# by default only image and media are blocked; resources such as stylesheet/font can also be configured; Roxy additionally disables image loading via Chromium launch arguments,
+# turn the mode off if the page layout or captcha misbehaves.
 BROWSER_DATA_SAVER_BLOCKED_RESOURCE_TYPES: list[str] = ["image", "media"]
-# URL glob 级别的额外拦截。以下是资源明细中确认不参与邮箱密码注册主流程的
-# RUM/广告统计资源；Google GSI 仅用于 Google 登录，不使用 Google 登录时默认拦截。
-# 不要把 ChatGPT/auth.openai 的 CDN chunk 当作候选：即使某个 chunk 只有少量函数
-# 被调用，也可能负责路由、表单切换或懒加载；需经过单变量 A/B 验证后才能加入规则。
-# 不要把 chatgpt/openai 的核心 API 或 sentinel URL 加到这里。
-# `**` 用于匹配 URL 中的任意路径；Roxy/Cloak 的 Playwright/Selenium 会读取这组规则。
+# URL glob extra blocking at the level of. The following are ad/analytics resources confirmed from the resource breakdown not to take part in the email-and-password registration main flow
+# RUM/ad analytics resources; Google GSI is only used for Google sign-in and is blocked by default when Google sign-in is not used.
+# Do not treat CDN chunks of ChatGPT/auth.openai as candidates: even if only a few functions of a chunk are called,
+# it may be responsible for routing, form switching or lazy loading; it can only be added to the rules after a single-variable A/B verification.
+# Do not add core chatgpt/openai APIs or sentinel URLs here.
+# `**` Used to match any path in a URL; the Playwright/Selenium of Roxy/Cloak reads this rule set.
 BROWSER_DATA_SAVER_BLOCKED_URL_PATTERNS: list[str] = [
     "**://auth.openai.com/awe/api/v2/rum**",
     "**://chatgpt.com/awe/api/v2/rum**",
@@ -119,17 +119,17 @@ BROWSER_DATA_SAVER_BLOCKED_URL_PATTERNS: list[str] = [
     "**://accounts.google.com/gsi/client**",
 ]
 
-# ---------- Roxy/Cloak 浏览器流量明细日志 ----------
-# 默认关闭；开启后在注册结束时仅输出有流量消耗的访问，包含上传/下载/总字节。
-# 按单请求总消耗降序输出；跳过拦截、零字节和本地访问，估算项显式标记。
-# URL 查询参数值会脱敏，不保存请求/响应 body 或完整 Header 内容。
+# ---------- Roxy/Cloak browser traffic detail log ----------
+# Off by default; when enabled, only requests that consumed traffic are printed at the end of registration, with upload/download/total bytes.
+# Sorted by total per-request consumption in descending order; blocked, zero-byte and local requests are skipped, and estimated items are explicitly marked.
+# URL Query parameter values are masked; request/response bodies and full header contents are not saved.
 BROWSER_TRAFFIC_DETAIL_LOG: bool = False
 BROWSER_TRAFFIC_DETAIL_MAX_ENTRIES: int = 2000
 
-# ---------- Roxy/Cloak 浏览器 JS 精确覆盖率 ----------
-# 开启后通过 Chrome DevTools Protocol Profiler 记录本次会话实际执行过的
-# JavaScript 函数/代码范围。只保存函数名、调用计数和 offset，不读取参数、返回值
-# 或源码；Browser Use/Skyvern 云端浏览器不启用该监听；默认关闭，避免给正常注册增加额外开销。
+# ---------- Roxy/Cloak browser JS precise coverage ----------
+# When enabled, the Chrome DevTools Protocol Profiler records the
+# JavaScript functions/code ranges actually executed in this session. Only function names, call counts and offsets are saved; arguments, return values
+# or source code are not read; Browser Use/Skyvern cloud browsers do not enable this listener; off by default to avoid extra overhead for normal registration.
 BROWSER_JS_COVERAGE_LOG: bool = False
 BROWSER_JS_COVERAGE_MAX_ENTRIES: int = 1000
 COUNTRY_LOCALE_PROFILE_MAP = {
@@ -138,8 +138,8 @@ COUNTRY_LOCALE_PROFILE_MAP = {
     "VN": "vn",
 }
 
-# 没有专用完整画像的出口国家，至少自动匹配浏览器语言。时区仍直接采用 IP
-# 地理接口返回值；这样切换代理国家时不会退回固定的 ja-JP/Asia-Tokyo。
+# For exit countries without a dedicated full profile, at least the browser language is matched automatically. The timezone still uses IP
+# the value returned by the geo API directly; this way switching the proxy country does not fall back to a fixed ja-JP/Asia-Tokyo.
 COUNTRY_LANGUAGE_TAG_MAP = {
     "TH": "th-TH", "ID": "id-ID", "MY": "ms-MY", "PH": "en-PH",
     "KR": "ko-KR", "IN": "en-IN", "BR": "pt-BR", "MX": "es-MX",
@@ -207,8 +207,8 @@ def _build_locale_from_geo(geo: dict | None) -> dict:
     locale = dict(BROWSER_LOCALE_PROFILES.get(key, BROWSER_LOCALE_PROFILES[BROWSER_LOCALE_PROFILE]))
     if geo and AUTO_BROWSER_LOCALE_FROM_IP:
         country = str(geo.get("country") or geo.get("country_code") or "").upper()
-        # 专用画像覆盖常见国家；其余已知国家动态生成语言字段。若地理接口
-        # 返回了未知国家，也使用中性的 en-US，而不是泄漏本机默认日语画像。
+        # Dedicated profiles cover common countries; language fields are generated dynamically for other known countries. If the geo API
+        # returns an unknown country, the neutral en-US is used instead of leaking the local default Japanese profile.
         if country not in COUNTRY_LOCALE_PROFILE_MAP:
             language_tag = COUNTRY_LANGUAGE_TAG_MAP.get(country, "en-US")
             resolved_profile = f"geo:{country.lower() or 'unknown'}"
@@ -244,14 +244,14 @@ TIMEZONE_IANA = _LOCALE["timezone_iana"]
 TIMEZONE_OFFSET_MINUTES = int(_LOCALE["timezone_offset_minutes"])
 TIMEZONE_NAME = _LOCALE["timezone_name"]
 
-# ---------- Sentinel / JS VM 环境 ----------
+# ---------- Sentinel / JS VM environment ----------
 SCREEN_WIDTH = 1680
 SCREEN_HEIGHT = 1050
 HARDWARE_CONCURRENCY = 6
 JS_HEAP_SIZE_LIMIT = 4395630592
 DEVICE_MEMORY = 8
 
-# 这些列表必须与 sentinel/sentinel-runner.js 的 createBrowserContext 保持一致。
+# These lists must stay consistent with createBrowserContext in sentinel/sentinel-runner.js.
 NAVIGATOR_PROTO_SAMPLES = [
     "createAuctionNonce−function createAuctionNonce() { [native code] }",
     "clearOriginJoinedAdInterestGroups−function clearOriginJoinedAdInterestGroups() { [native code] }",
@@ -294,18 +294,18 @@ WINDOW_FEATURE_FLAGS = {
     "data": 0,
     "solana": 0,
     "dump": 0,
-    # HAR 样本 p[24] 为 0；默认不暴露，必要时由画像开关启用。
+    # HAR In the sample p[24] is 0; not exposed by default, enabled via the profile switch when necessary.
     "requestIdleCallback": 0,
 }
 
-# ---------- HTTP 超时 ----------
+# ---------- HTTP timeout ----------
 REQUEST_TIMEOUT = 30
 
-# HAR 参考画像：Default-all-domains-1784468371563.json 解码 p[0]/p[2]/p[16] 得出。
+# HAR Reference profile: derived by decoding p[0]/p[2]/p[16] of Default-all-domains-1784468371563.json.
 HAR_CAPTURE_BASE_PROFILE = {"screen_width": 1680, "screen_height": 1050, "hardware_concurrency": 6, "device_memory": 8, "js_heap_size_limit": 4395630592, "device_pixel_ratio": 2}
 
-# 常见 macOS Chrome 桌面画像池。同一 session 内保持不变；不同 session 随机分散。
-# HAR_CAPTURE_BASE_PROFILE 只是候选之一，不全局固定。
+# Pool of common macOS Chrome desktop profiles. Constant within one session; randomly spread across sessions.
+# HAR_CAPTURE_BASE_PROFILE is only one of the candidates, not fixed globally.
 BROWSER_PROFILE_POOL = [
     HAR_CAPTURE_BASE_PROFILE,
     {"screen_width": 1440, "screen_height": 900,  "hardware_concurrency": 8,  "device_memory": 8, "js_heap_size_limit": 4294967296, "device_pixel_ratio": 2},
@@ -318,7 +318,7 @@ BROWSER_PROFILE_POOL = [
 
 
 def build_browser_environment(geo: dict | None = None, base_profile: dict | None = None) -> dict:
-    """构建完整浏览器环境画像，作为所有指纹字段的单一数据源。"""
+    """Build the full browser environment profile as the single source of truth for all fingerprint fields."""
     locale = _build_locale_from_geo(geo)
     profile = dict(base_profile or random.choice(BROWSER_PROFILE_POOL))
     profile.update({
@@ -356,7 +356,7 @@ def build_browser_environment(geo: dict | None = None, base_profile: dict | None
         "window_feature_flags": dict(WINDOW_FEATURE_FLAGS),
         "build_id": __import__("config.openai_protocol", fromlist=["OPENAI_BUILD_ID"]).OPENAI_BUILD_ID,
     })
-    # Sentinel VM 与 HTTP 指纹必须使用同一组 screen/window/viewport/GPU 画像。
+    # Sentinel VM Must use the same screen/window/viewport/GPU profile as the HTTP fingerprint.
     screen_width = int(profile.get("screen_width", 1680))
     screen_height = int(profile.get("screen_height", 1050))
     profile.setdefault("screen_avail_width", screen_width)
@@ -377,35 +377,35 @@ def build_browser_environment(geo: dict | None = None, base_profile: dict | None
 
 
 def pick_browser_profile(geo: dict | None = None) -> dict:
-    """为一个 BrowserSession 随机挑选稳定桌面画像；HAR 尺寸只是候选之一。"""
+    """Randomly pick a stable desktop profile for one BrowserSession; the HAR size is only one of the candidates."""
     return build_browser_environment(geo)
 
 
 def validate_browser_profile(profile: dict) -> list[str]:
-    """返回画像内部矛盾点，主要用于日志/自测。"""
+    """Return the contradictions inside the profile, mainly for logs/self-tests."""
     issues: list[str] = []
     ua = str(profile.get("user_agent") or "")
     family = str(profile.get("browser_family") or BROWSER_FAMILY)
     if family == "safari":
         if "Version/" not in ua or "Safari/" not in ua or "Chrome/" in ua or "Chromium/" in ua:
-            issues.append("Safari UA 不一致")
+            issues.append("Safari UA mismatch")
         if profile.get("send_client_hints"):
-            issues.append("Safari 不应发送 Chromium Client Hints")
+            issues.append("Safari must not be sent Chromium Client Hints")
     elif f"Chrome/{profile.get('chrome_full_version')}" not in ua:
-        issues.append("UA 与 chrome_full_version 不一致")
+        issues.append("UA does not match chrome_full_version")
     if profile.get("browser_os") == "macOS":
         if "Macintosh; Intel Mac OS X" not in ua:
-            issues.append("macOS 画像但 UA 不是 Macintosh")
+            issues.append("macOS profile but the UA is not Macintosh")
         if str(profile.get("navigator_platform") or "") != "MacIntel":
-            issues.append("macOS 画像但 navigator.platform 不是 MacIntel")
+            issues.append("macOS profile but navigator.platform is not MacIntel")
         if "macOS" not in str(profile.get("sec_ch_ua_platform") or ""):
-            issues.append("macOS 画像但 sec-ch-ua-platform 不是 macOS")
+            issues.append("macOS profile but sec-ch-ua-platform is not macOS")
     if not profile.get("navigator_language"):
-        issues.append("navigator_language 为空")
+        issues.append("navigator_language is empty")
     languages = profile.get("navigator_languages") or []
     if profile.get("navigator_language") and profile.get("navigator_language") not in languages:
-        issues.append("navigator.language 不在 navigator.languages 中")
-    # requestIdleCallback 是否暴露由画像决定。
+        issues.append("navigator.language is not in navigator.languages")
+    # requestIdleCallback whether it is exposed is decided by the profile.
     return issues
 
 # ---- .env overrides for WebUI editable fields ----

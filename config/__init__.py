@@ -3,23 +3,23 @@ load_env(override=False)
 
 # -*- coding: utf-8 -*-
 """
-config 包的统一入口。
+config package entry point.
 
-为保留 `from config import USER_AGENT` 这种历史用法，本文件把所有子模块的常量
-重新导出到包顶层。新代码推荐按子模块直接导入：
+To keep the legacy `from config import USER_AGENT` usage working, this file re-exports the constants of all submodules
+to the package top level. New code should import from the submodules directly:
     from config.email import EMAIL_SOURCE
     from config.proxy import pick_proxy
 
-子模块清单：
-    config.browser           浏览器指纹 / curl_cffi impersonate / HTTP 超时
-    config.openai_protocol   OpenAI OAuth 固定参数 / Sentinel 版本
-    config.proxy             代理池 + 随机抽取
-    config.register          注册默认信息（邮箱、密码、名称、生日）
-    config.email             Outlook 邮箱账号池 + OTP 轮询
-    config.twofa             2FA 开关
+Submodules:
+    config.browser           browser fingerprint / curl_cffi impersonate / HTTP timeouts
+    config.openai_protocol   OpenAI OAuth fixed parameters / Sentinel version
+    config.proxy             proxy pool + random pick
+    config.register          registration defaults (email, password, name, birthday)
+    config.email             Outlook email account pool + OTP polling
+    config.twofa             2FA switch
 """
 
-# ---------- 浏览器 / HTTP ----------
+# ---------- Browser / HTTP ----------
 from config.browser import (
     USER_AGENT,
     CHROME_MAJOR,
@@ -76,7 +76,7 @@ from config.browser import (
     REQUEST_TIMEOUT,
 )
 
-# ---------- OpenAI 协议 ----------
+# ---------- OpenAI Protocol ----------
 from config.openai_protocol import (
     OPENAI_CLIENT_ID,
     OPENAI_SCOPE,
@@ -100,7 +100,7 @@ from config.openai_protocol import (
     OPENAI_PREFLIGHT_TIMEOUT,
 )
 
-# ---------- 代理池 ----------
+# ---------- Proxy pool ----------
 from config.proxy import (
     PROXY_POOL,
     PROXY_POOL_UPSTREAM_PROXY,
@@ -119,7 +119,7 @@ from config.proxy import (
     PROXY,
 )
 
-# ---------- 注册默认信息 ----------
+# ---------- Registration defaults ----------
 from config.register import (
     REGISTER_EMAIL,
     REGISTER_PASSWORD,
@@ -129,7 +129,7 @@ from config.register import (
     POST_REGISTER_DWELL_SECONDS_RANGE,
 )
 
-# ---------- 邮箱服务 ----------
+# ---------- Email service ----------
 from config.email import (
     USE_EMAIL_SERVICE,
     EMAIL_SOURCE,
@@ -194,11 +194,11 @@ from config.twofa import (
 )
 
 
-# ---------- 热加载支持 ----------
-# WebUI 改配置后调 reload_all() 即可让所有运行时代码看到新值，无需重启进程。
-# 前提：运行时代码读配置时用 `config.<子模块>.KEY` 形式（而不是 `from config.子模块 import KEY` 把值绑死）。
-# 比如 `from config import codex; ... codex.SMS_COUNTRY`，reload 后 codex 模块对象原地更新，
-# 引用 codex.SMS_COUNTRY 立即看到新值。
+# ---------- Hot-reload support ----------
+# WebUI After changing the config, call reload_all() to make all runtime code see the new values, without restarting the process.
+# Prerequisite: runtime code must read config as `config.<submodule>.KEY` (not `from config.submodule import KEY`, which pins the value).
+# For example `from config import codex; ... codex.SMS_COUNTRY`: after reload the codex module object is updated in place,
+# so codex.SMS_COUNTRY immediately sees the new value.
 import importlib as _importlib
 
 _RELOADABLE_SUBMODULES = (
@@ -222,8 +222,8 @@ _RELOADABLE_SUBMODULES = (
 
 def reload_all() -> list[str]:
     """
-    热重载所有 config 子模块，返回成功 reload 的模块名列表。
-    任何子模块 reload 失败（语法错等）会抛 ImportError，调用方自行处理。
+    Hot-reload all config submodules and return the list of module names that reloaded successfully.
+    If any submodule fails to reload (syntax error etc.) an ImportError is raised and the caller must handle it.
     """
     from config.env_loader import load_env
     load_env(override=True)
@@ -237,17 +237,17 @@ def reload_all() -> list[str]:
         else:
             _importlib.reload(mod)
         reloaded.append(name)
-    # 同步刷新 config 包顶层的"被绑死"常量（兼容历史 `from config import X` 用法）
-    # 注意：通过这些名字读到的是 reload 前的值，但子模块属性方式不受影响。
+    # Also refresh the "pinned" constants at the top level of the config package (for the legacy `from config import X` usage)
+    # Note: values read through those names are the pre-reload ones, but the submodule attribute style is unaffected.
     _refresh_top_level_constants()
     return reloaded
 
 
 def _refresh_top_level_constants() -> None:
-    """把刚 reload 的子模块的常量重新拷一份到 config 包顶层。"""
+    """Copy the constants of the just-reloaded submodule to the top level of the config package again."""
     import config as _self
     from config import browser, openai_protocol, proxy as _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger
-    # 简单粗暴：枚举一遍重要常量，覆盖到 _self
+    # Simple and blunt: enumerate the important constants and overwrite them in _self
     for src in (browser, openai_protocol, _proxy, register, email, twofa, roxybrowser, cloakbrowser, browser_use, skyvern, codex, extract_link, sub2api, humanize, flow_trigger):
         for k in dir(src):
             if k.isupper() or k in ("pick_proxy", "pick_browser_profile", "build_browser_environment", "validate_browser_profile"):

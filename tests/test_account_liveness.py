@@ -101,7 +101,7 @@ class AccountLivenessTests(unittest.TestCase):
             )
 
         self.assertIs(_DummyBrowserSession.created[-1], session)
-        # 403 下发的 CF Cookie 必须留在同一 Cookie Jar 中，不能每轮新建会话。
+        # 403 The delivered CF Cookie must stay in the same Cookie Jar, and a new session must not be created every round.
         self.assertEqual(len(_DummyBrowserSession.created), 1)
         self.assertFalse(_DummyBrowserSession.created[0].session.closed)
         self.assertIsNone(_DummyBrowserSession.created[0].received_proxy)

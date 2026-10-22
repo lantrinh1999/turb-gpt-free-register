@@ -18,11 +18,11 @@ class RemailConfigTests(unittest.TestCase):
         self.assertIn('"remail"', source)
 
     def test_secret_registry_includes_remail_api_key(self):
-        self.assertEqual(SECRET_ENV_KEYS["REMAIL_API_KEY"], "Remail 开放 API Key")
+        self.assertEqual(SECRET_ENV_KEYS["REMAIL_API_KEY"], "Remail open API Key")
 
     def test_webui_exposes_remail_fields(self):
         fields = {item["key"]: item for item in EDITABLE_FIELDS}
-        self.assertEqual(fields["REMAIL_API_BASE"]["group"], "邮箱 / OTP")
+        self.assertEqual(fields["REMAIL_API_BASE"]["group"], "Email / OTP")
         self.assertEqual(
             fields["REMAIL_API_BASE"]["external_url"],
             "https://remail.aishop6.com/register?aff=AFFLGYQMTYIXH",
@@ -35,7 +35,7 @@ class RemailConfigTests(unittest.TestCase):
     def test_remail_promo_is_rendered_after_section_help(self):
         modern = Path("webui/templates/index.html").read_text(encoding="utf-8")
         legacy = Path("webui/templates/index_legacy.html").read_text(encoding="utf-8")
-        promo = "通过作者卡网购买积分9折优惠"
+        promo = "Buy credits via the author card shop for 10% off"
         self.assertIn(promo, modern)
         self.assertIn(promo, legacy)
         self.assertIn(

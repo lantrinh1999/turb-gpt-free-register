@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已注册账号查活：优先复用已有 AT 预热后走 reauth OTP，成功刷新 AT 即视为正常。"""
+"""Registered-account liveness check: reuse the existing AT to warm up first and then go through the reauth OTP; successfully refreshing the AT counts as healthy."""
 import logging
 import json
 import threading
@@ -35,8 +35,8 @@ _LOG_DIR = Path(__file__).resolve().parent.parent / "注册日志"
 _RUNNING: set[str] = set()
 _RUNNING_LOCK = threading.Lock()
 
-# 查活网络预检失败（403/429/代理/超时等）多为出口 IP 被 CF 标记或代理池抖动，
-# 视为可换新 IP 重试；账号本身问题（废号/邮箱错误等）不重试。
+# A failed liveness network pre-check (403/429/proxy/timeout etc.) is mostly caused by the exit IP being flagged by CF or by proxy-pool jitter,
+# and is treated as retryable with a new IP; problems of the account itself (dead account / wrong email etc.) are not retried.
 _RETRYABLE_NETWORK_HINTS = (
     "403", "429", "502", "503", "504",
     "proxy", "socks", "timeout", "timed out",
@@ -68,22 +68,22 @@ def _new_fingerprint_pinned_session(
     proxy: str | None,
     fingerprint_state: dict | None = None,
 ) -> BrowserSession:
-    """创建任务独占账号会话；同一路由尝试内固定完整身份与浏览器画像。"""
+    """Create the task with exclusive use of the account session; the full identity and browser profile stay fixed within one route attempt."""
     state = fingerprint_state if fingerprint_state is not None else {}
     saved_profile = state.get("browser_profile")
     identity = str(email).strip().lower()
-    # 和协议注册使用同一套生命周期配置：开启“同邮箱保持协议指纹”时，
-    # 查活可重新构造注册阶段的 device/session/硬件画像；关闭时每次查活
-    # 生成独立 seed。无论哪种模式，同一任务内部的所有阶段/重试都固定。
+    # Uses the same lifecycle setting as protocol registration: when "keep protocol fingerprint for the same email" is enabled,
+    # the liveness check can rebuild the device/session/hardware profile of the registration phase; when disabled every liveness check
+    # generates an independent seed. In either mode all stages/retries within the same task stay fixed.
     fingerprint_seed = str(state.get("fingerprint_seed") or "").strip() or None
     if not state.get("fingerprint_initialized"):
         from config import register as register_cfg
         reuse_by_email = bool(
             getattr(register_cfg, "PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL", False)
         ) and not bool(state.get("force_fresh"))
-        # “每次重新创建”必须和协议注册完全一致：不传 seed，让 BrowserSession
-        # 生成真实的随机 UUID4。旧实现先生成随机 seed 再派生 UUID5，虽然值也
-        # 随机，但 UUID version 位与注册时不同，属于可观测的指纹差异。
+        # “Re-create each time” must be exactly identical to protocol registration: pass no seed, let BrowserSession
+        # it generate a real random UUID4. The old implementation first generated a random seed and then derived a UUID5; although the value is also
+        # random, the UUID version bits differ from those at registration time, which is an observable fingerprint difference.
         fingerprint_seed = f"registration:{identity}" if reuse_by_email else None
         state["fingerprint_seed"] = fingerprint_seed or ""
         state["fingerprint_mode"] = (
@@ -92,7 +92,7 @@ def _new_fingerprint_pinned_session(
         state["fingerprint_initialized"] = True
     session = BrowserSession(
         proxy=proxy,
-        # 首次按当前出口生成地区画像；同一路由内部如需重建则原样复用。
+        # Generate the region profile from the current exit the first time; reuse it as is if it must be rebuilt within the same route.
         detect_exit_geo=not bool(saved_profile),
         browser_profile=dict(saved_profile) if isinstance(saved_profile, dict) else None,
         fingerprint_seed=fingerprint_seed,
@@ -115,26 +115,26 @@ def _new_fingerprint_pinned_session(
 def _fingerprint_mode_label(state: dict) -> str:
     mode = str(state.get("fingerprint_mode") or "")
     if mode == "registration_email_stable":
-        return "同邮箱复用协议注册指纹"
-    return "每次查活重新创建"
+        return "reuse the protocol registration fingerprint for the same email"
+    return "re-created on every liveness check"
 
 
 def _warm_login_fingerprint_context(session: BrowserSession) -> None:
-    """复现 plus 纯协议注册成功样本的登录页初始化顺序。"""
+    """Reproduce the login page initialization order of a successful plus pure-protocol registration sample."""
     from core.chatgpt_bootstrap import anonymous_bootstrap
 
     logger.info(
-        "[查活] 登录链预热：/auth/login 顶层导航 → anonymous bootstrap → "
+        "[Liveness] Login chain warm-up: /auth/login top-level navigation → anonymous bootstrap → "
         "providers → session → CSRF → session"
     )
     nav = session.get(
         "https://chatgpt.com/auth/login",
         headers=session.get_chatgpt_navigate_headers(
-            # 地址栏级顶层导航：无 Referer，Sec-Fetch-Site=none。
+            # Address-bar-level top-level navigation: no Referer, Sec-Fetch-Site=none.
             referer="", user_initiated=True,
         ),
         allow_redirects=True,
-        # 代理端口可连接不代表其上游 TLS 可用，避免坏节点长期占住 worker。
+        # A reachable proxy port does not mean its upstream TLS works; avoid bad nodes holding a worker for a long time.
         timeout=12,
     )
     nav.raise_for_status()
@@ -142,7 +142,7 @@ def _warm_login_fingerprint_context(session: BrowserSession) -> None:
     if callable(observe):
         observe(nav)
     anonymous_bootstrap(session, strict=False)
-    # best-effort bootstrap 的非关键接口不能阻断正式认证链。
+    # best-effort bootstrap non-critical endpoints must not block the real authentication chain.
     _clear_optional_bootstrap_circuit(session)
     get_providers(session)
     probe_auth_session(session)
@@ -154,35 +154,35 @@ def _network_preflight_with_retry(
     max_attempts: int = 4,
     fingerprint_state: dict | None = None,
 ) -> tuple[BrowserSession, str]:
-    """CSRF → Signin 备用预检；失败时保留同一会话重试。
+    """CSRF → Signin Backup pre-check; on failure keep the same session and retry.
 
-    `/api/auth/providers` 只是 NextAuth 的发现接口，signin 端点并不依赖它返回的
-    内容。实际运行中该接口很容易先被 Cloudflare 拦截，如果把它作为硬门槛，后续
-    本来可用的 CSRF/授权链永远不会执行。因此查活备用链不再把 providers 当作
-    必经步骤。
+    `/api/auth/providers` is just the NextAuth discovery endpoint; the signin endpoint does not depend on what it returns
+    content. In practice this endpoint is very easily blocked by Cloudflare first; if it were a hard gate, the CSRF/authorization chain that would
+    otherwise work would never run. So the backup liveness chain no longer treats providers as a
+    mandatory step.
 
-    这里必须原样传递 ``proxy``：``None`` 表示按配置选代理，空字符串表示明确
-    直连。之前用 ``proxy if proxy else None`` 把直连兜底误变成了再次抽取代理。
+    ``proxy`` must be passed through unchanged here: ``None`` means pick a proxy according to the config, an empty string means explicitly
+    direct. Previously ``proxy if proxy else None`` wrongly turned the direct fallback into drawing a proxy again.
     """
     session: BrowserSession | None = None
     last_exc: BaseException | None = None
     state = fingerprint_state if fingerprint_state is not None else {}
-    # 一次网络预检只创建一个 BrowserSession。403 响应下发的新 __cf_bm、
-    # OAuth/设备上下文都保留在同一 Cookie Jar 中供下一轮使用。
+    # One network pre-check creates only one BrowserSession. The new __cf_bm issued with a 403 response and the
+    # OAuth/device context all stay in the same Cookie Jar for the next round.
     session = _new_fingerprint_pinned_session(email, proxy, state)
-    logger.info("[查活] 指纹生命周期：%s", _fingerprint_mode_label(state))
+    logger.info("[Liveness] Fingerprint lifecycle:%s", _fingerprint_mode_label(state))
     for attempt in range(1, max_attempts + 1):
         logger.info(
-            "[查活] 复用统一会话：proxy=%s device_id=%s oai_session_id=%s（网络预检第 %s/%s 次）",
-            session.proxy or "配置随机/直连", session.device_id,
+            "[Liveness] Reusing the unified session: proxy=%s device_id=%s oai_session_id=%s (network pre-check %s/%s)",
+            session.proxy or "configured random/direct", session.device_id,
             str(getattr(session, "oai_session_id", "") or "")[:12] + "...",
             attempt, max_attempts,
         )
-        logger.info("[查活] 指纹摘要：%s", session.fingerprint_summary_text())
+        logger.info("[Liveness] Fingerprint summary:%s", session.fingerprint_summary_text())
         try:
             _warm_login_fingerprint_context(session)
             csrf = get_csrf_token(session)
-            # 成功 Web 样本在 signin 前会再次确认匿名 NextAuth session。
+            # Successful Web samples confirm the anonymous NextAuth session once more before signin.
             probe_auth_session(session)
             authorize_url = signin_openai(session, csrf, email)
             return session, authorize_url
@@ -196,11 +196,11 @@ def _network_preflight_with_retry(
                 raise
             _clear_optional_bootstrap_circuit(session)
             logger.warning(
-                "[查活] 网络预检失败（%s/%s），保留当前 session/deviceId/CF Cookie 重试：%s",
+                "[Liveness] Network pre-check failed (%s/%s), keeping the current session/deviceId/CF Cookie for the retry:%s",
                 attempt, max_attempts, str(exc)[:200],
             )
             time.sleep(2)
-    raise RuntimeError(f"网络预检多次失败：{last_exc}")
+    raise RuntimeError(f"Network pre-check failed repeatedly:{last_exc}")
 
 
 def _now() -> str:
@@ -208,7 +208,7 @@ def _now() -> str:
 
 
 def _safe_fingerprint_for_account(session: BrowserSession) -> dict:
-    """账号里只记录运行环境画像，不保存会话/设备标识。"""
+    """Only the runtime environment profile is recorded in the account; session/device identifiers are not saved."""
     fp = session.fingerprint_summary()
     return {k: v for k, v in fp.items() if k not in _SESSION_FINGERPRINT_KEYS}
 
@@ -310,11 +310,11 @@ def _mfa_verify(session: BrowserSession, factor_id: str, code: str) -> dict:
 
 
 def _follow_continue_and_fetch(session: BrowserSession, continue_url: str, *, referer: str) -> dict:
-    """完成 callback/session，并对 403 保留同会话 Cookie 做阶段内重试。
+    """Complete callback/session, and on a 403 keep the same-session Cookie and retry within the stage.
 
-    callback 与 session 分开重试：callback 一旦成功就不重复消费 OAuth code；
-    只有 callback 本身失败时才重放 continue_url。重试耗尽后抛给上层，由
-    live_check_service 按既有策略换成独立直连会话完整兜底。
+    callback Retried separately from the session: once the callback succeeds the OAuth code is not consumed again;
+    continue_url is only replayed when the callback itself fails. After the retries are exhausted it is thrown to the upper layer, which
+    live_check_service falls back to a complete independent direct session according to the existing strategy.
     """
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
@@ -327,8 +327,8 @@ def _follow_continue_and_fetch(session: BrowserSession, continue_url: str, *, re
             _clear_optional_bootstrap_circuit(session)
             delay = float(2 ** (attempt - 1))
             logger.warning(
-                "[查活] OAuth callback 临时失败（%s/%s），保留当前 "
-                "session/deviceId/CF Cookie，%.1fs 后重试：%s",
+                "[Liveness] OAuth callback failed temporarily (%s/%s), keeping the current "
+                "session/deviceId/CF Cookie, retrying in %.1fs:%s",
                 attempt, max_attempts, delay, str(exc)[:200],
             )
             time.sleep(delay)
@@ -342,30 +342,30 @@ def _follow_continue_and_fetch(session: BrowserSession, continue_url: str, *, re
             _clear_optional_bootstrap_circuit(session)
             delay = float(2 ** (attempt - 1))
             logger.warning(
-                "[查活] Session/AT 拉取临时失败（%s/%s），保留当前 "
-                "session/deviceId/CF Cookie，%.1fs 后重试：%s",
+                "[Liveness] Session/AT fetch failed temporarily (%s/%s), keeping the current "
+                "session/deviceId/CF Cookie, retrying in %.1fs:%s",
                 attempt, max_attempts, delay, str(exc)[:200],
             )
             time.sleep(delay)
-    raise RuntimeError("查活 Session/AT 拉取重试耗尽")
+    raise RuntimeError("Liveness Session/AT fetch retries exhausted")
 
 
 def _stored_access_token(email: str) -> str:
-    """读取本地账号已有 AT，用于先预热登录态再走稳定的 reauth 链。"""
+    """Read the AT the local account already has, to warm up the login state first and then take the stable reauth chain."""
     try:
         account = db.get_account_by_email(email)
         return str((account or {}).get("access_token") or "").strip()
     except Exception as exc:
-        logger.debug("[查活] 读取已有 accessToken 失败，改走备用登录链：%s: %s", type(exc).__name__, exc)
+        logger.debug("[Liveness] Failed to read the existing accessToken, switching to the backup login chain:%s: %s", type(exc).__name__, exc)
         return ""
 
 
 def _clear_optional_bootstrap_circuit(session: BrowserSession) -> None:
-    """清理可选登录态预热造成的本地熔断，不影响后续正式认证请求。
+    """Clear the local circuit breaker caused by the optional login-state warm-up; it does not affect the real authentication requests that follow.
 
-    authenticated_bootstrap 是 best-effort 预热，其中个别旧接口返回 403 不等于
-    reauth 链不可用；BrowserSession 的通用熔断器若保留该状态，会直接拦截后续
-    `/api/auth/csrf`，导致稳定的 2FA 链也无法开始。
+    authenticated_bootstrap is a best-effort warm-up; a 403 from some legacy endpoint there does not mean
+    reauth the chain is unusable; if the generic circuit breaker of BrowserSession kept that state it would directly block the following
+    `/api/auth/csrf`, so even the stable 2FA chain could not start.
     """
     reset = getattr(session, "reset_circuit_breaker", None)
     if callable(reset):
@@ -377,18 +377,18 @@ def _clear_optional_bootstrap_circuit(session: BrowserSession) -> None:
 
 
 def _warm_authenticated_session(session: BrowserSession, access_token: str) -> None:
-    """复用 2FA 已验证的登录态预热流程。预热失败不直接判定账号死亡。"""
+    """Reuse the login-state warm-up flow already verified by 2FA. A failed warm-up does not directly mark the account dead."""
     if not access_token:
         return
     from core.chatgpt_bootstrap import authenticated_bootstrap
 
     try:
-        logger.info("[查活] 使用已有 accessToken 预热登录态...")
+        logger.info("[Liveness] Warming up the login state with the existing accessToken...")
         authenticated_bootstrap(session, access_token, strict=False)
-        logger.info("[查活] accessToken 预热完成，继续走 reauth OTP")
+        logger.info("[Liveness] accessToken warm-up completed, continuing with reauth OTP")
     except Exception as exc:
-        # strict=False 已经会吞掉大部分单接口错误；这里仅兜住初始化异常。
-        logger.warning("[查活] accessToken 预热失败，继续走 reauth OTP：%s: %s", type(exc).__name__, str(exc)[:180])
+        # strict=False already swallows most single-endpoint errors; this only catches initialization exceptions.
+        logger.warning("[Liveness] accessToken warm-up failed, continuing with reauth OTP:%s: %s", type(exc).__name__, str(exc)[:180])
     finally:
         _clear_optional_bootstrap_circuit(session)
 
@@ -414,13 +414,13 @@ def _validate_reauth_with_retry(
     max_otp_attempts: int = 3,
     email_source: str | None = None,
 ) -> str:
-    """提交 reauth OTP；验证码错误时重新发送并重新取码。"""
+    """Submit the reauth OTP; when the code is wrong, resend and fetch a new code."""
     current_otp: str | None = None
     last_exc: Exception | None = None
     for attempt in range(1, max_otp_attempts + 1):
         try:
             if current_otp is None:
-                logger.info("[查活] 等待重认证 OTP：%s（第 %s/%s 次）", email, attempt, max_otp_attempts)
+                logger.info("[Liveness] Waiting for the re-authentication OTP: %s (attempt %s/%s)", email, attempt, max_otp_attempts)
                 current_otp = wait_for_otp(
                     email,
                     after_ts=otp_after_ts,
@@ -429,7 +429,7 @@ def _validate_reauth_with_retry(
             human_delay("otp_input")
             continue_url = _validate_reauth_otp(session, current_otp)
             if not continue_url:
-                raise RuntimeError("重认证 OTP 验证响应缺少 continue_url")
+                raise RuntimeError("re-authentication OTP verification response is missing continue_url")
             return str(continue_url)
         except AccountUnusableError:
             raise
@@ -439,18 +439,18 @@ def _validate_reauth_with_retry(
             dead_code = detect_account_unusable_text(body) or detect_account_unusable_text(str(exc))
             if dead_code:
                 raise AccountUnusableError(
-                    f"账号已废弃（{dead_code}），邮箱不可再用",
+                    f"Account is dead ({dead_code}), the email can no longer be used",
                     error_code=dead_code,
                 ) from exc
 
             status = _exception_status_code(exc)
-            # reauth validate 的 403 可能是 Cloudflare/出口拦截；不要在同一已熔断
-            # 会话上反复发送 OTP，交给上层的直连兜底处理。
+            # reauth validate 403 may be a Cloudflare/exit block; do not keep sending OTPs on the same tripped
+            # session, leave it to the direct fallback of the upper layer.
             retryable_otp = status in (400, 401, 422)
             if attempt >= max_otp_attempts or not retryable_otp:
                 raise
             logger.warning(
-                "[查活] 重认证 OTP 无效/过期，重新发送后再取（%s/%s）：%s",
+                "[Liveness] Re-authentication OTP invalid/expired, fetching again after resending (%s/%s):%s",
                 attempt,
                 max_otp_attempts,
                 str(exc)[:180],
@@ -459,7 +459,7 @@ def _validate_reauth_with_retry(
             otp_after_ts = time.time()
             current_otp = None
             time.sleep(1)
-    raise last_exc if last_exc else RuntimeError("重认证 OTP 验证失败")
+    raise last_exc if last_exc else RuntimeError("Re-authentication OTP verification failed")
 
 
 def _login_via_reauth(
@@ -468,23 +468,23 @@ def _login_via_reauth(
     otp_after_ts: float,
     email_source: str | None = None,
 ) -> dict:
-    """按 2FA 已验证链路重新认证并刷新 ChatGPT session。"""
+    """Re-authenticate through the chain already verified by 2FA and refresh the ChatGPT session."""
     auth_url = _trigger_reauth_with_retry(session, email)
-    logger.info("[查活] reauth authorize URL 已获取")
+    logger.info("[Liveness] reauth authorize URL obtained")
     human_delay("api")
     final_url = _follow_reauth_with_retry(session, auth_url)
     dead_code = detect_account_unusable_text(final_url)
     if dead_code:
-        raise AccountUnusableError(f"账号已废弃（{dead_code}）", error_code=dead_code)
+        raise AccountUnusableError(f"Account is dead ({dead_code})", error_code=dead_code)
     human_delay("navigate")
-    logger.info("[查活] 已跟随 reauth authorize URL，开始等待邮箱 OTP")
+    logger.info("[Liveness] Followed the reauth authorize URL, now waiting for the email OTP")
     continue_url = _validate_reauth_with_retry(
         session,
         email,
         otp_after_ts,
         email_source=email_source,
     )
-    logger.info("[查活] reauth OTP 验证通过，开始交换新 token")
+    logger.info("[Liveness] reauth OTP verified, now exchanging the new token")
     human_delay("api")
     return _follow_continue_and_fetch(
         session,
@@ -499,7 +499,7 @@ def _login_via_email_otp(
     otp_after_ts: float,
     email_source: str | None = None,
 ) -> dict:
-    """完成邮箱 OTP 登录，并跟随 OAuth callback 后拉取 ChatGPT session。"""
+    """Complete the email OTP login, follow the OAuth callback, then fetch the ChatGPT session."""
     validate_result = _validate_with_retry(
         session,
         email,
@@ -511,10 +511,10 @@ def _login_via_email_otp(
     page_type = str(page.get("type") or "")
     continue_url = _extract_continue_url(validate_result)
     if not continue_url:
-        raise RuntimeError(f"OTP 登录成功但没有 OAuth continue_url: {validate_result}")
+        raise RuntimeError(f"OTP login succeeded but no OAuth continue_url: {validate_result}")
     if "about-you" in str(continue_url) or page_type in {"about_you", "about-you"}:
-        raise RuntimeError(f"该邮箱登录后进入资料页，疑似不是完整已注册账号: page_type={page_type}, continue_url={continue_url}")
-    logger.info("[查活] 邮箱 OTP 验证完成，开始跟随 OAuth callback")
+        raise RuntimeError(f"After login this email landed on the profile page, so it is probably not a fully registered account: page_type={page_type}, continue_url={continue_url}")
+    logger.info("[Liveness] Email OTP verification done, now following OAuth callback")
     return _follow_continue_and_fetch(session, continue_url, referer="https://auth.openai.com/email-verification")
 
 
@@ -524,10 +524,10 @@ def _login_via_password_or_otp(
     otp_after_ts: float,
     email_source: str | None = None,
 ) -> dict:
-    """优先密码登录；如进入 MFA challenge 则自动用 TOTP 完成。"""
+    """Prefer password login; if it enters an MFA challenge, finish automatically with TOTP."""
     password = _account_registration_password(email)
     if not password:
-        logger.info("[查活] 未找到注册密码，继续使用邮箱 OTP：%s", email)
+        logger.info("[Liveness] No registration password found, continuing with email OTP:%s", email)
         return _login_via_email_otp(
             session,
             email,
@@ -535,7 +535,7 @@ def _login_via_password_or_otp(
             email_source=email_source,
         )
 
-    logger.info("[查活] 账号存在密码，优先走密码登录：%s", email)
+    logger.info("[Liveness] The account has a password, preferring password login:%s", email)
     password_result = _password_verify(session, password)
     continue_url = _extract_continue_url(password_result)
     page = password_result.get("page") if isinstance(password_result, dict) else {}
@@ -546,18 +546,18 @@ def _login_via_password_or_otp(
         factor_id = _extract_factor_id(password_result, continue_url)
         secret = _account_totp_secret(email)
         if not factor_id:
-            raise RuntimeError(f"密码登录后进入 MFA 但未拿到 factor_id: {password_result}")
+            raise RuntimeError(f"After password login it entered MFA but did not get factor_id: {password_result}")
         if not secret:
-            raise RuntimeError(f"密码登录后进入 MFA，但账号没有 totp_secret：{email}")
-        logger.info("[查活] 已进入 MFA challenge，开始提交 TOTP：%s factor_id=%s", email, factor_id)
+            raise RuntimeError(f"After password login it entered MFA, but the account has no totp_secret:{email}")
+        logger.info("[Liveness] Entered the MFA challenge, now submitting TOTP:%s factor_id=%s", email, factor_id)
         _mfa_issue_challenge(session, factor_id)
         code = _account_totp_code(email)
         if not code:
-            raise RuntimeError(f"无法生成 TOTP 验证码：{email}")
+            raise RuntimeError(f"Cannot generate the TOTP verification code:{email}")
         mfa_result = _mfa_verify(session, factor_id, code)
         mfa_continue_url = _extract_continue_url(mfa_result) or continue_url
         if not mfa_continue_url:
-            raise RuntimeError(f"MFA 验证成功但没有 continue_url: {mfa_result}")
+            raise RuntimeError(f"MFA verification succeeded but no continue_url: {mfa_result}")
         return _follow_continue_and_fetch(
             session,
             mfa_continue_url,
@@ -565,7 +565,7 @@ def _login_via_password_or_otp(
         )
 
     if "email-verification" in continue_url or page_type in {"email_verification", "email_otp_send"}:
-        logger.info("[查活] 密码登录后仍进入邮箱 OTP，继续完成邮箱验证：%s", email)
+        logger.info("[Liveness] Password login still led to email OTP, continuing with email verification:%s", email)
         return _login_via_email_otp(
             session,
             email,
@@ -574,10 +574,10 @@ def _login_via_password_or_otp(
         )
 
     if continue_url:
-        logger.info("[查活] 密码登录直接给出回调地址，继续完成回调：%s", email)
+        logger.info("[Liveness] Password login gave the callback address directly, continuing with the callback:%s", email)
         return _follow_continue_and_fetch(session, continue_url, referer="https://auth.openai.com/log-in/password")
 
-    raise RuntimeError(f"密码登录成功但没有可用 continue_url: {password_result}")
+    raise RuntimeError(f"password login succeeded but there is no usable continue_url: {password_result}")
 
 
 def _login_via_full_web_flow(
@@ -587,20 +587,20 @@ def _login_via_full_web_flow(
     email_source: str | None,
     fingerprint_state: dict,
 ) -> tuple[BrowserSession, dict]:
-    """按 plus 纯协议注册的 Web 登录序列建立一份全新登录态。"""
+    """Establish a brand new login state following the Web login sequence of the plus pure-protocol registration."""
     session, authorize_url = _network_preflight_with_retry(
         email,
         proxy,
         fingerprint_state=fingerprint_state,
     )
-    # 预检返回后本函数持有会话；只有成功返回才把释放责任移交给上层。
+    # After the pre-check returns this function holds the session; the duty to release it passes to the upper layer only on successful return.
     try:
         otp_after_ts = time.time()
         final_url = follow_authorize(session, authorize_url)
         dead_code = detect_account_unusable_text(final_url)
         if dead_code:
             raise AccountUnusableError(
-                f"账号已废弃（{dead_code}）",
+                f"Account is dead ({dead_code})",
                 error_code=dead_code,
             )
         session_info = _login_via_password_or_otp(
@@ -614,7 +614,7 @@ def _login_via_full_web_flow(
         try:
             close_browser_session(session)
         except Exception:
-            logger.warning("[查活] 登录失败后的会话清理异常", exc_info=True)
+            logger.warning("[Liveness] Session cleanup error after login failure", exc_info=True)
         raise
 
 
@@ -641,7 +641,7 @@ def _validate_with_retry(
     for attempt in range(1, max_otp_attempts + 1):
         try:
             if current_otp is None:
-                logger.info("[查活] 等待登录 OTP：%s（第 %s/%s 次）", email, attempt, max_otp_attempts)
+                logger.info("[Liveness] Waiting for the login OTP: %s (attempt %s/%s)", email, attempt, max_otp_attempts)
                 current_otp = wait_for_otp(
                     email,
                     after_ts=otp_after_ts,
@@ -653,18 +653,18 @@ def _validate_with_retry(
             last_exc = exc
             if attempt >= max_otp_attempts:
                 break
-            logger.warning("[查活] OTP 无效/过期，重新发送后再取：%s", str(exc)[:180])
+            logger.warning("[Liveness] OTP invalid/expired, fetching again after resending:%s", str(exc)[:180])
             send_email_otp(session)
-            # 以“重新发送请求完成后”为新基准，避免刚刚失败的上一封旧码再次被 after 容忍窗口命中。
+            # Use "after the resend request completes" as the new baseline, so the old code that just failed is not matched again by the after tolerance window.
             otp_after_ts = time.time()
             current_otp = None
             time.sleep(1)
         except Exception as exc:
-            # 提交 OTP 后的网络抖动（连接断开/超时/代理波动）：同一会话重发验证码再验证一次。
+            # Network jitter after submitting the OTP (connection dropped / timeout / proxy fluctuation): resend the code on the same session and verify once more.
             if attempt >= max_otp_attempts or not _is_retryable_network_error(exc):
                 raise
             last_exc = exc
-            logger.warning("[查活] OTP 验证网络抖动，重新发送后再取（%s/%s）：%s", attempt, max_otp_attempts, str(exc)[:180])
+            logger.warning("[Liveness] OTP verification network jitter, fetching again after resending (%s/%s):%s", attempt, max_otp_attempts, str(exc)[:180])
             try:
                 send_email_otp(session)
             except Exception:
@@ -672,7 +672,7 @@ def _validate_with_retry(
             otp_after_ts = time.time()
             current_otp = None
             time.sleep(1)
-    raise last_exc if last_exc else RuntimeError("OTP 验证失败")
+    raise last_exc if last_exc else RuntimeError("OTP verification failed")
 
 
 def check_account_liveness(
@@ -685,22 +685,22 @@ def check_account_liveness(
     on_authenticated: Callable[[dict, BrowserSession], dict] | None = None,
 ) -> dict:
     """
-    重新登录账号并刷新最新 accessToken，关闭会话前在原会话查询套餐。
+    Log in to the account again and refresh the latest accessToken; query the plan on the original session before closing it.
 
-    返回：
+    Returns:
       {
         ok: bool,
         status: live/deactivated/failed,
         access_token: str?,
         session: dict?,
         checked_at: ISO,
-        plan_result: dict?,  # 查活成功时的同会话套餐查询结果；失败不影响查活 ok
+        plan_result: dict?,  # Plan query result in the same session when the liveness check succeeded; a failure does not affect the liveness check ok
         error: str?
       }
     """
     email = str(email or "").strip()
     if not email:
-        raise ValueError("email 不能为空")
+        raise ValueError("email cannot be empty")
 
     checked_at = _now()
     key = email.lower()
@@ -726,27 +726,27 @@ def check_account_liveness(
         fh.addFilter(lambda record: record.threadName == thread_name)
         root_logger.addHandler(fh)
 
-        logger.info("[查活] 日志文件：%s", path)
-        logger.info("[查活] 开始重新登录：%s", email)
+        logger.info("[Liveness] Log file:%s", path)
+        logger.info("[Liveness] Starting re-login:%s", email)
         existing_access_token = _stored_access_token(email)
         has_totp = bool(_account_totp_secret(email))
         if existing_access_token and not has_totp:
-            # 2FA 设置流程已经验证：先用已有 AT 预热 ChatGPT 登录态，再走
-            # reauth → 邮箱 OTP → callback。该链路不依赖容易被 CF 拦截的
-            # /api/auth/providers。已开启 TOTP 的账号保留密码 → MFA 路径，
-            # 避免把 MFA challenge 误当成邮箱 OTP 页面。
-            logger.info("[查活] 流程：登录态预热 → CSRF → Reauth Signin → Authorize → 邮箱 OTP → OAuth callback → Session/AT")
+            # 2FA The setup flow is already verified: first warm up the ChatGPT login state with the existing AT, then take
+            # reauth → the email OTP -> callback. This chain does not depend on the
+            # /api/auth/providers, which is easily blocked by CF. Accounts with TOTP enabled keep the password -> MFA path,
+            # to avoid mistaking the MFA challenge for the email OTP page.
+            logger.info("[Liveness] Flow: login state warm-up -> CSRF -> Reauth Signin -> Authorize -> email OTP → OAuth callback → Session/AT")
             session = _new_fingerprint_pinned_session(email, proxy, task_fingerprint_state)
             logger.info(
-                "[查活] 指纹生命周期：%s",
+                "[Liveness] Fingerprint lifecycle:%s",
                 _fingerprint_mode_label(task_fingerprint_state),
             )
             logger.info(
-                "[查活] 会话创建完成：proxy=%s device_id=%s（复用2FA稳定链路）",
-                session.proxy or "直连/配置随机",
+                "[Liveness] Session created: proxy=%s device_id=%s (reusing the stable 2FA chain)",
+                session.proxy or "direct/configured random",
                 session.device_id,
             )
-            logger.info("[查活] 指纹摘要：%s", session.fingerprint_summary_text())
+            logger.info("[Liveness] Fingerprint summary:%s", session.fingerprint_summary_text())
             _warm_authenticated_session(session, existing_access_token)
             human_delay("navigate")
             try:
@@ -759,12 +759,12 @@ def check_account_liveness(
             except Exception as reauth_exc:
                 if not _is_retryable_network_error(reauth_exc):
                     raise
-                # reauth/callback 的同会话阶段重试已经耗尽。继续复用熔断的
-                # Cookie Jar 没有意义；参考 plus 纯协议注册，建立干净会话并按
-                # /auth/login → providers/session/csrf/session → signin 完整重登。
+                # reauth/callback the same-session stage retries are exhausted. Continuing to reuse the tripped
+                # Cookie Jar one is meaningless; following the plus pure-protocol registration, build a clean session and run
+                # /auth/login → providers/session/csrf/session → signin the complete re-login.
                 failed_proxy = session.proxy if proxy is None else proxy
                 logger.warning(
-                    "[查活] AT reauth 链临时失败，切换干净会话执行纯协议完整登录：%s",
+                    "[Liveness] AT reauth chain failed temporarily, switching to a clean session for a full pure-protocol login:%s",
                     str(reauth_exc)[:240],
                 )
                 try:
@@ -778,11 +778,11 @@ def check_account_liveness(
                     fingerprint_state=task_fingerprint_state,
                 )
         else:
-            # 兼容没有本地 AT 或已开启 TOTP 的记录，按 plus 成功注册样本复现
-            # 登录页 document 与完整 NextAuth 调用顺序。
+            # Compatible with records without a local AT or with TOTP enabled; reproduces, following the successful plus registration sample,
+            # the login page document and the complete NextAuth call order.
             logger.info(
-                "[查活] 流程：登录页 → Providers/Session/CSRF/Session → Signin → "
-                "Authorize → 密码/邮箱 OTP → MFA(如有) → OAuth callback → Session/AT"
+                "[Liveness] Flow: login page → Providers/Session/CSRF/Session → Signin → "
+                "Authorize → password/email OTP -> MFA (if any) → OAuth callback → Session/AT"
             )
             session, session_info = _login_via_full_web_flow(
                 email,
@@ -792,11 +792,11 @@ def check_account_liveness(
             )
         access_token = str(session_info.get("accessToken") or "")
         if not access_token:
-            raise RuntimeError("重新登录后未拿到 accessToken")
+            raise RuntimeError("no accessToken after re-login accessToken")
 
         user = session_info.get("user") or {}
         account = session_info.get("account") or {}
-        logger.info("[查活] 正常：%s user_id=%s plan=%s", email, user.get("id"), account.get("planType"))
+        logger.info("[Liveness] Healthy:%s user_id=%s plan=%s", email, user.get("id"), account.get("planType"))
         fp = _safe_fingerprint_for_account(session)
         result = {
             "ok": True,
@@ -810,7 +810,7 @@ def check_account_liveness(
         }
         if on_authenticated is not None:
             return on_authenticated(result, session)
-        # 直接调用底层查活时也自动查询；业务队列通过 hook 先落库新 AT，再统一占用套餐任务。
+        # It is also queried automatically when the low-level liveness check is called directly; the business queue first stores the new AT through a hook and then occupies the plan task in a unified way.
         try:
             from core.chatgpt_plan import check_account_plan
             from core.plan_check_service import _wait_for_rate_slot
@@ -822,18 +822,18 @@ def check_account_liveness(
 
     except AccountUnusableError as exc:
         code = getattr(exc, "error_code", "") or detect_account_unusable_text(str(exc)) or "account_deactivated"
-        logger.warning("[查活] 已废号：%s %s", email, code)
+        logger.warning("[Liveness] Dead account:%s %s", email, code)
         return {"ok": False, "status": "deactivated", "checked_at": checked_at, "error": code}
     except Exception as exc:
         code = detect_account_unusable_text(_exception_response_text(exc)) or detect_account_unusable_text(str(exc))
         if code:
-            logger.warning("[查活] 已废号：%s %s", email, code)
+            logger.warning("[Liveness] Dead account:%s %s", email, code)
             return {"ok": False, "status": "deactivated", "checked_at": checked_at, "error": code}
-        logger.warning("[查活] 失败：%s %s: %s", email, type(exc).__name__, str(exc)[:260])
+        logger.warning("[Liveness] Failed:%s %s: %s", email, type(exc).__name__, str(exc)[:260])
         return {"ok": False, "status": "failed", "checked_at": checked_at, "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
     finally:
         try:
-            logger.info("[查活] 结束：%s", email)
+            logger.info("[Liveness] Finished:%s", email)
             if session is not None:
                 try:
                     close_browser_session(session)
@@ -844,8 +844,8 @@ def check_account_liveness(
                 try:
                     fh.close()
                 except Exception:
-                    # 已保存的查活/套餐结果不应被日志文件关闭异常覆盖。
-                    logger.warning("[查活] 日志文件关闭失败", exc_info=True)
+                    # A saved liveness/plan result must not be overwritten by an exception when the log file is closed.
+                    logger.warning("[Liveness] Failed to close the log file", exc_info=True)
         finally:
             with _RUNNING_LOCK:
                 _RUNNING.discard(key)

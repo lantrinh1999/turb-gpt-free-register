@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Skyvern Browser Sessions 客户端。"""
+"""Skyvern Browser Sessions client."""
 from __future__ import annotations
 
 import logging
@@ -25,7 +25,7 @@ class SkyvernSession:
 
 
 class SkyvernClient:
-    """最小 Skyvern Browser Session 客户端。"""
+    """Minimal Skyvern Browser Session client."""
 
     def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = (api_key if api_key is not None else getattr(_cfg, "SKYVERN_API_KEY", "") or "").strip()
@@ -33,7 +33,7 @@ class SkyvernClient:
 
     def require_api_key(self) -> str:
         if not self.api_key:
-            raise RuntimeError("SKYVERN_API_KEY 为空。请在 .env 或 WebUI 配置页填写 Skyvern API Key。")
+            raise RuntimeError("SKYVERN_API_KEY is empty. Fill in the Skyvern API Key in .env or the WebUI settings page.")
         return self.api_key
 
     def _headers(self) -> dict[str, str]:
@@ -44,7 +44,7 @@ class SkyvernClient:
         }
 
     def cdp_headers(self) -> dict[str, str]:
-        """连接 Skyvern browser_address WebSocket 时需要携带的认证头。"""
+        """Authentication headers to carry when connecting to the Skyvern browser_address WebSocket."""
         api_key = self.require_api_key()
         return {
             "x-api-key": api_key,
@@ -119,7 +119,7 @@ class SkyvernClient:
         payload["ad_blocker"] = bool(getattr(_cfg, "SKYVERN_AD_BLOCKER", True))
 
         safe_payload = dict(payload)
-        logger.info("[Skyvern] 创建 browser session: base=%s payload=%s", self.api_base, safe_payload)
+        logger.info("[Skyvern] Creating browser session: base=%s payload=%s", self.api_base, safe_payload)
         resp = requests.post(
             f"{self.api_base}/v1/browser_sessions",
             headers=self._headers(),
@@ -133,7 +133,7 @@ class SkyvernClient:
         if resp.status_code >= 400:
             raise RuntimeError(f"Skyvern create browser session HTTP {resp.status_code}: {data}")
         if not isinstance(data, dict):
-            raise RuntimeError(f"Skyvern create browser session 响应不是对象: {data!r}")
+            raise RuntimeError(f"Skyvern create browser session response is not an object: {data!r}")
         return data
 
     def get_browser_session(self, session_id: str) -> dict[str, Any]:
@@ -149,7 +149,7 @@ class SkyvernClient:
         if resp.status_code >= 400:
             raise RuntimeError(f"Skyvern get browser session HTTP {resp.status_code}: {data}")
         if not isinstance(data, dict):
-            raise RuntimeError(f"Skyvern get browser session 响应不是对象: {data!r}")
+            raise RuntimeError(f"Skyvern get browser session response is not an object: {data!r}")
         return data
 
     def close_browser_session(self, session_id: str) -> dict[str, Any]:
@@ -171,7 +171,7 @@ class SkyvernClient:
         data = self.create_browser_session()
         session_id = self._session_id(data)
         address = self._browser_address(data)
-        # create 响应有时先返回 session_id，browser_address 需要 get session 才出现。
+        # create The response sometimes returns session_id first; browser_address only appears after get session.
         if session_id and not address:
             last = data
             for _ in range(10):
@@ -182,15 +182,15 @@ class SkyvernClient:
                     data = {**data, "latest": last}
                     break
             if not address:
-                raise RuntimeError(f"Skyvern browser session 缺少 browser_address/cdp_url: {last}")
+                raise RuntimeError(f"Skyvern browser session missing browser_address/cdp_url: {last}")
         if not session_id:
             session_id = self._session_id(data.get("latest") or {}) if isinstance(data.get("latest"), dict) else ""
         if not address:
-            raise RuntimeError(f"Skyvern browser session 缺少 browser_address/cdp_url: {data}")
+            raise RuntimeError(f"Skyvern browser session missing browser_address/cdp_url: {data}")
         proxy_location = str(getattr(_cfg, "SKYVERN_PROXY_LOCATION", "") or "").strip()
         profile_id = str(getattr(_cfg, "SKYVERN_BROWSER_PROFILE_ID", "") or "").strip()
         safe_raw = dict(data)
-        logger.info("[Skyvern] browser session 已创建：session_id=%s browser_address=%s", session_id or "-", address)
+        logger.info("[Skyvern] browser session created:session_id=%s browser_address=%s", session_id or "-", address)
         return SkyvernSession(
             connect_url=address,
             api_key_present=True,

@@ -67,7 +67,7 @@ class DelayedEmailAllocationTests(unittest.TestCase):
         )
 
     def test_roxy_accepts_verification_page_reached_during_slow_diagnostic(self):
-        """复现邮箱提交超时后，读取诊断 DOM 时才完成 OTP 跳转的竞态。"""
+        """Reproduce the race where the OTP navigation only completes while the diagnostic DOM is being read after the email submission timed out."""
         with patch.object(
             roxy, "_current_email_submit_next_state", side_effect=[None, "otp"]
         ), patch.object(roxy, "_type_email_address"), patch.object(

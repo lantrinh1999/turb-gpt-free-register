@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-注册成功后自动触发 Flow 的配置项。
-设置 ENABLE_FLOW_TRIGGER = False 可完全跳过此步骤。
+Settings for automatically triggering a Flow after a successful registration.
+Set ENABLE_FLOW_TRIGGER = False to skip this step completely.
 """
 from config.env_loader import apply_env_overrides
 
-# 是否启用自动触发 Flow（False = 跳过，不影响注册结果）
+# Whether to enable the automatic Flow trigger (False = skip, does not affect the registration result)
 ENABLE_FLOW_TRIGGER: bool = False
 
-# Flow 触发接口地址
+# Flow trigger endpoint address
 FLOW_TRIGGER_URL: str = ""
 
-# Bearer Token（Authorization 头）
+# Bearer Token(Authorization header)
 FLOW_TRIGGER_BEARER: str = ""
 
-# Cookie 字符串
+# Cookie string
 FLOW_TRIGGER_COOKIE: str = ""
 
-# 发送的 JSON payload（会把 access_token 注入进去）
+# JSON payload to send (access_token is injected into it)
 FLOW_TRIGGER_PAYLOAD: dict = {}
 
-# 请求超时（秒）
+# Request timeout (seconds)
 FLOW_TRIGGER_TIMEOUT: int = 15
 
 # ---- .env overrides for WebUI editable fields ----

@@ -190,7 +190,7 @@ class RemailClientTests(unittest.TestCase):
         with patch.object(email_config, "REMAIL_API_KEY", "rk-test-key", create=True), patch.object(
             email_config, "REMAIL_PROJECT_ID", 0, create=True
         ):
-            with self.assertRaisesRegex(remail_client.RemailError, "项目 ID"):
+            with self.assertRaisesRegex(remail_client.RemailError, "Project ID"):
                 remail_client.pick_account()
 
     def test_release_account_clears_cached_context(self):

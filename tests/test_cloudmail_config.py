@@ -18,7 +18,7 @@ class CloudMailConfigTests(unittest.TestCase):
 
     def test_secret_registry_includes_cloudmail_token(self):
         self.assertEqual(SECRET_ENV_KEYS["CLOUDMAIL_AUTH_TOKEN"], "CloudMail Authorization Token")
-        self.assertEqual(SECRET_ENV_KEYS["CLOUDMAIL_PASSWORD"], "CloudMail 登录密码")
+        self.assertEqual(SECRET_ENV_KEYS["CLOUDMAIL_PASSWORD"], "CloudMail login password")
 
     def test_webui_exposes_cloudmail_fields(self):
         keys = {item["key"]: item for item in EDITABLE_FIELDS}

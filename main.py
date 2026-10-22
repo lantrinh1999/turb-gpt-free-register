@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-ChatGPT 协议注册全流程入口
-串联 12 个步骤，自动完成 ChatGPT 账号注册
+ChatGPT Protocol registration full flow entry point
+Chains 12 steps to complete a ChatGPT account registration automatically
 """
 import sys
 import argparse
@@ -10,8 +10,8 @@ import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Callable
 
-from config import REGISTER_EMAIL, REGISTER_NAME  # 这两个一般不在 WebUI 改
-# 可热改的，按模块属性方式读
+from config import REGISTER_EMAIL, REGISTER_NAME  # These two are generally not changed in the WebUI
+# Hot-changeable ones, read through module attributes
 from config import twofa as _twofa_cfg
 from config import email as _email_cfg
 from config import roxybrowser as _roxy_cfg
@@ -47,7 +47,7 @@ from core.humanize import delay as human_delay
 from core.name_samples import random_display_name
 from core.profile_utils import generate_random_birthday
 
-# 配置日志
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -60,7 +60,7 @@ _FINALIZE_SESSION_BACKOFF_BASE = 2.0
 
 
 def configure_logging(verbose: bool = False) -> None:
-    """配置 CLI 日志：默认简洁，--verbose 时显示完整步骤细节。"""
+    """Configure the CLI logging: concise by default, full step details with --verbose."""
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     for handler in root.handlers:
@@ -76,12 +76,12 @@ def configure_logging(verbose: bool = False) -> None:
 
 
 def _is_success(result: dict) -> bool:
-    """判断单次注册结果是否成功，集中收敛批量统计规则。"""
+    """Judge whether a single registration succeeded, centralizing the batch statistics rules."""
     return isinstance(result, dict) and bool(result.get("success"))
 
 
 def _protocol_registration_fingerprint_seed(email: str) -> str | None:
-    """按配置决定协议注册是否跨任务复用同邮箱指纹。"""
+    """Decide by config whether protocol registration reuses the same-email fingerprint across tasks."""
     if not bool(getattr(_register_cfg, "PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL", False)):
         return None
     identity = str(email or "").strip().lower()
@@ -95,28 +95,28 @@ def _finalize_registration_session(
     callback_referer: str = "https://auth.openai.com/about-you",
 ) -> tuple[dict, str]:
     """
-    完成 OAuth 回调并拉取 accessToken。
+    Complete the OAuth callback and fetch the accessToken.
 
-    create_account 返回只代表创建接口通过，真正可用必须等 chatgpt.com
-    写入登录态 cookie 且 /api/auth/session 返回 accessToken。
+    create_account The return of the create endpoint only means it was accepted; it is truly usable only after chatgpt.com
+    the login-state cookie is written and /api/auth/session returns the accessToken.
     """
     if not continue_url:
-        raise RuntimeError("create_account 响应缺少 continue_url，无法完成 OAuth 回调")
+        raise RuntimeError("create_account The response lacks continue_url, cannot complete the OAuth callback")
 
     last_exc: Exception | None = None
     for attempt in range(1, _FINALIZE_SESSION_MAX_ATTEMPTS + 1):
         try:
             logger.info(
-                f"[登录态] 完成 OAuth 回调并拉取 Token：{email} "
-                f"(尝试 {attempt}/{_FINALIZE_SESSION_MAX_ATTEMPTS})"
+                f"[login state] Completing the OAuth callback and fetching the Token:{email} "
+                f"(attempt {attempt}/{_FINALIZE_SESSION_MAX_ATTEMPTS})"
             )
             follow_oauth_callback(session, continue_url, referer=callback_referer)
             human_delay("post_auth")
             session_info = fetch_session(session)
             access_token = session_info.get("accessToken")
             if not access_token:
-                raise RuntimeError("session 响应缺少 accessToken")
-            logger.info(f"[登录态] 已拿到 accessToken：{email}")
+                raise RuntimeError("session response is missing accessToken")
+            logger.info(f"[login state] Got the accessToken:{email}")
             return session_info, access_token
         except Exception as exc:
             last_exc = exc
@@ -124,47 +124,47 @@ def _finalize_registration_session(
                 break
             backoff = _FINALIZE_SESSION_BACKOFF_BASE ** (attempt - 1)
             logger.warning(
-                f"[登录态] 回调或拉取 Token 失败：{email}，"
-                f"{type(exc).__name__}: {str(exc)[:180]}，{backoff:.1f}s 后重试"
+                f"[login state] Callback or Token fetch failed: {email},"
+                f"{type(exc).__name__}: {str(exc)[:180]}, retrying in {backoff:.1f}s"
             )
             time.sleep(backoff)
 
     raise RuntimeError(
-        f"OAuth 回调/拉取 Token 重试耗尽：{email}，"
-        f"最后错误：{type(last_exc).__name__ if last_exc else 'Unknown'}: {last_exc}"
+        f"OAuth Callback/Token fetch retries exhausted: {email},"
+        f"last error:{type(last_exc).__name__ if last_exc else 'Unknown'}: {last_exc}"
     ) from last_exc
 
 
 def generate_display_name() -> str:
-    """生成只包含英文字母和空格的显示名，符合注册接口限制。"""
+    """Generate a display name made only of English letters and spaces, matching the registration API limits."""
     return random_display_name()
 
 
 def prepare_registration_inputs() -> tuple[str | None, str, str]:
-    """按 CLI 规则准备一次注册所需的邮箱、显示名和生日。"""
+    """Prepare the email, display name and birthday needed for one registration according to the CLI rules."""
     email = REGISTER_EMAIL
     name = REGISTER_NAME
     birthday = generate_random_birthday()
 
-    # 邮箱：自动模式下先留空；浏览器驱动会在页面找到邮箱输入框后领取，
-    # protocol 驱动会在 run_registration 开始认证前领取。
+    # Email: left empty first in automatic mode; the browser driver claims it after the page finds the email input box,
+    # protocol and the driver claims it before run_registration starts authentication.
     if not email:
         if not _email_cfg.USE_EMAIL_SERVICE:
-            email = input("请输入注册邮箱: ").strip()
+            email = input("Please enter the registration email: ").strip()
 
-    # 显示名称：未填则随机生成
-    # OpenAI 限制：name_invalid_chars —— 只允许字母和空格，不能含数字/标点
+    # Display name: generated randomly if not filled in
+    # OpenAI Restriction: name_invalid_chars - only letters and spaces are allowed, no digits/punctuation
     if not name:
         if _email_cfg.USE_EMAIL_SERVICE:
             name = generate_display_name()
-            logger.debug(f"自动生成显示名称: {name}")
+            logger.debug(f"Automatically generated display name: {name}")
         else:
-            name = input("请输入显示名称: ").strip()
+            name = input("Please enter the display name: ").strip()
 
     if not name:
-        raise RuntimeError("显示名称不能为空")
+        raise RuntimeError("Display name cannot be empty")
     if not email and not _email_cfg.USE_EMAIL_SERVICE:
-        raise RuntimeError("邮箱不能为空")
+        raise RuntimeError("Email cannot be empty")
 
     return email, name, birthday
 
@@ -179,23 +179,23 @@ def run_registration(
     on_email_acquired: Callable[[str], None] | None = None,
 ):
     """
-    执行完整的 ChatGPT 邮箱密码注册流程。
+    Run the complete ChatGPT email-and-password registration flow.
 
-    OpenAI 当前默认流程：signin 时携带 login_hint+screen_hint=login_or_signup
-    → 进入 /create-account/password 并提交密码 → 发送并验证邮箱 OTP
-    → about-you 提交昵称生日 → 完成。
+    OpenAI Current default flow: signin carries login_hint+screen_hint=login_or_signup
+    → enter /create-account/password and submit the password -> send and verify the email OTP
+    → about-you submit nickname and birthday -> done.
 
     Args:
-        email: 注册邮箱
-        name: 用户显示名称
-        birthday: 生日，格式 YYYY-MM-DD
-        proxy: 代理地址（不传则从 PROXY_POOL 随机抽）
-        otp_code: 邮箱验证码（如果为None，会等待手动输入）
+        email: registration email
+        name: user display name
+        birthday: birthday, format YYYY-MM-DD
+        proxy: Proxy address (when not passed one is drawn from PROXY_POOL at random)
+        otp_code: Email verification code (if None, it waits for manual input)
     """
-    # 可选注册驱动：
-    #   protocol     = 原有纯协议（curl_cffi）
-    #   roxy         = RoxyBrowser 指纹浏览器 + Selenium
-    #   cloak        = CloakBrowser + Playwright/Selenium 适配层
+    # Optional registration drivers:
+    #   protocol     = Original pure protocol (curl_cffi)
+    #   roxy         = RoxyBrowser fingerprint browser + Selenium
+    #   cloak        = CloakBrowser + Playwright/Selenium adapter layer
     #   browser_use  = Browser Use Cloud stealth Chromium + Playwright
     #   skyvern      = Skyvern Browser Sessions + Playwright
     driver_mode = str(getattr(_roxy_cfg, "REGISTRATION_DRIVER", "protocol") or "protocol").strip().lower()
@@ -245,34 +245,34 @@ def run_registration(
         )
     if driver_mode not in ("protocol", "api", "http"):
         raise RuntimeError(
-            f"不支持的 REGISTRATION_DRIVER={driver_mode!r}，可选 protocol / roxy / cloak / browser_use / skyvern"
+            f"Unsupported REGISTRATION_DRIVER={driver_mode!r}, options are protocol / roxy / cloak / browser_use / skyvern"
         )
 
-    # 纯协议驱动没有“邮箱输入框”可等待，因此在创建 BrowserSession 前领取。
+    # The pure-protocol driver has no "email input box" to wait for, so the email is claimed before the BrowserSession is created.
     if not str(email or "").strip():
         if not _email_cfg.USE_EMAIL_SERVICE:
             raise RuntimeError(
-                "手动模式未配置邮箱。请在 WebUI 配置页设置 REGISTER_EMAIL，"
-                "或开启 USE_EMAIL_SERVICE 并从邮箱池领取。"
+                "Manual mode has no email configured. Please set REGISTER_EMAIL on the WebUI config page,"
+                "or enable USE_EMAIL_SERVICE and claim one from the email pool."
             )
         email = acquire_email()
         if on_email_acquired:
             on_email_acquired(email)
 
-    # 创建浏览器会话（proxy=None 时自动从 config.PROXY_POOL 随机抽一个）
+    # Create the browser session (when proxy=None one is drawn from config.PROXY_POOL at random automatically)
     fingerprint_seed = _protocol_registration_fingerprint_seed(email)
     reuse_fingerprint = fingerprint_seed is not None
-    # 单个 BrowserSession 生命周期内始终复用同一指纹；是否跨任务按邮箱
-    # 稳定复用由 PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL 控制。
+    # The same fingerprint is always reused within the lifetime of a single BrowserSession; whether it is stably reused across tasks by email
+    # is controlled by PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL.
     session = BrowserSession(
         proxy=proxy,
         fingerprint_seed=fingerprint_seed,
     )
 
-    # 从代理 URL 中抽取 sid 段做日志，避免把账号密码完整打印
-    proxy_label = "无"
+    # Extract the sid segment from the proxy URL for logging, to avoid printing the account and password in full
+    proxy_label = "none"
     if session.proxy:
-        # 形如 socks5h://user-region-JP-sid-XXXX-t-5:pass@host:port
+        # shaped like socks5h://user-region-JP-sid-XXXX-t-5:pass@host:port
         try:
             sid_part = next(
                 (seg for seg in session.proxy.split("@")[0].split("-") if len(seg) == 8),
@@ -280,20 +280,20 @@ def run_registration(
             )
             proxy_label = f"{session.proxy.split('://')[0]}://...sid-{sid_part}...@{session.proxy.split('@')[-1]}"
         except Exception:
-            proxy_label = "已配置"
+            proxy_label = "configured"
 
     if not birthday:
         birthday = generate_random_birthday()
 
-    logger.info(f"[注册] 开始：{email}，代理={proxy_label}")
+    logger.info(f"[registration] Start: {email}, proxy={proxy_label}")
     logger.info(
-        "[指纹] 生命周期模式：%s",
-        "同邮箱保持" if reuse_fingerprint else "每次任务重新创建",
+        "[fingerprint] Lifecycle mode:%s",
+        "kept per email" if reuse_fingerprint else "re-created per task",
     )
-    logger.info(f"[注册] 本次随机生日: {birthday}")
+    logger.info(f"[registration] Random birthday this time: {birthday}")
     fp = session.fingerprint_summary()
     logger.info(
-        "[指纹] 协议注册统一上下文: device_id=%s oai_session_id=%s auth_session_logging_id=%s "
+        "[fingerprint] Unified context of protocol registration: device_id=%s oai_session_id=%s auth_session_logging_id=%s "
         "ua=%s lang=%s tz=%s(%s) screen=%sx%s@%s cpu=%s mem=%s geo=%s:%s",
         session.device_id[:12] + "...",
         session.oai_session_id[:12] + "...",
@@ -310,11 +310,11 @@ def run_registration(
     create_acknowledged = False
     registration_password = None
     try:
-        # 网络预检必须在 signin/follow_authorize 之前完成；预检不带邮箱，不会触发 OTP。
+        # The network pre-check must finish before signin/follow_authorize; the pre-check carries no email and does not trigger an OTP.
         network_preflight(session)
         human_delay("navigate")
 
-        # 根据 2026-07-19 HAR 补齐匿名态 ChatGPT 首屏/模型预热链路。
+        # Fill in the anonymous ChatGPT first-screen / model warm-up chain according to the 2026-07-19 HAR.
         if getattr(_protocol_cfg, "CHATGPT_ANON_BOOTSTRAP_ENABLED", True):
             from core.chatgpt_bootstrap import anonymous_bootstrap
             anonymous_bootstrap(
@@ -323,25 +323,25 @@ def run_registration(
             )
             human_delay("navigate")
 
-        # ==================== 阶段1: ChatGPT 认证 ====================
-        # 步骤1: 获取 providers
+        # ==================== Stage 1: ChatGPT authentication ====================
+        # Step 1: get providers
         providers = get_providers(session)
         human_delay("api")
 
-        # 步骤2: 获取 CSRF token
+        # Step 2: get CSRF token
         csrf_token = get_csrf_token(session)
         human_delay("api")
 
-        # 步骤3: 发起 OAuth signin
+        # Step 3: initiate OAuth signin
         authorize_url = signin_openai(session, csrf_token, email)
         human_delay("api")
 
-        # ==================== 阶段2: OpenAI Auth ====================
-        # 步骤4: 跟随 authorize URL（建立 auth.openai.com 的 cookies）
+        # ==================== Stage 2: OpenAI Auth ====================
+        # Step 4: follow the authorize URL (establishes the cookies of auth.openai.com)
         authorize_final_url = follow_authorize(session, authorize_url)
         human_delay("navigate")
 
-        # 步骤5-8: 强制走邮箱+密码注册，不使用 passwordless OTP-only 分支。
+        # Steps 5-8: force email + password registration, and do not use the passwordless OTP-only branch.
         navigate_create_account_password(session, authorize_final_url)
         human_delay("navigate")
         registration_password = generate_registration_password()
@@ -359,34 +359,34 @@ def run_registration(
         )
         create_acknowledged = True
 
-        # 只读取本次发送之后到达的验证码，避免误取历史邮件。
+        # Only read verification codes that arrived after this send, to avoid taking historical emails by mistake.
         otp_after_ts = time.time()
         navigate_email_otp_send(session, register_result.get("continue_url"))
         human_delay("navigate")
 
-        # ==================== 阶段3: 验证码验证 ====================
-        # Sentinel Token 不提前生成；等 OTP 到手后紧贴 validate 请求生成，
-        # 避免等待邮箱期间 challenge 过期或与重新发送后的状态不一致。
+        # ==================== Stage 3: verification code validation ====================
+        # Sentinel Token Not generated in advance; generated right before the validate request once the OTP is in hand,
+        # to avoid the challenge expiring while waiting for the email or being inconsistent with the state after a resend.
 
-        # 等待验证码：USE_EMAIL_SERVICE=True 时自动从 Outlook 取件，否则人工输入。
-        # 如果验证码错误/过期，自动重新发送并重新取最新验证码。
+        # Waiting for the verification code: with USE_EMAIL_SERVICE=True it is fetched from Outlook automatically, otherwise entered manually.
+        # If the verification code is wrong/expired, automatically resend and fetch the latest verification code again.
         validate_result = None
         max_otp_attempts = 3
         current_otp = otp_code
         for otp_attempt in range(1, max_otp_attempts + 1):
             if current_otp is None:
                 if _email_cfg.USE_EMAIL_SERVICE:
-                    logger.info(f"[OTP] 等待验证码：{email}（第 {otp_attempt}/{max_otp_attempts} 次）")
+                    logger.info(f"[OTP] Waiting for the verification code: {email} (attempt {otp_attempt}/{max_otp_attempts})")
                     current_otp = wait_for_otp(email, after_ts=otp_after_ts)
                 else:
                     logger.info("")
-                    logger.info(f"[OTP] 请检查邮箱，输入收到的 6 位验证码（第 {otp_attempt}/{max_otp_attempts} 次）:")
-                    current_otp = input(">>> 验证码: ").strip()
+                    logger.info(f"[OTP] Please check your email and enter the 6-digit verification code received (attempt {otp_attempt}/{max_otp_attempts}):")
+                    current_otp = input(">>> verification code: ").strip()
 
             human_delay("otp_input")
             try:
-                # HAR 对齐：2026-07-19 抓包中的 email-otp/validate 未携带 Sentinel。
-                # 保留开关，必要时可切回旧逻辑。
+                # HAR Aligned: email-otp/validate in the 2026-07-19 capture carries no Sentinel.
+                # The switch is kept so the old logic can be restored when necessary.
                 sentinel_header_9 = None
                 so_header_9 = None
                 if getattr(_protocol_cfg, "SEND_SENTINEL_ON_EMAIL_OTP_VALIDATE", False):
@@ -394,26 +394,26 @@ def run_registration(
                     sentinel_header_9, so_header_9 = build_sentinel_header(session, sentinel_resp_9, "authorize_continue")
                     human_delay("challenge")
 
-                # 步骤10: 提交验证码
+                # Step 10: submit the verification code
                 validate_result = validate_email_otp(session, current_otp, sentinel_header_9, so_header_9)
                 break
             except EmailOtpInvalidError as exc:
                 if otp_attempt >= max_otp_attempts:
                     raise
-                logger.warning(f"[OTP] 验证码错误/过期：{str(exc)[:180]}，准备重新发送并重新获取验证码")
+                logger.warning(f"[OTP] Verification code wrong/expired: {str(exc)[:180]}, preparing to resend and fetch a new verification code")
                 otp_after_ts = time.time()
                 send_email_otp(session)
                 human_delay("api")
                 current_otp = None
 
         if validate_result is None:
-            raise RuntimeError("OTP 验证未完成")
+            raise RuntimeError("OTP validation not completed")
         human_delay("api")
 
-        # OTP 校验后的下一步由服务端 auth session 决定：
-        #   - about_you：新账号，需要继续提交姓名/生日 create_account。
-        #   - external_url：通常说明服务端已可直接 OAuth 回调（常见于已有账号/无需资料页），
-        #                   此时再强行调用 create_account 会触发 invalid_auth_step。
+        # OTP The next step after validation is decided by the server-side auth session:
+        #   - about_you: a new account that needs to continue submitting the name/birthday via create_account.
+        #   - external_url: usually means the server can go straight to the OAuth callback (common for existing accounts / no profile page needed),
+        #                   and forcing a create_account call then would trigger invalid_auth_step.
         page = validate_result.get("page") if isinstance(validate_result, dict) else {}
         page = page if isinstance(page, dict) else {}
         page_type = str(page.get("type") or "")
@@ -426,11 +426,11 @@ def run_registration(
             or page.get("url")
         )
         logger.info(
-            f"[步骤10] 后续分支判断: page_type={page_type or '空'}, "
+            f"[Step 10] Next-branch decision: page_type={page_type or 'empty'}, "
             f"has_continue_url={bool(otp_continue_url)}"
         )
 
-        # ==================== 阶段5/6: 完成注册或直接 OAuth 回调 ====================
+        # ==================== Stage 5/6: finish registration or go straight to the OAuth callback ====================
         otp_continue_text = str(otp_continue_url or "")
         direct_oauth_after_otp = bool(
             otp_continue_text
@@ -443,8 +443,8 @@ def run_registration(
         )
         if page_type == "external_url" or direct_oauth_after_otp:
             if not otp_continue_url:
-                raise RuntimeError(f"OTP external_url 响应缺少可跟随 URL，无法继续: {validate_result}")
-            logger.info(f"[注册] OTP 后进入 OAuth 回调分支，跳过 create_account：{email}")
+                raise RuntimeError(f"OTP external_url The response lacks a followable URL, cannot continue: {validate_result}")
+            logger.info(f"[registration] After the OTP it entered the OAuth callback branch, skipping create_account:{email}")
             create_acknowledged = True
             session_info, access_token = _finalize_registration_session(
                 session,
@@ -461,44 +461,44 @@ def run_registration(
                 )
             human_delay("post_auth")
         else:
-            # 兼容服务端只返回 continue_url=/about-you 但 page.type 为空/变化的情况。
+            # Compatible with the case where the server only returns continue_url=/about-you but page.type is empty/changed.
             if page_type and page_type not in ("about_you", "about-you"):
                 if otp_continue_url and "about-you" not in str(otp_continue_url):
                     raise RuntimeError(
-                        f"OTP 后续页面类型未知，不应盲目 create_account: "
+                        f"OTP The following page type is unknown, do not blindly create_account: "
                         f"page_type={page_type}, resp={validate_result}"
                     )
                 logger.warning(
-                    f"[步骤10] 未知 page_type={page_type}，但 continue_url 指向 about-you，继续 create_account"
+                    f"[Step 10] Unknown page_type={page_type}, but continue_url points to about-you, continuing create_account"
                 )
 
-            # 先真实导航到 about-you，让 auth session/page state 与 create_account 一致。
+            # Navigate to about-you for real first, so the auth session/page state is consistent with create_account.
             about_url = str(otp_continue_url) if otp_continue_url and "about-you" in str(otp_continue_url) else None
             navigate_about_you(session, about_url)
             human_delay("navigate")
 
-            # 步骤11: 获取 Sentinel Token（oauth_create_account）
+            # Step 11: get the Sentinel Token (oauth_create_account)
             sentinel_resp_11 = request_sentinel_token(session, "oauth_create_account")
             sentinel_header_11, so_header_11 = build_sentinel_header(session, sentinel_resp_11, "oauth_create_account")
             human_delay("challenge")
 
             human_delay("form")
 
-            # 步骤12: 提交用户信息，完成注册
+            # Step 12: submit the user information to complete the registration
             create_result = create_account(session, name, birthday, sentinel_header_11, so_header_11)
             create_acknowledged = True
 
-            logger.info(f"[注册] 创建接口已通过：{email}，继续完成 OAuth 回调")
+            logger.info(f"[registration] The create endpoint passed: {email}, continuing to complete the OAuth callback")
             human_delay("post_auth")
 
-            # 步骤12.5: 跟随 create_account 返回的 continue_url 完成 OAuth 回调
+            # Step 12.5: follow the continue_url returned by create_account to complete the OAuth callback
             continue_url = create_result.get("continue_url")
             if not continue_url:
                 raise RuntimeError(
-                    f"create_account 响应缺少 continue_url，无法继续: {create_result}"
+                    f"create_account The response lacks continue_url, cannot continue: {create_result}"
                 )
 
-            # 步骤13: 拉 /api/auth/session 提取 accessToken
+            # Step 13: pull /api/auth/session to extract the accessToken
             session_info, access_token = _finalize_registration_session(session, continue_url, email)
             if getattr(_protocol_cfg, "CHATGPT_AUTH_BOOTSTRAP_ENABLED", True):
                 from core.chatgpt_bootstrap import authenticated_bootstrap
@@ -509,26 +509,26 @@ def run_registration(
                 )
             human_delay("post_auth")
 
-        # ==================== 阶段7: 设置 2FA（受 config.ENABLE_2FA 控制）====================
+        # ==================== Stage 7: set up 2FA (controlled by config.ENABLE_2FA)====================
         totp_secret = None
         if _twofa_cfg.ENABLE_2FA:
-            # 步骤14-20: 重认证（要再收一次邮箱 OTP）→ enroll TOTP → activate
+            # Steps 14-20: re-authentication (another email OTP must be received)→ enroll TOTP → activate
             try:
                 totp_secret = setup_2fa(session, email)
             except Exception as exc:
-                logger.error(f"2FA 设置失败: {exc}")
-                logger.debug("2FA 错误详情:", exc_info=True)
-                logger.warning("将继续保存账号信息（不含 TOTP secret），可后续手动设置")
+                logger.error(f"2FA setup failed: {exc}")
+                logger.debug("2FA error details:", exc_info=True)
+                logger.warning("Will keep saving the account information (without the TOTP secret), which can be set manually later")
         else:
-            logger.debug("已跳过 2FA 设置 (config.ENABLE_2FA=False)")
+            logger.debug("2FA setup skipped (config.ENABLE_2FA=False)")
 
-        # ==================== 阶段 7.5: Codex OAuth（注册成功→拿回调/CPA凭证）====================
-        # 用全新干净 session 从头登录该邮箱，走 邮箱OTP→手机短信验证(接码)→选workspace
-        # →拿 code 的标准路径（不复用注册 session，避免撞 choose-an-account）。
-        # 产出：
-        #   1) codex_result["callback_url"]  命中 redirect_uri 的整条 Location（携带 code/state）
-        #   2) codex_result["file_path"]     CPA 可直接导入的 codex-{email}.json
-        codex_result = {"status": "skipped", "ok": False, "message": "未触发"}
+        # ==================== Stage 7.5: Codex OAuth (registration succeeded -> get the callback / CPA credential)====================
+        # Log in to the email from scratch with a brand new clean session, following email OTP -> phone SMS verification (code receiving) -> pick workspace
+        # →the standard path to get the code (the registration session is not reused, to avoid hitting choose-an-account).
+        # Output:
+        #   1) codex_result["callback_url"]  The whole Location that hit the redirect_uri (carrying code/state)
+        #   2) codex_result["file_path"]     CPA directly importable codex-{email}.json
+        codex_result = {"status": "skipped", "ok": False, "message": "not triggered"}
         try:
             from core.codex_oauth import run_codex_oauth
             codex_result = run_codex_oauth(email)
@@ -541,17 +541,17 @@ def run_registration(
 
         if codex_result.get("ok"):
             logger.info(
-                f"[Codex] 成功：{email}，file={codex_result.get('file_path')}，"
+                f"[Codex] Success: {email},file={codex_result.get('file_path')},"
                 f"callback={codex_result.get('callback_url')}"
             )
         elif codex_result.get("status") == "skipped":
-            logger.info(f"[Codex] 跳过：{email}，原因={codex_result.get('message')}")
+            logger.info(f"[Codex] Skipped: {email}, reason={codex_result.get('message')}")
         else:
             logger.warning(
-                f"[Codex] 失败：{email}，原因={codex_result.get('message')}"
+                f"[Codex] Failed: {email}, reason={codex_result.get('message')}"
             )
 
-        # ==================== 阶段8: 持久化账号 ====================
+        # ==================== Stage 8: persist the account ====================
         from core.email_provider import resolve_email_source
         account_id = save_account_data(
             email=email,
@@ -572,12 +572,12 @@ def run_registration(
             },
         )
 
-        logger.info(f"[完成] {email}，账号ID={account_id}，Token={access_token[:16]}...")
+        logger.info(f"[done] {email}, account ID={account_id},Token={access_token[:16]}...")
 
-        # ==================== 阶段9: 后置自动触发 flow ====================
-        # 只有走完回调、拿到 token 并保存成功的账号，才会触发 flow。
-        # flow 请求不影响账号保存状态，但会记录结果并参与批量统计。
-        flow_result = {"status": "skipped", "ok": False, "message": "未触发"}
+        # ==================== Stage 9: post-trigger flow ====================
+        # Only accounts that completed the callback, got a token and were saved successfully trigger the flow.
+        # flow request does not affect the account save state, but its result is recorded and counted in the batch statistics.
+        flow_result = {"status": "skipped", "ok": False, "message": "not triggered"}
         try:
             from core.flow_trigger import trigger_flow
             flow_result = trigger_flow(access_token)
@@ -586,28 +586,28 @@ def run_registration(
 
         if flow_result.get("ok"):
             logger.info(
-                f"[Flow] 成功：{email}，HTTP={flow_result.get('http_status')}, "
-                f"flow_id={flow_result.get('flow_id') or '未解析'}"
+                f"[Flow] Success: {email},HTTP={flow_result.get('http_status')}, "
+                f"flow_id={flow_result.get('flow_id') or 'unresolved'}"
             )
         elif flow_result.get("status") == "skipped":
-            logger.info(f"[Flow] 跳过：{email}，原因={flow_result.get('message')}")
+            logger.info(f"[Flow] Skipped: {email}, reason={flow_result.get('message')}")
         else:
             logger.warning(
-                f"[Flow] 失败：{email}，HTTP={flow_result.get('http_status') or '无'}, "
-                f"原因={flow_result.get('message')}"
+                f"[Flow] Failed: {email},HTTP={flow_result.get('http_status') or 'none'}, "
+                f"reason={flow_result.get('message')}"
             )
 
-        logger.debug(f"[完成] TOTP Secret: {totp_secret or '(未设置)'}")
+        logger.debug(f"[done] TOTP Secret: {totp_secret or '(Not set)'}")
 
-        # 注册任务的成功判定：账号本身(注册+token)+Codex 授权都成功才算 success。
-        # Codex 失败时账号仍保存（token 拿到了、有补跑机会），但任务状态标失败，
-        # 让 WebUI 任务表能清楚区分"完整成功"和"差 Codex"两种结果。
+        # Success criterion of a registration task: the account itself (registration + token) and the Codex authorization must both succeed to count as success.
+        # Codex On failure the account is still saved (the token was obtained and there is a chance to rerun), but the task state is marked failed,
+        # so the WebUI task table can clearly tell "fully successful" from "missing Codex".
         codex_ok = codex_result.get("ok") or codex_result.get("status") == "skipped"
         task_success = codex_ok
         task_error = None
         if not task_success:
-            task_error = f"Codex 未完成: {codex_result.get('message', '未知')}"
-            logger.warning(f"[任务结果] {email} 账号已保存但任务标失败，原因: {task_error}")
+            task_error = f"Codex not completed: {codex_result.get('message', 'unknown')}"
+            logger.warning(f"[task result] {email} account saved but the task marked failed, reason: {task_error}")
 
         return {"success": task_success, "email": email, "account_id": account_id,
                 "access_token": access_token, "totp_secret": totp_secret,
@@ -615,12 +615,12 @@ def run_registration(
                 "error": task_error}
 
     except Exception as e:
-        logger.error(f"[失败] {email}: {type(e).__name__}: {e}")
-        logger.debug("详细错误信息:", exc_info=True)
-        # 邮箱状态回收策略，三种情况：
-        #   1. 账号已废（account_deactivated 等）：邮箱素材本身不可用，标 failed 直接剔除。
-        #   2. 创建接口通过后失败：远端已消耗这个邮箱，直接废弃，避免重复注册。
-        #   3. 创建接口通过前的普通失败：邮箱还可以下次继续尝试，放回 available。
+        logger.error(f"[failed] {email}: {type(e).__name__}: {e}")
+        logger.debug("Detailed error information:", exc_info=True)
+        # Email state reclaim policy, three cases:
+        #   1. Account dead (account_deactivated etc.): the email material itself is unusable, mark it failed and drop it directly.
+        #   2. Failure after the create endpoint passed: the remote side has consumed this email, abandon it directly to avoid registering again.
+        #   3. Ordinary failure before the create endpoint passed: the email can still be tried next time, put it back to available.
         from core.openai_auth import AccountUnusableError
         account_dead = isinstance(e, AccountUnusableError)
         try:
@@ -629,61 +629,61 @@ def run_registration(
                 if account_dead:
                     src = release_email(
                         email, status="failed",
-                        note=f"账号已废弃，邮箱不可用: {str(e)[:180]}",
+                        note=f"Account is dead, the email is unusable: {str(e)[:180]}",
                     )
-                    logger.warning(f"[邮箱:{src}] {email} 账号已废弃，标记为 failed，不再重新注册")
+                    logger.warning(f"[email:{src}] {email} account is dead, marked failed, will not be registered again")
                 elif create_acknowledged:
                     src = release_email(
                         email, status="failed",
-                        note=f"创建接口已通过但后续失败，已废弃: {str(e)[:180]}",
+                        note=f"The create endpoint passed but a later step failed, abandoned: {str(e)[:180]}",
                     )
-                    logger.warning(f"[邮箱:{src}] {email} 已创建但后续失败，标记为 failed，不再重新注册")
+                    logger.warning(f"[email:{src}] {email} was created but a later step failed, marked failed, will not be registered again")
                 else:
-                    src = release_email(email, status="available", note=f"上次失败: {str(e)[:180]}")
-                    logger.info(f"[邮箱:{src}] {email} 已恢复 available")
+                    src = release_email(email, status="available", note=f"last failure: {str(e)[:180]}")
+                    logger.info(f"[email:{src}] {email} restored available")
         except Exception:
             pass
         return {"success": False, "email": email, "error": str(e)}
 
 
 def main():
-    """主函数"""
-    parser = argparse.ArgumentParser(description="ChatGPT 协议注册 CLI")
-    parser.add_argument("-n", "--count", type=int, default=1, help="连续注册数量，默认 1")
-    parser.add_argument("--workers", type=int, default=1, help="并发注册线程数，默认 1（串行）")
-    parser.add_argument("--delay", type=float, default=0, help="每次注册结束后的间隔秒数")
-    parser.add_argument("--continue-on-fail", action="store_true", help="单个账号失败后继续注册下一个")
-    parser.add_argument("--verbose", action="store_true", help="显示详细步骤日志和错误堆栈")
+    """Main function"""
+    parser = argparse.ArgumentParser(description="ChatGPT protocol registration CLI")
+    parser.add_argument("-n", "--count", type=int, default=1, help="Number of consecutive registrations, default 1")
+    parser.add_argument("--workers", type=int, default=1, help="Number of concurrent registration threads, default 1 (serial)")
+    parser.add_argument("--delay", type=float, default=0, help="Interval in seconds after each registration ends")
+    parser.add_argument("--continue-on-fail", action="store_true", help="Continue with the next registration after a single account fails")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed step logs and error stack traces")
     args = parser.parse_args()
     configure_logging(args.verbose)
 
     if args.count < 1:
-        logger.error("注册数量必须大于 0")
+        logger.error("The registration count must be greater than 0")
         sys.exit(1)
 
     if args.workers < 1:
-        logger.error("并发线程数必须大于 0")
+        logger.error("The number of concurrent threads must be greater than 0")
         sys.exit(1)
 
     if args.count > 1 and REGISTER_EMAIL:
-        logger.error("config.REGISTER_EMAIL 已固定邮箱，不适合批量注册；请留空后再使用 --count")
+        logger.error("config.REGISTER_EMAIL An email is fixed, which is not suitable for batch registration; please clear it before using --count")
         sys.exit(1)
 
     if args.workers > 1 and not _email_cfg.USE_EMAIL_SERVICE:
-        logger.error("多线程注册需要启用 Outlook 自动取件；请开启 USE_EMAIL_SERVICE 或改用 --workers 1")
+        logger.error("Multi-threaded registration requires enabling Outlook automatic retrieval; please enable USE_EMAIL_SERVICE or switch to --workers 1")
         sys.exit(1)
 
     if args.workers > args.count:
-        logger.info(f"[批量] 并发线程数 {args.workers} 大于目标数量，已按 {args.count} 个任务执行")
+        logger.info(f"[batch] The number of concurrent threads {args.workers} is larger than the target count, running {args.count} tasks")
         args.workers = args.count
 
     if args.workers > 1:
         batch_dir = create_batch_archive_dir(args.count, args.workers)
-        logger.info("[批量] 账号数据将直接写入 SQLite")
+        logger.info("[batch] Account data will be written directly to SQLite")
         results = run_parallel_batch(args.count, args.workers, args.delay, args.continue_on_fail, batch_dir)
     else:
         batch_dir = create_batch_archive_dir(args.count, args.workers)
-        logger.info("[批量] 账号数据将直接写入 SQLite")
+        logger.info("[batch] Account data will be written directly to SQLite")
         results = run_serial_batch(args.count, args.delay, args.continue_on_fail, batch_dir)
 
     success_count = sum(1 for r in results if _is_success(r))
@@ -719,20 +719,20 @@ def main():
         and isinstance(r.get("codex"), dict)
         and r["codex"].get("status") == "skipped"
     )
-    logger.info(f"[批量] 完成：成功 {success_count} / 尝试 {len(results)} / 目标 {args.count}")
+    logger.info(f"[batch] Done: success {success_count} / attempted {len(results)} / target {args.count}")
     if success_count:
         logger.info(
-            f"[批量] Flow：成功 {flow_success_count} / 失败 {flow_failed_count} / 跳过 {flow_skipped_count}"
+            f"[batch] Flow: success {flow_success_count} / failed {flow_failed_count} / skipped {flow_skipped_count}"
         )
         logger.info(
-            f"[批量] Codex：成功 {codex_success_count} / 失败 {codex_failed_count} / 跳过 {codex_skipped_count}"
+            f"[batch] Codex: success {codex_success_count} / failed {codex_failed_count} / skipped {codex_skipped_count}"
         )
     sys.exit(0 if success_count == args.count else 1)
 
 
 def run_one_batch_item(index: int, total: int, batch_dir=None) -> dict:
-    """执行批量注册中的一个任务，返回结构化结果。"""
-    logger.info(f"[批量] 开始第 {index + 1}/{total} 个注册")
+    """Run one task of the batch registration and return a structured result."""
+    logger.info(f"[batch] Starting registration {index + 1}/{total}")
     try:
         email, name, birthday = prepare_registration_inputs()
         return run_registration(
@@ -740,26 +740,26 @@ def run_one_batch_item(index: int, total: int, batch_dir=None) -> dict:
             name=name,
             birthday=birthday,
             batch_dir=batch_dir,
-            # proxy 不传 → BrowserSession 会从 PROXY_POOL 随机抽
+            # proxy Not passed -> the BrowserSession draws one from PROXY_POOL at random
         )
     except Exception as exc:
-        logger.error(f"[批量] 第 {index + 1} 个注册准备阶段失败: {type(exc).__name__}: {exc}")
-        logger.debug("准备阶段错误详情:", exc_info=True)
+        logger.error(f"[batch] Preparation phase of registration {index + 1} failed: {type(exc).__name__}: {exc}")
+        logger.debug("Preparation phase error details:", exc_info=True)
         return {"success": False, "error": str(exc)}
 
 
 def run_serial_batch(count: int, delay: float, continue_on_fail: bool, batch_dir=None) -> list[dict]:
-    """按原有串行方式执行批量注册。"""
+    """Run the batch registration serially in the original way."""
     results = []
     for index in range(count):
         result = run_one_batch_item(index, count, batch_dir)
         results.append(result)
         if not _is_success(result) and not continue_on_fail:
-            logger.error("[批量] 当前账号失败，已停止。需要继续跑可加 --continue-on-fail")
+            logger.error("[batch] The current account failed, stopped. To keep going you can add --continue-on-fail")
             break
 
         if delay > 0 and index < count - 1:
-            logger.info(f"[批量] 等待 {delay} 秒后继续")
+            logger.info(f"[batch] Waiting {delay} seconds before continuing")
             time.sleep(delay)
     return results
 
@@ -771,10 +771,10 @@ def run_parallel_batch(
     continue_on_fail: bool,
     batch_dir=None,
 ) -> list[dict]:
-    """使用线程池并发执行批量注册。"""
-    logger.info(f"[批量] 启用多线程注册：目标 {count}，并发 {workers}")
+    """Run the batch registration concurrently with a thread pool."""
+    logger.info(f"[batch] Multi-threaded registration enabled: target {count}, concurrency {workers}")
     if delay > 0:
-        logger.info(f"[批量] 并发模式下 --delay={delay} 表示提交任务之间的错峰间隔")
+        logger.info(f"[batch] In concurrent mode --delay={delay} means the staggered interval between task submissions")
 
     results: list[dict] = []
     future_to_index = {}
@@ -803,14 +803,14 @@ def run_parallel_batch(
                 try:
                     result = future.result()
                 except Exception as exc:
-                    logger.error(f"[批量] 第 {index + 1}/{count} 个注册线程异常: {type(exc).__name__}: {exc}")
-                    logger.debug("线程错误详情:", exc_info=True)
+                    logger.error(f"[batch] Registration thread {index + 1}/{count} raised an exception: {type(exc).__name__}: {exc}")
+                    logger.debug("Thread error details:", exc_info=True)
                     result = {"success": False, "error": str(exc)}
                 results.append(result)
 
                 if not _is_success(result) and not continue_on_fail:
                     stop_submitting = True
-                    logger.error("[批量] 当前账号失败，已停止提交新任务。已开始的任务会继续跑完。")
+                    logger.error("[batch] The current account failed, submitting new tasks stopped. Tasks already started will run to completion.")
 
             while len(future_to_index) < workers and submit_next(executor):
                 pass

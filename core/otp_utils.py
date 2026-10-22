@@ -1,30 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-OTP 检测与抽取通用工具，被 outlook_client（Outlook 邮箱）使用。
+OTP detection and extraction utilities, used by outlook_client (Outlook mailbox).
 
-要求：
-    - 多语言关键字识别（英 / 中 / 日 / 韩）
-    - 字段名容错（不同邮件 API 用不同的字段命名约定）
-    - 上下文优先：在多个 6 位数中，选择离"验证码"等关键字最近的那个
+Requirements:
+    - Multilingual keyword recognition (English / Chinese / Japanese / Korean)
+    - Field name tolerance (different mail APIs use different field naming conventions)
+    - Context first: among multiple 6-digit numbers, pick the one closest to keywords such as "verification code"
 """
 import re
 
 _OPENAI_SENDER_HINT = "openai"
 
-# 多语言关键字（用于判断是否是 OpenAI 邮件）
+# Multilingual keywords (used to decide whether a message is an OpenAI email)
 _OPENAI_KEYWORDS = (
     "chatgpt", "openai",
-    # 英文
+    # English
     "verification code", "code is", "your code", "verify your email",
-    # 中文
-    "代码", "验证码", "确认码",
-    # 日文
+    # Chinese
+    "代码", "verification code", "确认码",
+    # Japanese
     "認証コード", "検証コード", "確認コード", "一時検証", "認証",
-    # 韩文
+    # Korean
     "인증 코드", "확인 코드",
 )
 
-# OTP 上下文关键字（用于在多个 6 位数中挑出真正的验证码）
+# OTP context keywords (used to pick the real verification code among multiple 6-digit numbers)
 _OTP_CONTEXT_KEYWORDS = (
     "code", "verify", "verification",
     "代码", "验证", "确认",
@@ -37,12 +37,12 @@ _OTP_REGEX = re.compile(r"\b(\d{6})\b")
 
 def _get_field(item: dict, *names: str) -> str:
     """
-    从邮件 dict 中按顺序尝试多个可能的字段名，返回第一个非空字符串。
-    用于兼容不同邮件 API 的字段命名约定（例如 sendEmail / from / fromEmail / from.address）。
+    Try several possible field names in order from the mail dict, and return the first non-empty string.
+    Used for compatibility with the field naming conventions of different mail APIs (e.g. sendEmail / from / fromEmail / from.address).
     """
     for name in names:
         if "." in name:
-            # 支持 "from.emailAddress.address" 这种点路径
+            # Supports dotted paths such as "from.emailAddress.address"
             value = item
             for part in name.split("."):
                 if not isinstance(value, dict):
@@ -60,12 +60,12 @@ def _get_field(item: dict, *names: str) -> str:
 
 def looks_like_openai_email(item: dict) -> bool:
     """
-    判断邮件是否来自 OpenAI / ChatGPT。多语言、多字段名兼容。
+    Decide whether the email comes from OpenAI / ChatGPT. Multilingual, compatible with multiple field names.
 
-    字段名容错（不同 API 返回风格不一）：
-        发件人:  sendEmail / from / fromEmail / from.emailAddress.address
-        发件人名:sendName / fromName / from.emailAddress.name
-        纯文本:  text / bodyPreview / bodyText
+    Field name tolerance (different APIs return different styles):
+        Sender:  sendEmail / from / fromEmail / from.emailAddress.address
+        Sender name:sendName / fromName / from.emailAddress.name
+        Plain text:  text / bodyPreview / bodyText
         HTML:    content / body / html / body.content / bodyHtml
     """
     sender = _get_field(item, "sendEmail", "from", "fromEmail", "from.emailAddress.address").lower()
@@ -82,24 +82,24 @@ def looks_like_openai_email(item: dict) -> bool:
 
 def extract_otp(item: dict) -> str | None:
     """
-    从邮件中抽出 6 位 OTP。
+    Extract the 6-digit OTP from the email.
 
-    抽取顺序：
-        1. subject（OpenAI 部分邮件直接把 6 位数放在主题里，例 "Your OpenAI code is 525210"）
-        2. 纯文本字段（text / bodyPreview / bodyText）
-        3. HTML 字段（content / html / body / body.content / bodyHtml，去标签后）
+    Extraction order:
+        1. subject(Some OpenAI emails put the 6-digit number directly in the subject, e.g. "Your OpenAI code is 525210")
+        2. Plain text fields (text / bodyPreview / bodyText)
+        3. HTML fields (content / html / body / body.content / bodyHtml, after stripping tags)
 
-    若 body 中含多个 6 位数，优先选择离 "验证码 / code / 認証" 等关键字最近的那个。
+    If the body contains multiple 6-digit numbers, prefer the one closest to keywords such as "verification code / code / auth".
     """
-    # 1. 主题里如果直接有 6 位数，最可信
+    # 1. If the subject directly contains a 6-digit number, it is the most trustworthy
     subject = _get_field(item, "subject")
     if subject:
         codes_in_subject = _OTP_REGEX.findall(subject)
         if len(codes_in_subject) == 1:
-            # 主题里恰好只有一个 6 位数，几乎肯定就是 OTP
+            # If the subject contains exactly one 6-digit number, it is almost certainly the OTP
             return codes_in_subject[0]
 
-    # 2. body 字段
+    # 2. body field
     candidates = [
         ("text", _get_field(item, "text", "bodyPreview", "bodyText")),
         ("html", _get_field(item, "content", "html", "body", "body.content", "bodyHtml")),
@@ -108,15 +108,15 @@ def extract_otp(item: dict) -> str | None:
     for kind, body in candidates:
         if not body:
             continue
-        # 无论 text 还是 html，都先去 HTML 标签和 style 属性
-        # （QQ 邮箱转发的 OpenAI 邮件，text 字段也可能含 HTML）
+        # Whether text or html, first strip HTML tags and style attributes
+        # (For OpenAI emails forwarded by QQ Mail, the text field may also contain HTML)
         body = re.sub(r"<style[^>]*>.*?</style>", " ", body, flags=re.DOTALL | re.IGNORECASE)
         body = re.sub(r"<[^>]+>", " ", body)
         all_codes = _OTP_REGEX.findall(body)
         if not all_codes:
             continue
         body_lower = body.lower()
-        # 优先选离上下文关键字最近的 6 位数
+        # Prefer the 6-digit number closest to a context keyword
         for code in all_codes:
             idx = body_lower.find(code)
             if idx < 0:

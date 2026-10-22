@@ -25,7 +25,7 @@ class AccountFullExportTests(unittest.TestCase):
         )
 
     def test_separators_match_spec(self):
-        # 前四段为 “---”，2FA 段前为 “----”
+        # The first four segments are “---”, and before the 2FA segment is “----”
         line = db._account_full_export_line(self._row())
         self.assertTrue(line.startswith("a@b.com---gptmail---Pass123---https://2fa.run/----2FA:ABCDEF123"))
         self.assertIn("---https://2fa.run/----2FA:", line)
@@ -33,7 +33,7 @@ class AccountFullExportTests(unittest.TestCase):
     def test_missing_registration_password_keeps_empty_field(self):
         row = self._row(extra_json=json.dumps({}))
         line = db._account_full_export_line(row)
-        # 空密码是“真实空字段”，由相邻 “---” 收拢为 “------”，保持 5 段结构可读
+        # An empty password is a “real empty field”, collapsed from adjacent “---” into “------”, keeping the 5-segment structure readable
         self.assertEqual(
             line,
             "a@b.com---gptmail------https://2fa.run/----2FA:ABCDEF123",
@@ -48,7 +48,7 @@ class AccountFullExportTests(unittest.TestCase):
         )
 
     def test_password_from_top_level_registration_password(self):
-        # 兼容 registration_password 直接写在顶层（无 extra_json）的情况
+        # Compatible with registration_password written directly at the top level (no extra_json)
         row = self._row(extra_json=None, registration_password="TopPw")
         line = db._account_full_export_line(row)
         self.assertIn("---TopPw---", line)
@@ -56,11 +56,11 @@ class AccountFullExportTests(unittest.TestCase):
     def test_email_source_fallback_empty(self):
         row = self._row(email_source="")
         line = db._account_full_export_line(row)
-        # 来源为空时保留空字段（------），不破坏整体结构
+        # Keep the empty field (------) when the source is empty, without breaking the overall structure
         self.assertTrue(line.startswith("a@b.com------Pass123---https://2fa.run/----2FA:ABCDEF123"))
 
     def test_generic_api_resolves_to_code_url_link(self):
-        # generic_api 账号应解析出邮箱池里的完整取码链接，而非裸字符串 generic_api
+        # generic_api accounts should resolve to the full code-retrieval link from the email pool, not the bare string generic_api
         with mock.patch.object(
             db, "get_generic_api_email_by_email",
             return_value={"code_url": "http://127.0.0.1:5055/code?email=a@b.com"},
@@ -73,7 +73,7 @@ class AccountFullExportTests(unittest.TestCase):
         )
 
     def test_generic_api_constructs_link_when_pool_missing(self):
-        # 邮箱池查不到该邮箱时，按 OmniMail 约定拼出完整取码链接
+        # When the email is not found in the email pool, build the full code-retrieval link following the OmniMail convention
         import config.email as ce
         with mock.patch.object(
             db, "get_generic_api_email_by_email", return_value=None

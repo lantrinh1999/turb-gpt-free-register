@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-OpenAI / ChatGPT OAuth 协议固定参数
+OpenAI / ChatGPT OAuth protocol fixed parameters
 
-来自抓包，OpenAI 自己的 client_id 是固定值。
-SENTINEL_SV 是 sdk.js 的版本号，会随 OpenAI 更新而变化，
-更新时去 https://sentinel.openai.com/sentinel/<version>/sdk.js 找当前版本。
+From packet captures; OpenAI own client_id is a fixed value.
+SENTINEL_SV is the version number of sdk.js; it changes as OpenAI updates,
+when updating, look up the current version at https://sentinel.openai.com/sentinel/<version>/sdk.js.
 """
 from config.env_loader import apply_env_overrides
 
-# OAuth 客户端 ID（固定）
+# OAuth client ID (fixed)
 OPENAI_CLIENT_ID = "app_X8zY6vW2pQ9tR3dE7nK1jL5gH"
 
 # OAuth scopes
@@ -21,41 +21,41 @@ OPENAI_SCOPE = (
 # OAuth audience
 OPENAI_AUDIENCE = "https://api.openai.com/v1"
 
-# OAuth 回调（chatgpt.com 端）
+# OAuth callback (chatgpt.com side)
 OPENAI_REDIRECT_URI = "https://chatgpt.com/api/auth/callback/openai"
 
-# Sentinel SDK 版本号（影响 sentinel iframe URL 与 referer header）
+# Sentinel SDK Version number (affects the sentinel iframe URL and the referer header)
 SENTINEL_SV = "20260810913b"
 
-# ChatGPT 页面 build 标识（用于 Sentinel p[6] / documentElement data-build 模拟）
+# ChatGPT Page build identifier (used for Sentinel p[6] / documentElement data-build simulation)
 OPENAI_BUILD_ID = "prod-d4e40d432de549a66bf9feb61d43c262b258386f"
 
-# ChatGPT 前端 CES / API 上报头，来自 2026-07-19 抓包。
+# ChatGPT Front-end CES / API reporting headers, from the 2026-07-19 capture.
 OAI_CLIENT_BUILD_NUMBER = "10762726"
 OAI_CLIENT_VERSION = OPENAI_BUILD_ID
 
-# Statsig / Analytics SDK 版本，纯协议补齐前端同形态链路时使用。
+# Statsig / Analytics SDK version, used by the pure protocol flow to fill in the front-end equivalent chain.
 STATSIG_CLIENT_KEY = "client-nb0qtYlZuy2tCMN5s5ncnuIBCJncjRViT0IzFm7GqST"
 STATSIG_SDK_VERSION = "3.33.1"
 STATSIG_SDK_TYPE = "javascript-client"
 AB_CLIENT_KEY = "client-tN5GMyzpIPKXd3KNv7ANIfiqjRSvNNTTWbZdbdabF58"
 AB_SDK_VERSION = "3.32.7"
 
-# 2026-09-14 Roxy 成功样本中 email-otp/validate 同时携带 Sentinel 与 SO。
+# 2026-09-14 Roxy In successful samples email-otp/validate carries both Sentinel and SO.
 SEND_SENTINEL_ON_EMAIL_OTP_VALIDATE = True
 
-# 是否补齐 HAR 中 ChatGPT Web 首屏 bootstrap 预热链路。
+# Whether to fill in the ChatGPT Web first-screen bootstrap warm-up chain seen in the HAR.
 CHATGPT_ANON_BOOTSTRAP_ENABLED = True
 CHATGPT_AUTH_BOOTSTRAP_ENABLED = True
-# True 时预热失败会中断主流程；默认 False，仅记录日志并继续。
+# True a warm-up failure aborts the main flow; the default is False, which only logs and continues.
 CHATGPT_BOOTSTRAP_STRICT = False
 
-# 纯协议注册遇到代理连接、TLS、超时、连接重置等临时网络故障时的重试配置。
-# 总尝试次数包含首次请求；退避间隔依次为 delay、delay*2、delay*4……
+# Retry settings for temporary network failures such as proxy connection, TLS, timeouts and connection resets in pure-protocol registration.
+# Total attempts include the first request; backoff intervals are delay, delay*2,delay*4……
 OPENAI_PROXY_RETRY_MAX_ATTEMPTS = 3
 OPENAI_PROXY_RETRY_DELAY = 1.0
-# 登录页预检使用独立的短超时。代理端口可连接并不代表其上游 TLS 链路可用，
-# 避免失效节点按全局 30 秒超时长时间占住注册 worker。
+# The login page pre-check uses its own short timeout. A reachable proxy port does not mean its upstream TLS link works,
+# so a dead node does not hold a registration worker for a long time under the global 30-second timeout.
 OPENAI_PREFLIGHT_TIMEOUT = 12.0
 
 

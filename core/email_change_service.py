@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ChatGPT 账号邮箱换绑后台队列。"""
+"""ChatGPT Background queue for account email changes."""
 from __future__ import annotations
 
 import json
@@ -44,7 +44,7 @@ def _proxy(value: str | None) -> str:
 
 
 def _proxy_label(value: str | None) -> str:
-    """日志用代理摘要，保留路由信息但隐藏认证密码。"""
+    """Proxy summary for logs: keeps the route information but hides the authentication password."""
     text = str(value or "").strip()
     if not text:
         return "direct"
@@ -62,8 +62,8 @@ def _cost(started: float) -> str:
 
 
 def _new_session(account_id: int, proxy, *, email: str = "") -> BrowserSession:
-    # 与 2FA/查活统一使用账号级种子。同一账号做敏感操作时保持 device_id、
-    # Sentinel sid、浏览器画像稳定，而不是为“换绑”另造一套新设备指纹。
+    # Uses the account-level seed, same as 2FA / liveness checks. For sensitive operations on the same account, device_id,
+    # Sentinel sid and the browser profile stay stable, instead of creating a new device fingerprint just for the "email change".
     seed = f"account:{email.lower()}" if email else f"email-change:{account_id}"
     return BrowserSession(proxy=proxy, fingerprint_seed=seed)
 
@@ -92,10 +92,10 @@ def _post(session: BrowserSession, path: str, token: str, payload: dict) -> dict
     })
     resp = session.post(f"https://chatgpt.com{path}", headers=headers, data=json.dumps(payload))
     if resp.status_code != 200:
-        raise RuntimeError(f"{path} 返回 {resp.status_code}: {_response_error(resp)}")
+        raise RuntimeError(f"{path} Return {resp.status_code}: {_response_error(resp)}")
     data = resp.json()
     if not isinstance(data, dict) or not data.get("success"):
-        raise RuntimeError(f"{path} 返回失败: {data}")
+        raise RuntimeError(f"{path} returned failure: {data}")
     return data
 
 
@@ -103,14 +103,14 @@ def _post_with_network_retry(
     session: BrowserSession, *, account_id: int, path: str, token: str, payload: dict,
     fingerprint_email: str = "",
 ) -> tuple[dict, BrowserSession]:
-    """TLS reset/超时等传输故障时换会话重试，最后一次明确直连兜底。"""
+    """TLS reset/On transport failures such as timeouts, switch sessions and retry; the last attempt explicitly falls back to a direct connection."""
     last_exc: Exception | None = None
     current = session
     for attempt in range(1, 4):
         attempt_started = time.monotonic()
         _append_log(
             account_id,
-            f"HTTP 请求开始：path={path} attempt={attempt}/3 "
+            f"HTTP request started:path={path} attempt={attempt}/3 "
             f"route={_proxy_label(getattr(current, 'proxy', None))} "
             f"device_id={str(getattr(current, 'device_id', '') or '')[:12]}...",
         )
@@ -118,7 +118,7 @@ def _post_with_network_retry(
             result = _post(current, path, token, payload)
             _append_log(
                 account_id,
-                f"HTTP 请求成功：path={path} status=200 attempt={attempt}/3 cost={_cost(attempt_started)}",
+                f"HTTP request succeeded:path={path} status=200 attempt={attempt}/3 cost={_cost(attempt_started)}",
             )
             return result, current
         except Exception as exc:
@@ -126,24 +126,24 @@ def _post_with_network_retry(
             text = str(exc)
             _append_log(
                 account_id,
-                f"HTTP 请求失败：path={path} attempt={attempt}/3 cost={_cost(attempt_started)} "
+                f"HTTP Request failed:path={path} attempt={attempt}/3 cost={_cost(attempt_started)} "
                 f"error={type(exc).__name__}: {text[:300]}",
             )
-            # 明确的业务 4xx 不重复提交；网络错误、429 和 5xx 才重试。
-            if isinstance(exc, RuntimeError) and "返回 4" in text and "返回 429" not in text:
+            # Clear business 4xx errors are not resubmitted; only network errors, 429 and 5xx are retried.
+            if isinstance(exc, RuntimeError) and "Return 4" in text and "Return 429" not in text:
                 raise
             if attempt >= 3:
                 break
             delay = attempt * 2
-            next_route = "代理池新会话" if attempt == 1 else "直连兜底"
+            next_route = "new proxy-pool session" if attempt == 1 else "direct connection fallback"
             _append_log(
                 account_id,
-                f"请求异常（第 {attempt}/3 次）：{type(exc).__name__}: {text[:300]}；"
-                f"{delay}s 后切换到{next_route}重试",
+                f"Request error (attempt {attempt}/3): {type(exc).__name__}: {text[:300]};"
+                f"{delay}s switching to {next_route} and retrying afterwards",
             )
-            logger.warning("[邮箱换绑] %s attempt=%s failed: %s", path, attempt, text[:300])
+            logger.warning("[Email Change] %s attempt=%s failed: %s", path, attempt, text[:300])
             time.sleep(delay)
-            # 第二次从代理池重新选择出口；第三次明确直连，避免坏代理持续 reset。
+            # The second attempt re-selects the exit from the proxy pool; the third explicitly connects directly, so a bad proxy cannot keep resetting.
             current = _new_session(
                 account_id, None if attempt == 1 else "", email=fingerprint_email,
             )
@@ -152,7 +152,7 @@ def _post_with_network_retry(
 
 
 def _enqueue_live_check_after_change(account_id: int, email: str) -> dict:
-    """换绑成功后立即排队查活，用新邮箱重新登录并刷新失效的 AT。"""
+    """After a successful email change, immediately queue a liveness check, log in again with the new email and refresh the expired AT."""
     from core import live_check_service
 
     result = live_check_service.enqueue_account_live_check(
@@ -160,14 +160,14 @@ def _enqueue_live_check_after_change(account_id: int, email: str) -> dict:
         trigger="email_change_auto", proxy=None,
     )
     if result.get("accepted"):
-        logger.info("[邮箱换绑] 已自动加入查活队列 account_id=%s email=%s", account_id, email)
-        _append_log(account_id, f"自动查活已入队：email={email}")
+        logger.info("[email change] Automatically added to the liveness check queue account_id=%s email=%s", account_id, email)
+        _append_log(account_id, f"Automatic liveness check queued:email={email}")
     else:
         logger.warning(
-            "[邮箱换绑] 换绑成功，但自动查活入队失败 account_id=%s email=%s error=%s",
-            account_id, email, result.get("error") or "未知错误",
+            "[email change] Email change succeeded, but queuing the automatic liveness check failed account_id=%s email=%s error=%s",
+            account_id, email, result.get("error") or "Unknown error",
         )
-        _append_log(account_id, f"自动查活入队失败：{result.get('error') or '未知错误'}")
+        _append_log(account_id, f"Failed to queue the automatic liveness check:{result.get('error') or 'Unknown error'}")
     return result
 
 
@@ -178,13 +178,13 @@ def _refresh_recent_login(
     email: str,
     email_source: str,
 ) -> tuple[BrowserSession, str]:
-    """按查活的完整登录链重新登录，建立服务端认可的 Recent Login。
+    """Log in again following the complete login chain of the liveness check, establishing a Recent Login recognized by the server.
 
-    change_email 的 reauth 链会无条件向原邮箱发送 OTP，即使账号已经保存了
-    注册密码。这里改为复用查活的备用登录链：优先密码（以及 TOTP），仅在
-    登录页确实要求邮箱验证时才读取原邮箱 OTP。
+    change_email The reauth chain sends an OTP to the original email unconditionally, even if the account already has a saved
+    registration password. Here it reuses the backup login chain of the liveness check instead: password first (and TOTP), and the original email OTP is only read when
+    the login page really requires email verification.
     """
-    # 延迟导入，避免 account_liveness 初始化时形成模块循环。
+    # Lazy import, to avoid a module cycle when account_liveness initializes.
     from core.account_liveness import (
         _login_via_password_or_otp,
         _network_preflight_with_retry,
@@ -197,11 +197,11 @@ def _refresh_recent_login(
 
     _append_log(
         account_id,
-        "Recent Login 开始：复用查活重新登录逻辑（CSRF → signin → authorize → 密码/OTP/MFA → OAuth callback → session/AT）",
+        "Recent Login Start: reuse the liveness check re-login logic (CSRF -> signin -> authorize -> password/OTP/MFA -> OAuth callback -> session/AT)",
     )
 
-    # 保留本次换绑已经生成的账号级设备身份和浏览器画像，同时让查活预检
-    # 创建干净的登录 Cookie Jar，并获得其网络重试能力。
+    # Keep the account-level device identity and browser profile already generated for this email change, while letting the liveness pre-check
+    # create a clean login Cookie Jar and gain its network retry capability.
     fingerprint_state = {
         "fingerprint_seed": f"account:{email.lower()}",
     }
@@ -217,19 +217,19 @@ def _refresh_recent_login(
 
     login_started = time.monotonic()
     selected_proxy = getattr(session, "proxy", None)
-    # 与后台查活一致：代理路线的完整认证链只要收到 403，就用一套完全
-    # 独立的直连会话重跑。OAuth callback 的 403 会让当前 BrowserSession
-    # 进入 15 分钟熔断；仅清除熔断后继续请求既不能修复出口，也容易复用
-    # 已污染的 CF Cookie，因此必须从 CSRF 开始重新登录。
-    routes = [(selected_proxy, fingerprint_state, "当前代理路线")]
+    # Same as the background liveness check: as soon as the full authentication chain on the proxy route receives a 403, it is rerun with a completely
+    # independent direct session. A 403 on the OAuth callback puts the current BrowserSession
+    # into a 15-minute circuit breaker; merely clearing the breaker and continuing neither fixes the exit nor avoids reusing the
+    # contaminated CF Cookie, so the login must restart from CSRF.
+    routes = [(selected_proxy, fingerprint_state, "current proxy route")]
     if selected_proxy:
-        routes.append(("", {}, "独立直连兜底"))
+        routes.append(("", {}, "independent direct fallback"))
 
     last_exc: BaseException | None = None
     for route_index, (route_proxy, route_state, route_label) in enumerate(routes):
         login_session: BrowserSession | None = None
         try:
-            _append_log(account_id, f"Recent Login 路线开始：{route_label}")
+            _append_log(account_id, f"Recent Login route started:{route_label}")
             login_session, authorize_url = _network_preflight_with_retry(
                 email,
                 route_proxy,
@@ -240,7 +240,7 @@ def _refresh_recent_login(
             dead_code = detect_account_unusable_text(final_url)
             if dead_code:
                 raise AccountUnusableError(
-                    f"账号已废弃（{dead_code}）",
+                    f"Account is dead ({dead_code})",
                     error_code=dead_code,
                 )
             info = _login_via_password_or_otp(
@@ -251,10 +251,10 @@ def _refresh_recent_login(
             )
             fresh_token = str((info or {}).get("accessToken") or "").strip()
             if not fresh_token:
-                raise RuntimeError("Recent Login 重新登录完成，但未获取到新 access_token")
+                raise RuntimeError("Recent Login Re-login completed, but no new access_token")
             _append_log(
                 account_id,
-                f"Recent Login 完成：route={route_label}，已获取新鲜 AT，cost={_cost(login_started)}",
+                f"Recent Login Completed: route={route_label}, obtained a fresh AT,cost={_cost(login_started)}",
             )
             return login_session, fresh_token
         except AccountUnusableError:
@@ -266,8 +266,8 @@ def _refresh_recent_login(
                 raise
             _append_log(
                 account_id,
-                "Recent Login 代理路线收到 403/会话熔断，"
-                f"关闭失败会话并从 CSRF 开始使用独立直连兜底：{type(exc).__name__}: {str(exc)[:260]}",
+                "Recent Login The proxy route received a 403 / session circuit breaker,"
+                f"closing the failed session and starting from CSRF with the independent direct fallback:{type(exc).__name__}: {str(exc)[:260]}",
             )
             if login_session is not None:
                 try:
@@ -288,7 +288,7 @@ def _begin_change_with_optional_reauth(
     new_email: str,
     access_token: str,
 ) -> tuple[BrowserSession, str, float, bool]:
-    """优先直接 begin；仅在服务端明确要求 Recent Login 时验证原邮箱。"""
+    """Call begin directly first; verify the original email only when the server explicitly requires a Recent Login."""
     otp_after_ts = time.time()
     try:
         _, session = _post_with_network_retry(
@@ -299,20 +299,20 @@ def _begin_change_with_optional_reauth(
             payload={"email": new_email},
             fingerprint_email=current_email,
         )
-        _append_log(account_id, "现有 AT 满足 Recent Login 要求，已跳过原邮箱 OTP 重认证")
+        _append_log(account_id, "The existing AT satisfies the Recent Login requirement, original email OTP re-authentication skipped")
         return session, access_token, otp_after_ts, False
     except Exception as exc:
         if not _is_reauth_required(exc):
             raise
 
-    _append_log(account_id, "服务端返回 reauth_required，开始按查活逻辑重新登录原账号")
+    _append_log(account_id, "The server returned reauth_required, starting to log in again to the original account following the liveness check logic")
     session, fresh_token = _refresh_recent_login(
         session,
         account_id=account_id,
         email=current_email,
         email_source=current_source,
     )
-    # 新邮箱 OTP 的时间基准必须放在第二次 begin 之前，不能沿用重认证前时间。
+    # The time baseline of the new email OTP must be set before the second begin, and must not reuse the time from before the re-authentication.
     otp_after_ts = time.time()
     _, session = _post_with_network_retry(
         session,
@@ -322,7 +322,7 @@ def _begin_change_with_optional_reauth(
         payload={"email": new_email},
         fingerprint_email=current_email,
     )
-    _append_log(account_id, "原账号重新登录完成，使用新鲜 AT 重试 begin 成功")
+    _append_log(account_id, "Re-login to the original account completed, retrying begin with the fresh AT succeeded")
     return session, fresh_token, otp_after_ts, True
 
 
@@ -333,7 +333,7 @@ def _check_live_in_current_session(
     email: str,
     email_source: str,
 ) -> dict:
-    """换绑后复用当前已通过 CF/reauth 的会话重新登录并刷新 AT。"""
+    """After the email change, log in again in the current session that already passed CF/reauth and refresh the AT."""
     from core.account_liveness import (
         _login_via_password_or_otp,
         _safe_fingerprint_for_account,
@@ -345,19 +345,19 @@ def _check_live_in_current_session(
     from core.live_check_service import complete_authenticated_live_check
     expected_account = db.get_account(account_id)
     if not expected_account or str(expected_account.get("email") or "").lower() != email.lower():
-        raise RuntimeError("账号已删除或邮箱已变更，取消原会话查活")
+        raise RuntimeError("Account was deleted or its email changed, cancelling the original-session liveness check")
     live_started = time.monotonic()
-    _append_log(account_id, "原会话查活开始：复用 Cookie、CF 状态、出口和当前指纹")
+    _append_log(account_id, "Original-session liveness check started: reusing Cookies, CF state, exit and the current fingerprint")
     step_started = time.monotonic()
     csrf = get_csrf_token(session)
-    _append_log(account_id, f"原会话查活：CSRF 获取成功，cost={_cost(step_started)}")
+    _append_log(account_id, f"Original-session liveness check: CSRF obtained successfully,cost={_cost(step_started)}")
     step_started = time.monotonic()
     authorize_url = signin_openai(session, csrf, email)
-    _append_log(account_id, f"原会话查活：signin 成功并取得 authorize URL，cost={_cost(step_started)}")
+    _append_log(account_id, f"Original-session liveness check: signin succeeded and the authorize URL was obtained,cost={_cost(step_started)}")
     otp_after_ts = time.time()
     step_started = time.monotonic()
     follow_authorize(session, authorize_url)
-    _append_log(account_id, f"原会话查活：authorize 跟随完成，进入密码/OTP/MFA 阶段，cost={_cost(step_started)}")
+    _append_log(account_id, f"Original-session liveness check: authorize followed, entering the password/OTP/MFA stage,cost={_cost(step_started)}")
     step_started = time.monotonic()
     session_info = _login_via_password_or_otp(
         session,
@@ -367,8 +367,8 @@ def _check_live_in_current_session(
     )
     access_token = str((session_info or {}).get("accessToken") or "").strip()
     if not access_token:
-        raise RuntimeError("换绑后原会话查活未获取到 access_token")
-    _append_log(account_id, f"原会话查活：登录验证及 session 获取成功，cost={_cost(step_started)}")
+        raise RuntimeError("After the email change the original-session liveness check did not get access_token")
+    _append_log(account_id, f"Original-session liveness check: login verification and session fetch succeeded,cost={_cost(step_started)}")
     result = {
         "ok": True,
         "status": "live",
@@ -382,51 +382,51 @@ def _check_live_in_current_session(
     result = complete_authenticated_live_check(account_id=account_id, expected_account=expected_account,
                                                result=result, session=session)
     if not result.get("ok"):
-        raise RuntimeError(result.get("error") or "原会话查活结果写入失败")
-    _append_log(account_id, f"原会话查活成功：最新 AT 已写回，已自动查套餐，total={_cost(live_started)}")
+        raise RuntimeError(result.get("error") or "Failed to write the original-session liveness check result")
+    _append_log(account_id, f"Original-session liveness check succeeded: the latest AT was written back and the plan was checked automatically,total={_cost(live_started)}")
     return result
 
 
 def _run(account_id: int, source: str) -> dict:
     new_email = ""
     task_started = time.monotonic()
-    stage = "初始化"
+    stage = "Initialization"
     with _LOCK:
         _RUNNING.add(account_id)
     try:
-        _append_log(account_id, f"任务执行开始：account_id={account_id} source={source}")
-        stage = "读取账号"
+        _append_log(account_id, f"Task execution started:account_id={account_id} source={source}")
+        stage = "reading account"
         account = db.get_account(account_id)
         if not account:
-            raise RuntimeError("账号不存在")
+            raise RuntimeError("Account does not exist")
         token = str(account.get("access_token") or "").strip()
         if not token:
-            raise RuntimeError("账号缺少 access_token，请先查活刷新 AT")
-        stage = "领取新邮箱"
+            raise RuntimeError("The account has no access_token, please refresh it with a liveness check first AT")
+        stage = "claiming new email"
         acquire_started = time.monotonic()
         new_email = acquire_email_from_source(source)
-        _append_log(account_id, f"新邮箱领取成功：source={source} email={new_email} cost={_cost(acquire_started)}")
+        _append_log(account_id, f"New email claimed successfully:source={source} email={new_email} cost={_cost(acquire_started)}")
         if new_email.lower() == str(account.get("email") or "").lower():
-            raise RuntimeError("领取到的邮箱与当前邮箱相同")
+            raise RuntimeError("The claimed email is the same as the current email")
         if not db.mark_account_email_change_running(account_id, new_email):
-            raise RuntimeError("换绑任务状态已失效")
+            raise RuntimeError("The email change task state is no longer valid")
 
-        stage = "创建网络会话"
+        stage = "creating network session"
         saved_proxy = _proxy(account.get("proxy_used"))
-        # 账号没有可复用的真实代理 URL 时，先按全局代理池选路，而不是直接裸连。
+        # When the account has no reusable real proxy URL, route through the global proxy pool first instead of connecting bare.
         current_email = str(account.get("email") or "").strip()
         current_source = str(account.get("email_source") or "").strip().lower()
         session = _new_session(account_id, saved_proxy or None, email=current_email)
         _append_log(
             account_id,
-            f"网络会话已创建：route={'账号代理' if saved_proxy else '全局代理池/默认网络'} "
+            f"Network session created:route={'account proxy' if saved_proxy else 'global proxy pool / default network'} "
             f"proxy={_proxy_label(getattr(session, 'proxy', None))}",
         )
-        _append_log(account_id, f"指纹摘要：{session.fingerprint_summary_text()}")
+        _append_log(account_id, f"Fingerprint summary:{session.fingerprint_summary_text()}")
 
-        logger.info("[邮箱换绑] begin account_id=%s old=%s new=%s source=%s", account_id, account.get("email"), new_email, source)
-        _append_log(account_id, f"开始换绑：原邮箱={account.get('email') or '-'}，新邮箱={new_email}，来源={source}")
-        stage = "发送新邮箱验证码/按需重认证"
+        logger.info("[Email Change] begin account_id=%s old=%s new=%s source=%s", account_id, account.get("email"), new_email, source)
+        _append_log(account_id, f"Starting email change: original email={account.get('email') or '-'}, new email={new_email}, source={source}")
+        stage = "Send the new email verification code / re-authenticate on demand"
         session, token, after_ts, reauthenticated = _begin_change_with_optional_reauth(
             session,
             account_id=account_id,
@@ -437,32 +437,32 @@ def _run(account_id: int, source: str) -> dict:
         )
         _append_log(
             account_id,
-            f"新邮箱验证码发送成功，开始等待 OTP；reauth={'yes' if reauthenticated else 'no'}",
+            f"New email verification code sent successfully, starting to wait for the OTP;reauth={'yes' if reauthenticated else 'no'}",
         )
-        stage = "等待新邮箱 OTP"
+        stage = "waiting for new email OTP"
         otp_started = time.monotonic()
         otp = wait_for_otp(new_email, after_ts=after_ts, email_source=source, force_service=True)
-        _append_log(account_id, f"新邮箱 OTP 获取成功：source={source} cost={_cost(otp_started)}（验证码不写入日志）")
-        stage = "验证新邮箱 OTP"
+        _append_log(account_id, f"New email OTP obtained: source={source} cost={_cost(otp_started)} (the verification code is not written to the log)")
+        stage = "verifying new email OTP"
         _, session = _post_with_network_retry(
             session, account_id=account_id,
             path="/backend-api/accounts/change_email/verify", token=token,
             payload={"email": new_email, "code": otp},
             fingerprint_email=current_email,
         )
-        _append_log(account_id, "新邮箱 OTP 服务端验证成功，开始更新本地账号记录")
+        _append_log(account_id, "New email OTP verified by the server, starting to update the local account record")
 
-        stage = "更新本地账号"
+        stage = "updating local account"
         db_started = time.monotonic()
         db.finish_account_email_change(
             account_id, ok=True, new_email=new_email, source=source,
             material_line=email_material_line(new_email, source),
         )
-        _append_log(account_id, f"本地账号更新成功：current_email={new_email}，旧 AT 已清空，cost={_cost(db_started)}")
-        # 抓包显示 verify 后旧 AT 会立刻 401，但当前会话中的 __cf_bm、OAuth
-        # Cookie 和出口连续性仍然有效。优先在该会话内重新登录，避免另建会话后
-        # `/api/auth/csrf` 被 CF 403；原会话失败时再退回后台查活队列。
-        stage = "换绑后自动查活"
+        _append_log(account_id, f"Local account updated successfully: current_email={new_email}, the old AT was cleared,cost={_cost(db_started)}")
+        # Packet captures show that the old AT returns 401 right after verify, but the __cf_bm in the current session,OAuth
+        # Cookie and the exit continuity are still valid. Prefer logging in again inside this session, to avoid creating another session
+        # `/api/auth/csrf` and getting a CF 403; if the original session fails, fall back to the background liveness queue.
+        stage = "automatic liveness check after email change"
         try:
             live_result = _check_live_in_current_session(
                 session,
@@ -474,13 +474,13 @@ def _run(account_id: int, source: str) -> dict:
         except Exception as live_exc:
             _append_log(
                 account_id,
-                f"原会话查活失败：{type(live_exc).__name__}: {str(live_exc)[:300]}；改用后台查活队列",
+                f"Original-session liveness check failed: {type(live_exc).__name__}: {str(live_exc)[:300]}; switching to the background liveness queue",
             )
-            logger.warning("[邮箱换绑] 原会话查活失败 account_id=%s: %s", account_id, str(live_exc)[:300])
+            logger.warning("[email change] Original-session liveness check failed account_id=%s: %s", account_id, str(live_exc)[:300])
             live_result = _enqueue_live_check_after_change(account_id, new_email)
             live_mode = "queued"
-        logger.info("[邮箱换绑] 成功 account_id=%s new=%s；已执行换绑后查活", account_id, new_email)
-        _append_log(account_id, f"换绑任务完成：live_check_mode={live_mode} total={_cost(task_started)}")
+        logger.info("[email change] Success account_id=%s new=%s; liveness check after the email change was executed", account_id, new_email)
+        _append_log(account_id, f"Email change task completed:live_check_mode={live_mode} total={_cost(task_started)}")
         return {
             "ok": True, "id": account_id, "email": new_email,
             "live_check_started": bool(live_result.get("ok") or live_result.get("accepted")),
@@ -490,15 +490,15 @@ def _run(account_id: int, source: str) -> dict:
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         db.finish_account_email_change(account_id, ok=False, new_email=new_email or None, source=source, error=error)
-        _append_log(account_id, f"换绑失败：stage={stage} total={_cost(task_started)} error={error}")
+        _append_log(account_id, f"Email change failed:stage={stage} total={_cost(task_started)} error={error}")
         if new_email:
             try:
-                release_email_if_unconsumed(new_email, note=f"账号 #{account_id} 换绑失败: {error[:300]}")
-                _append_log(account_id, f"失败邮箱处理完成：已请求回收 email={new_email}")
+                release_email_if_unconsumed(new_email, note=f"Account #{account_id} email change failed: {error[:300]}")
+                _append_log(account_id, f"Failed-email handling completed: reclaim requested email={new_email}")
             except Exception:
-                _append_log(account_id, f"失败邮箱回收异常：email={new_email}")
-                logger.exception("[邮箱换绑] 回收新邮箱失败: %s", new_email)
-        logger.exception("[邮箱换绑] 失败 account_id=%s", account_id)
+                _append_log(account_id, f"Failed-email reclaim error:email={new_email}")
+                logger.exception("[email change] Failed to reclaim the new email: %s", new_email)
+        logger.exception("[email change] Failed account_id=%s", account_id)
         return {"ok": False, "id": account_id, "error": error}
     finally:
         with _LOCK:
@@ -510,18 +510,18 @@ def enqueue(account_id: int, source: str, trigger: str = "manual") -> dict:
     account_id = int(account_id)
     source = str(source or "").strip().lower()
     if not _SLOTS.acquire(blocking=False):
-        return {"accepted": False, "error": "邮箱换绑队列已满"}
+        return {"accepted": False, "error": "Email change queue is full"}
     if not db.claim_account_email_change(account_id, source, trigger):
         _SLOTS.release()
-        return {"accepted": False, "busy": True, "error": "账号正在换绑或不存在"}
-    _append_log(account_id, f"换绑任务已入队：source={source} trigger={trigger}", clear=True)
+        return {"accepted": False, "busy": True, "error": "Account is being changed or does not exist"}
+    _append_log(account_id, f"Email change task queued:source={source} trigger={trigger}", clear=True)
     try:
         future = _EXECUTOR.submit(_run, account_id, source)
         return {"accepted": True, "future": future}
     except Exception as exc:
         _SLOTS.release()
         db.finish_account_email_change(account_id, ok=False, error=str(exc))
-        _append_log(account_id, f"换绑任务提交失败：{type(exc).__name__}: {exc}")
+        _append_log(account_id, f"Email change task submit failed:{type(exc).__name__}: {exc}")
         return {"accepted": False, "error": str(exc)}
 
 

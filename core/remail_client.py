@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Remail 开放 API 邮箱客户端。
+"""Remail open API email client.
 
-Remail 的开放 API 与本项目已有的“生成随机邮箱”类服务不同：
+Remail open API differs from the existing generate-random-email services in this project:
 
-1. 先用 API Key 按项目下一个 ``code`` 或 ``purchase`` 订单；
-2. 订单返回交付邮箱和只属于该订单的 service token；
-3. 取码时使用 ``/v1/pickup``，不再携带 API Key，只携带邮箱和 service token。
+1. First use the API Key to place a ``code`` or ``purchase`` order under the project;
+2. The order returns the delivered email and a service token that belongs only to that order;
+3. Code retrieval uses ``/v1/pickup``, no longer carries the API Key, and carries only the email and service token.
 
-因此 service token 必须和邮箱一起保存在当前进程上下文中，不能只根据邮箱地址
-重新拼接取件请求。
+Therefore the service token must be saved in the current process context together with the email; do not rely only on the email address
+to reassemble the pickup request.
 """
 from __future__ import annotations
 
@@ -36,16 +36,16 @@ _FINAL_ORDER_STATUSES = {"failed", "refunded", "closed"}
 
 
 class RemailError(RuntimeError):
-    """Remail API 请求、下单或取码失败。"""
+    """Remail API request, order placement, or code retrieval failed."""
 
 
-# 兼容调用方可能使用的命名。
+# Compatible with names callers may use.
 RemailClientError = RemailError
 
 
 @dataclass
 class RemailAccount:
-    """一次 Remail 订单的取件上下文。"""
+    """Pickup context of one Remail order."""
 
     email: str
     service_token: str
@@ -63,7 +63,7 @@ def _cache_key(email: str) -> str:
 
 
 def _base_url(value: str | None = None) -> str:
-    """返回 API 根地址，也兼容用户误填文档地址 ``.../docs``。"""
+    """Return the API root URL; also tolerates users mistakenly entering the docs URL ``.../docs``."""
     raw = str(
         value if value is not None else getattr(_email_cfg, "REMAIL_API_BASE", DEFAULT_API_BASE) or DEFAULT_API_BASE
     ).strip()
@@ -74,10 +74,10 @@ def _base_url(value: str | None = None) -> str:
 
     parsed = urlsplit(raw.rstrip("/"))
     if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc:
-        raise RemailError("Remail API 地址无效，请填写 https://remail.aishop6.com（不要填写接口路径）")
+        raise RemailError("Remail API URL is invalid, enter https://remail.aishop6.com (do not enter an API path)")
 
     path = parsed.path.rstrip("/")
-    # 文档链接可直接粘贴到配置页；API 实际位于同一域名根路径。
+    # The docs link can be pasted directly into the settings page; the API actually lives at the root path of the same domain.
     if path.lower() == "/docs":
         path = ""
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
@@ -94,7 +94,7 @@ def _request_timeout() -> int:
 def _api_key() -> str:
     value = str(getattr(_email_cfg, "REMAIL_API_KEY", "") or "").strip()
     if not value:
-        raise RemailError("Remail API Key 未配置，请在配置 → 邮箱 / OTP 填写 REMAIL_API_KEY")
+        raise RemailError("Remail API Key is not configured, fill in under Settings → Email / OTP: REMAIL_API_KEY")
     return value
 
 
@@ -109,7 +109,7 @@ def _error_message(payload, response) -> str:
         if message:
             return f"{message} (requestId={request_id})" if request_id else str(message)
     text = str(getattr(response, "text", "") or "").strip()
-    return text[:240] if text else "服务端未返回错误信息"
+    return text[:240] if text else "The server returned no error message"
 
 
 def _request(
@@ -121,9 +121,9 @@ def _request(
     headers: dict[str, str] | None = None,
     authenticated: bool = True,
 ):
-    """调用 Remail API 并返回 JSON payload。
+    """Call the Remail API and return the JSON payload.
 
-    ``authenticated=False`` 仅用于 pickup 接口。服务 token 不写入日志和异常文本。
+    ``authenticated=False`` Only for the pickup endpoint. The service token is not written to logs or exception text.
     """
     request_headers = {"Accept": "application/json"}
     if authenticated:
@@ -142,23 +142,23 @@ def _request(
             timeout=_request_timeout(),
         )
     except requests.RequestException as exc:
-        raise RemailError(f"Remail 请求失败 ({method.upper()} {path}): {type(exc).__name__}: {exc}") from exc
+        raise RemailError(f"Remail Request failed ({method.upper()} {path}): {type(exc).__name__}: {exc}") from exc
 
     try:
         payload = response.json()
     except ValueError as exc:
         if response.status_code >= 400:
             raise RemailError(
-                f"Remail 请求失败 ({method.upper()} {path}): HTTP {response.status_code}; "
+                f"Remail Request failed ({method.upper()} {path}): HTTP {response.status_code}; "
                 f"{_error_message(None, response)}"
             ) from exc
-        raise RemailError(f"Remail 响应不是 JSON ({method.upper()} {path})") from exc
+        raise RemailError(f"Remail response is not JSON ({method.upper()} {path})") from exc
 
     if response.status_code >= 400:
         if response.status_code == 401 and authenticated:
-            raise RemailError(f"Remail API Key 无效或已失效 ({path})")
+            raise RemailError(f"Remail API Key is invalid or expired ({path})")
         raise RemailError(
-            f"Remail 请求失败 ({method.upper()} {path}): HTTP {response.status_code}; "
+            f"Remail Request failed ({method.upper()} {path}): HTTP {response.status_code}; "
             f"{_error_message(payload, response)}"
         )
     return payload
@@ -173,9 +173,9 @@ def _first_value(data: dict, *keys: str):
 
 
 def _unwrap_order(payload) -> dict:
-    """读取 OpenAPI 定义的 Order，并兼容少数网关包裹 data/order 的响应。"""
+    """Read the Order defined by OpenAPI, and tolerate the few gateways that wrap the response in data/order."""
     if not isinstance(payload, dict):
-        raise RemailError("Remail 下单响应不是对象")
+        raise RemailError("Remail order response is not an object")
     if any(
         k in payload
         for k in ("orderNo", "order_no", "deliveryEmail", "delivery_email", "serviceToken", "service_token")
@@ -185,7 +185,7 @@ def _unwrap_order(payload) -> dict:
         value = payload.get(key)
         if isinstance(value, dict):
             return value
-    raise RemailError("Remail 下单响应缺少订单数据")
+    raise RemailError("Remail order response is missing order data")
 
 
 def _project_id() -> int:
@@ -196,7 +196,7 @@ def _project_id() -> int:
         value = 0
     if value <= 0:
         raise RemailError(
-            "Remail 项目 ID 未配置，请先通过 Remail API 查询项目后填写 REMAIL_PROJECT_ID"
+            "Remail Project ID is not configured, query the project via the Remail API first and then fill it in REMAIL_PROJECT_ID"
         )
     return value
 
@@ -204,21 +204,21 @@ def _project_id() -> int:
 def _email_suffix() -> str:
     suffix = str(getattr(_email_cfg, "REMAIL_EMAIL_SUFFIX", "outlook.com") or "").strip().lstrip("@")
     if not suffix or "@" in suffix or any(ch.isspace() for ch in suffix):
-        raise RemailError("Remail 邮箱后缀无效，请填写 outlook.com 等域名（不要填写完整邮箱）")
+        raise RemailError("Remail Invalid email suffix, enter a domain such as outlook.com (do not enter a full email)")
     return suffix
 
 
 def _supply_policy() -> str:
     value = str(getattr(_email_cfg, "REMAIL_SUPPLY_POLICY", "public_only") or "public_only").strip().lower()
     if value not in {"private_first", "public_only"}:
-        raise RemailError("Remail 库存策略无效，只支持 private_first 或 public_only")
+        raise RemailError("Remail invalid stock strategy, only private_first or public_only")
     return value
 
 
 def _service_mode() -> str:
     value = str(getattr(_email_cfg, "REMAIL_SERVICE_MODE", "purchase") or "purchase").strip().lower()
     if value not in {"code", "purchase"}:
-        raise RemailError("Remail 服务模式无效，只支持 code 或 purchase")
+        raise RemailError("Remail invalid service mode, only code or purchase")
     return value
 
 
@@ -240,14 +240,14 @@ def _order_credentials(order: dict) -> tuple[str, str, str] | None:
 
 
 def _cache_context(account: RemailAccount) -> RemailAccount:
-    """缓存订单取件上下文并返回对象。"""
+    """Cache the order pickup context and return the object."""
     with _CONTEXT_LOCK:
         _CONTEXT_CACHE[_cache_key(account.email)] = account
     return account
 
 
 def _context_from_order(order: dict, target_email: str) -> RemailAccount | None:
-    """从订单对象创建上下文，并要求交付邮箱完全匹配。"""
+    """Create the context from the order object, requiring the delivered email to match exactly."""
     credentials = _order_credentials(order)
     if not credentials:
         return None
@@ -259,8 +259,8 @@ def _context_from_order(order: dict, target_email: str) -> RemailAccount | None:
     try:
         project_id = int(str(raw_project_id).strip()) if raw_project_id is not None else _project_id()
     except (TypeError, ValueError, RemailError):
-        # 订单详情理论上一定有 projectId；历史接口缺失时不影响取件，保留
-        # 当前配置值作为展示/兼容字段。
+        # Order details should always have projectId; when a historical endpoint lacks it, pickup is unaffected, keep
+        # the current config value as a display/compatibility field.
         try:
             project_id = _project_id()
         except RemailError:
@@ -281,7 +281,7 @@ def _context_from_order(order: dict, target_email: str) -> RemailAccount | None:
 
 
 def _order_list_items(payload) -> list[dict]:
-    """读取订单列表响应，兼容 data/items 的网关包裹。"""
+    """Read the order list response, tolerating gateways that wrap it in data/items."""
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     if not isinstance(payload, dict):
@@ -300,13 +300,13 @@ def _order_list_items(payload) -> list[dict]:
 
 
 def _saved_context_metadata(email: str) -> dict:
-    """读取账号保存的 Remail 订单凭证，不把解析失败传播到查活主流程。"""
+    """Read the Remail order credentials saved on the account, without propagating parse failures into the main liveness check flow."""
     try:
         from core import db
 
         row = db.get_account_by_email(email)
     except Exception as exc:
-        logger.debug("[Remail] 读取已注册账号订单信息失败: %s: %s", type(exc).__name__, exc)
+        logger.debug("[Remail] Failed to read order info of the registered account: %s: %s", type(exc).__name__, exc)
         return {}
     if not row:
         return {}
@@ -324,7 +324,7 @@ def _saved_context_metadata(email: str) -> dict:
     if not isinstance(extra, dict):
         return {}
 
-    # 新字段使用 email_service；同时兼容早期开发版本可能使用 remail。
+    # The new field uses email_service; also tolerates remail, which early development versions may have used.
     for key in ("email_service", "remail"):
         value = extra.get(key)
         if isinstance(value, dict):
@@ -335,10 +335,10 @@ def _saved_context_metadata(email: str) -> dict:
 
 
 def get_account_context_metadata(email: str) -> dict | None:
-    """返回可持久化的 Remail 订单上下文，用于注册账号落库。
+    """Return the persistable Remail order context, used to save the registered account.
 
-    service token 是取件凭证，不写日志；这里仅由账号持久化层调用，普通列表
-    API 不会直接返回 ``extra_json``。
+    service token is the pickup credential and is not logged; it is called here only by the account persistence layer, and normal list
+    API endpoints do not return ``extra_json`` directly.
     """
     account = get_account_context(email)
     if account is None:
@@ -354,11 +354,11 @@ def get_account_context_metadata(email: str) -> dict | None:
 
 
 def restore_account_context(email: str) -> RemailAccount | None:
-    """恢复已注册账号的 Remail 取件上下文。
+    """Restore the Remail pickup context of a registered account.
 
-    进程重启后 ``_CONTEXT_CACHE`` 会丢失。优先使用账号保存的 service token，
-    其次按保存的订单号查详情，最后用 API Key 按邮箱搜索订单。所有候选订单
-    都必须与目标邮箱大小写不敏感地完全匹配，避免拿错其他邮箱的验证码。
+    ``_CONTEXT_CACHE`` is lost after a process restart. Prefer the service token saved on the account,
+    then look up details by the saved order number, and finally search orders by email with the API Key. All candidate orders
+    must match the target email exactly (case-insensitive), to avoid taking verification codes of other emails.
     """
     target = str(email or "").strip()
     if not target:
@@ -384,7 +384,7 @@ def restore_account_context(email: str) -> RemailAccount | None:
         account = _context_from_order(order, target)
         if account is not None:
             logger.info(
-                "[Remail] 已从账号保存信息恢复取件上下文: %s order=%s",
+                "[Remail] Restored pickup context from the saved account info: %s order=%s",
                 target,
                 account.order_no or "-",
             )
@@ -397,19 +397,19 @@ def restore_account_context(email: str) -> RemailAccount | None:
                 _request("GET", f"/v1/open/orders/{quote(saved_order_no, safe='')}")
             )
         except RemailError as exc:
-            logger.debug("[Remail] 按已保存订单号恢复失败: order=%s error=%s", saved_order_no, exc)
+            logger.debug("[Remail] Failed to restore by the saved order number: order=%s error=%s", saved_order_no, exc)
         else:
             account = _context_from_order(detail, target)
             if account is not None:
                 logger.info(
-                    "[Remail] 已按订单号恢复取件上下文: %s order=%s",
+                    "[Remail] Restored pickup context by order number: %s order=%s",
                     target,
                     account.order_no or saved_order_no,
                 )
                 return _cache_context(account)
 
-    # 没有可用的持久化凭证时，通过 API Key 查询用户自己的订单。列表接口的
-    # search 是服务端过滤；仍需在客户端做完整邮箱匹配，不能接受模糊命中。
+    # When no persisted credentials are available, query the orders belonging to the user via the API Key. The search of the list endpoint
+    # search is filtered on the server side; a full email match must still be done on the client, and fuzzy hits must not be accepted.
     try:
         payload = _request(
             "GET",
@@ -417,7 +417,7 @@ def restore_account_context(email: str) -> RemailAccount | None:
             params={"search": target},
         )
     except RemailError as exc:
-        logger.debug("[Remail] 按邮箱搜索订单失败: email=%s error=%s", target, exc)
+        logger.debug("[Remail] Failed to search orders by email: email=%s error=%s", target, exc)
         return None
 
     candidates = [
@@ -434,13 +434,13 @@ def restore_account_context(email: str) -> RemailAccount | None:
         reverse=True,
     )
 
-    # 列表响应通常直接带 serviceToken；若网关出于安全策略隐藏 token，
-    # 再逐个请求订单详情（优先最新订单）。
+    # List responses usually carry serviceToken directly; if the gateway hides the token for security policy reasons,
+    # then request order details one by one (newest orders first).
     for order in candidates:
         account = _context_from_order(order, target)
         if account is not None:
             logger.info(
-                "[Remail] 已按邮箱搜索恢复取件上下文: %s order=%s",
+                "[Remail] Restored pickup context via email search: %s order=%s",
                 target,
                 account.order_no or "-",
             )
@@ -459,7 +459,7 @@ def restore_account_context(email: str) -> RemailAccount | None:
         account = _context_from_order(detail, target)
         if account is not None:
             logger.info(
-                "[Remail] 已按订单详情恢复取件上下文: %s order=%s",
+                "[Remail] Restored pickup context via order details: %s order=%s",
                 target,
                 account.order_no or order_no,
             )
@@ -471,7 +471,7 @@ def _order_status_error(order: dict) -> str | None:
     status = str(order.get("status") or "").strip().lower()
     if status in _FINAL_ORDER_STATUSES:
         failure = str(order.get("failureCode") or order.get("failure_code") or "").strip()
-        return f"Remail 订单未就绪: status={status}" + (f", failure={failure}" if failure else "")
+        return f"Remail order not ready: status={status}" + (f", failure={failure}" if failure else "")
     return None
 
 
@@ -482,7 +482,7 @@ def _wait_for_order_credentials(order: dict) -> tuple[str, str, str]:
 
     order_no = str(_first_value(order, "orderNo", "order_no") or "").strip()
     if not order_no:
-        raise RemailError("Remail 下单成功但响应缺少 service token 或订单号")
+        raise RemailError("Remail order placed successfully but the response is missing the service token or order number")
 
     error = _order_status_error(order)
     if error:
@@ -494,7 +494,7 @@ def _wait_for_order_credentials(order: dict) -> tuple[str, str, str]:
         try:
             latest = _unwrap_order(_request("GET", f"/v1/open/orders/{order_no}"))
         except RemailError:
-            # 订单已创建，短暂的详情接口错误不应重新下单，继续等待到截止时间。
+            # The order is created; a transient detail endpoint error must not trigger a new order, keep waiting until the deadline.
             if time.monotonic() >= deadline:
                 raise
         else:
@@ -511,11 +511,11 @@ def _wait_for_order_credentials(order: dict) -> tuple[str, str, str]:
         time.sleep(min(1, remaining))
 
     status = str(latest.get("status") or "unknown")
-    raise RemailError(f"Remail 订单等待 service token 超时: order={order_no}, status={status}")
+    raise RemailError(f"Remail order timed out waiting for the service token: order={order_no}, status={status}")
 
 
 def pick_account() -> RemailAccount:
-    """按配置创建一个 Remail 接码/长效购买订单并返回交付邮箱。"""
+    """Create a Remail code-receiving / long-term purchase order per the config and return the delivered email."""
     project_id = _project_id()
     email_suffix = _email_suffix()
     service_mode = _service_mode()
@@ -539,12 +539,12 @@ def pick_account() -> RemailAccount:
         email_suffix=email_suffix,
     )
     _cache_context(account)
-    logger.info("[Remail] 已创建邮箱订单: %s order=%s project=%s", email, order_no or "-", project_id)
+    logger.info("[Remail] Created email order: %s order=%s project=%s", email, order_no or "-", project_id)
     return account
 
 
 def get_email() -> str:
-    """兼容其他临时邮箱客户端的旧入口。"""
+    """Legacy entry point compatible with other temporary email clients."""
     return pick_account().email
 
 
@@ -554,12 +554,12 @@ def get_account_context(email: str) -> RemailAccount | None:
 
 
 def release_account(email: str, status: str = "available", note: str | None = None) -> None:
-    """释放本地取件上下文；订单生命周期由 Remail 服务端管理。"""
+    """Release the local pickup context; the order lifecycle is managed by the Remail server."""
     with _CONTEXT_LOCK:
         account = _CONTEXT_CACHE.pop(_cache_key(email), None)
     if account:
         logger.info(
-            "[Remail] 已释放取件上下文: %s order=%s status=%s note=%s",
+            "[Remail] Released pickup context: %s order=%s status=%s note=%s",
             email,
             account.order_no or "-",
             status,
@@ -633,15 +633,15 @@ def fetch_latest_otp(
     poll_interval: int | None = None,
     settle_seconds: int | None = None,
 ) -> str:
-    """轮询 Remail pickup，返回领取时间之后最新的六位验证码。"""
+    """Poll Remail pickup and return the latest six-digit verification code after the claim time."""
     target = str(email or "").strip()
     if not target:
-        raise RemailError("Remail 取码缺少邮箱地址")
+        raise RemailError("Remail code retrieval is missing the email address")
     account = get_account_context(target) or restore_account_context(target)
     if account is None:
         raise RemailError(
-            "Remail 找不到该邮箱的 service token，且无法从已保存订单恢复；"
-            "请确认账号注册来源为 Remail、订单仍可取件，并已配置 Remail API Key"
+            "Remail Cannot find the service token for this email and cannot restore it from the saved order;"
+            "make sure the account was registered from Remail, the order can still be picked up, and that you have configured Remail API Key"
         )
 
     try:
@@ -662,9 +662,9 @@ def fetch_latest_otp(
     best_otp: str | None = None
     best_timestamp = float("-inf")
     settle_until: float | None = None
-    last_error = "收件箱为空或尚未出现新的验证码"
+    last_error = "Inbox is empty or no new verification code has appeared yet"
 
-    logger.info("[Remail] 开始轮询邮箱 %s，最长 %ss", target, wait_seconds)
+    logger.info("[Remail] Start polling email %s, for at most %ss", target, wait_seconds)
     while time.monotonic() <= deadline:
         try:
             payload = _request(
@@ -700,7 +700,7 @@ def fetch_latest_otp(
                     best_otp = code
                     best_timestamp = candidate_time
                     settle_until = time.monotonic() + settle
-                    logger.info("[Remail] 锁定 OTP 候选，等待 %ss 确认", settle)
+                    logger.info("[Remail] Locked OTP candidate, waiting %ss for confirmation", settle)
 
             if best_otp and settle_until is not None and time.monotonic() >= settle_until:
                 return best_otp
@@ -716,11 +716,11 @@ def fetch_latest_otp(
 
     if best_otp:
         return best_otp
-    raise RemailError(f"等待 Remail 验证码超时: {target}; {last_error}")
+    raise RemailError(f"Timed out waiting for Remail verification code: {target}; {last_error}")
 
 
 def list_projects(*, search: str | None = None, product_type: str | None = "microsoft") -> list[dict]:
-    """查询当前 API Key 可见项目，供配置/诊断使用。"""
+    """Query the projects visible to the current API Key, for configuration/diagnostics."""
     params = {"offset": 0, "limit": 100}
     if search:
         params["search"] = str(search).strip()

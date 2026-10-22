@@ -1,62 +1,62 @@
-# 巡检查活失败详情
+# Inspection liveness check failure details
 
-## 使用
+## Using
 
-在「巡检历史」的「查活结果」列点击「失败详情（N）」，查看本次任务查活失败的账号 ID、邮箱、失败类型、记录时间和原因。新旧界面均支持，每页 20 条；打开期间每 5 秒刷新，也可手动刷新。
+In Inspection History, click Failure Details (N) in the Liveness Result column to see the account ID, email, failure type, recorded time, and reason for every account whose liveness check failed in that task. Both the old and new UIs support it, 20 items per page; it refreshes every 5 seconds while open and can also be refreshed manually.
 
-- 失败类型包含查活失败、账号已废、入队被拒绝、执行异常。
-- 明细保存当时的账号邮箱和失败原因，不依赖账号当前状态或会被覆盖的查活日志；后续查活、账号删除和服务重启不会改写已保存明细。
-- 仅套餐失败不计为查活失败，不进入该列表。
-- 旧任务此前没有保存明细，界面提示无法还原，不使用当前账号错误冒充历史错误。
+- Failure types include liveness check failed, account deactivated, enqueue rejected, and execution error.
+- Details store the account email and failure reason as they were at the time, independent of the current account status or liveness logs that may be overwritten; later liveness checks, account deletion, and service restarts do not rewrite saved details.
+- Plan-only failures are not counted as liveness check failures and do not appear in this list.
+- Older tasks have no saved details, so the UI says they cannot be restored; the current account error is not used to stand in for a historical error.
 
-## 实现与一致性
+## Implementation and consistency
 
-- `account_inspection_failures` 独立表，以 `(inspection_id, account_id)` 为主键，查询按任务分页，不将失败清单放进统计 JSON。
-- 失败明细与对应统计同一事务写入；写入失败时还原内存计数，防止任务 finally 单独保存没有明细的失败数。
-- 已终止任务/旧 worker 不能写入明细；同一任务同一账号的重复明细不重复插入。
-- API：`GET /api/accounts/inspections/{id}/failures?page=1`，沿用登录鉴权；非法页码 400、任务不存在 404。返回当前页、总数、任务摘要和 `details_available`。
-- 不保存完整登录结果、AT、Cookie 或 BrowserSession 对象，只保存选定的失败字段；原因最多保存 2000 字符。
-- 前端转义邮箱、原因和未知状态；切换任务时隔离旧响应，超时后可重新加载。
+- `account_inspection_failures` is a separate table keyed by `(inspection_id, account_id)`; queries are paginated per task, and the failure list is not put into the stats JSON.
+- Failure details are written in the same transaction as the corresponding stats; if the write fails, the in-memory counters are restored, so the task finally block cannot save a failure count without details on its own.
+- Terminated tasks and stale workers cannot write details; duplicate details for the same account in the same task are not inserted twice.
+- API: `GET /api/accounts/inspections/{id}/failures?page=1`, which reuses login authentication; an invalid page number returns 400 and a missing task returns 404. Returns the current page, the total, the task summary, and `details_available`.
+- The full login result, AT, cookies, or BrowserSession objects are not stored, only the selected failure fields; the reason is stored up to 2000 characters.
+- The frontend escapes the email, reason, and unknown statuses; responses from a previous task are isolated when switching tasks, and loading can be retried after a timeout.
 
-## 验证（2026-10-18）
+## Verification (2026-10-18)
 
-- 全量 unittest：389 项通过（22.331 秒）。
-- 巡检专项：72 项连续 3 轮通过（7.717 / 6.445 / 6.884 秒），混合并发测试额外核对每个任务明细数等于已保存失败数。
-- 覆盖入队拒绝、异常、废号、历史快照不被账号变更/删除影响、重启保留、事务回滚、终态保护、分页、鉴权、旧记录和套餐失败隔离。
-- Node UI：任务切换旧响应隔离、分页、HTML 转义、旧任务提示、空态、请求超时与重试均通过。
-- Chrome mock API 渲染：新旧模板桌面/手机、嵌套弹窗 Escape、页面边界与转义通过。
-- compileall、`git diff --check` 通过；未执行真实登录/取码/套餐网络请求。
+- Full unittest run: 389 tests passed (22.331 s).
+- Inspection-specific: 72 tests passed in 3 consecutive rounds (7.717 / 6.445 / 6.884 s); the mixed-concurrency test additionally checks that each task detail count equals the saved failure count.
+- Covers enqueue rejection, exceptions, deactivated accounts, history snapshots unaffected by account changes/deletion, restart retention, transaction rollback, terminal-state protection, pagination, authentication, legacy records, and isolation of plan failures.
+- Node UI: stale-response isolation on task switch, pagination, HTML escaping, legacy-task notice, empty state, and request timeout with retry all passed.
+- Chrome mock API rendering: old and new templates on desktop/mobile, nested modal Escape, page bounds, and escaping passed.
+- compileall, `git diff --check` passed; no real login / code retrieval / plan network requests were run.
 
-## Bug 与 UI 适配复核（2026-10-18）
+## Bug and UI adaptation review (2026-10-18)
 
-- 先用真实 Chrome 复现：同页刷新重建表格，导致手机端横向阅读位置回到最左侧。现已统一历史/失败详情的渲染逻辑：内容未变化不重建；数据变化保留同页横向、纵向滚动位置和表格区域键盘焦点；翻页重置阅读位置。
-- 长邮箱支持换行，避免单列无限撑宽；手机端明确提示左右滑动查看完整原因，并支持键盘聚焦滚动区域。
-- 打开其他任务立即清理旧归档提示、禁用旧分页按钮，避免加载期间显示上一任务的信息。
-- 新增可重复运行的浏览器回归脚本：`.venv/bin/python tests/browser_account_inspection_check.py`。需要 Playwright Python 包及本机 Chrome，截图保存在临时目录。
-- 本轮全量 unittest：389 项通过（44.789 秒）；巡检专项：72 项通过（8.315 秒）。日志中的数据库/磁盘故障是测试注入场景，测试结果为 OK。
-- Node UI 回归通过，新增同页无变化不重建、有变化保留滚动、翻页重置、切换任务加载态验证。
-- Chrome 新旧模板覆盖 320/360/390/640/768/1328/1920px、手机横屏、20 条长邮箱/长错误、分页按钮边界、刷新滚动/焦点保持、翻页重置、嵌套 Escape、空态和 HTML 转义；均通过。
-- compileall、`git diff --check` 通过。本轮使用 mock API 和桌面 Chrome 模拟不同视口，未执行真实账号网络请求，未覆盖真机 Safari。
+- First reproduced with real Chrome: refreshing in place rebuilt the table, which sent the mobile horizontal reading position back to the far left. The history and failure-details rendering logic is now unified: unchanged content is not rebuilt; when data changes, the in-page horizontal and vertical scroll positions and the keyboard focus in the table area are preserved; paging resets the reading position.
+- Long emails wrap so a single column cannot grow without bound; on mobile a hint tells users to swipe left and right to see the full reason, and the scroll area can be focused by keyboard.
+- Opening another task immediately clears the old archive notice and disables the old pagination buttons, so the previous task information is not shown while loading.
+- Added a repeatable browser regression script: `.venv/bin/python tests/browser_account_inspection_check.py`. It needs the Playwright Python package and a local Chrome; screenshots are saved in a temporary directory.
+- This round full unittest run: 389 tests passed (44.789 s); inspection-specific: 72 tests passed (8.315 s). The database/disk faults in the logs are injected test scenarios, and the test result is OK.
+- Node UI The regression passed, with new checks for no rebuild when unchanged in place, preserved scroll on change, reset on paging, and the loading state when switching tasks.
+- Chrome The old and new templates cover 320/360/390/640/768/1328/1920px, mobile landscape, 20 rows of long emails/long errors, pagination button edges, scroll/focus retention on refresh, reset on paging, nested Escape, empty state, and HTML escaping; all passed.
+- compileall, `git diff --check` passed. This round used a mock API and desktop Chrome to simulate different viewports; no real account network requests were run, and real-device Safari was not covered.
 
-## 已废跳过与一键删除（2026-10-18）
+## Deactivated-skip and one-click delete (2026-10-18)
 
-- 巡检领取账号后优先检查 `live_check_status=deactivated`，直接跳过 AT 解析、查活和套餐查询。与执行前删除的账号一样计入 `skipped_count`，另以 `deactivated_skipped_count` 单独统计；不增加 `checked_count`、`invalid_count` 或实际查活失败数。
-- 已废跳过按 `deactivated_skipped` 类型写入失败详情，保存当时邮箱和原因，与跳过统计同事务提交。详情按钮数为「实际查活失败 + 已废跳过」，历史进度显示跳过总数及其中已废数量；旧任务字段缺失按 0 展示。
-- 新旧账号列表的账号管理操作区增加「一键删除已废」。确认当前归档范围后删除该范围全部已废账号，不限当前页、不受搜索和其他筛选影响。未归档和已归档范围互不影响；不删除邮箱池或巡检历史。
-- API：`POST /api/accounts/delete-deactivated`，JSON `{ "archived": "0" | "only" | "all" }`。必须显式指定有效范围，沿用登录鉴权；返回 `deleted_count`。
-- 删除在 SQLite 单一写事务内按最新状态匹配，同时清理关联 Agent 凭证；不在 Python 全量加载/重写账号集合，正常账号 payload 保持原样。删除失败时账号与凭证一起回滚。
-- 新增回归覆盖：有效/过期 AT 的已废账号均无查活请求、跳过和明细统计、删除后历史保留、归档范围隔离、已恢复正常账号保护、Agent 凭证清理、删除回滚、API 鉴权与参数校验、前端确认/防重/失败恢复。
-- 验证：全量 393 项通过（最终复测 20.358 秒），巡检专项 76 项通过（5.986 秒），Node UI 与 Chrome mock API 布局回归通过；未执行真实账号网络请求。
+- After claiming an account, inspection first checks `live_check_status=deactivated` and skips AT parsing, liveness check, and plan query directly. It counts toward `skipped_count` like accounts deleted before execution, and is also counted separately in `deactivated_skipped_count`; `checked_count`, `invalid_count`, and the actual liveness check failure count do not increase.
+- Deactivated skips are written to the failure details with type `deactivated_skipped`, storing the email and reason at the time, committed in the same transaction as the skip stats. The details button count is actual liveness check failures plus deactivated skips, and the history progress shows the total skipped and how many of them are deactivated; missing fields on legacy tasks are shown as 0.
+- The account management area of the old and new account lists gains a Delete All Deactivated button. After confirming the current archive scope, it deletes all deactivated accounts in that scope, not limited to the current page and unaffected by search and other filters. The unarchived and archived scopes do not affect each other; the email pool and inspection history are not deleted.
+- API: `POST /api/accounts/delete-deactivated`, JSON `{ "archived": "0" | "only" | "all" }`. A valid scope must be given explicitly, login authentication is reused; returns `deleted_count`.
+- Deletion matches against the latest state inside a single SQLite write transaction and also cleans up the associated Agent credentials; the account collection is not fully loaded/rewritten in Python, and normal account payloads stay unchanged. On deletion failure, accounts and credentials roll back together.
+- New regressions cover: deactivated accounts with valid/expired ATs make no liveness check request, skip and detail stats, history retained after deletion, archive scope isolation, protection of accounts that have recovered to normal, Agent credential cleanup, deletion rollback, API authentication and parameter validation, and frontend confirmation / duplicate-submit guard / failure recovery.
+- Verification: 393 tests pass in the full run (final re-run 20.358 s), 76 inspection-specific tests pass (5.986 s), and the Node UI and Chrome mock-API layout regressions pass; no real account network requests were run.
 
-- 本轮工具栏测试隔离固定侧栏外壳，验证新删除按钮所在工具组在窄容器内换行；不表示已完成全站移动端侧栏适配。
+- This round toolbar test isolates the fixed sidebar shell and verifies that the tool group holding the new delete button wraps in a narrow container; it does not mean full-site mobile sidebar adaptation is complete.
 
-## 已废功能集中复核（2026-10-18）
+## Focused review of the deactivated feature (2026-10-18)
 
-- 复现并修复新旧账号列表的并发刷新缺陷：旧列表请求未结束时，删除后的刷新会被直接丢弃。现在合并后续刷新、丢弃已失效的旧响应，并在当前请求结束后补读最新列表。
-- 同时修正页数缩小后的补读锁提前释放问题，保证列表请求串行；账号列表增加 30 秒取消超时，失败/超时均释放锁并处理待刷新请求。
-- 复现并修复共享 `api()` 的响应体取消被吞掉问题：收到响应头后若读取 JSON 超时，不能把 AbortError 转成成功的空对象；原先可能误清空列表或把删除结果误报为成功 0 条。
-- 新增 `node tests/test_account_list_reload_ui.cjs`，直接提取新旧模板中的真实函数，覆盖刷新合并、旧列表不回显、缩页锁、失败/超时恢复和响应体取消。
-- 后端追加外部 SQLite 写事务竞争验证：等待其他写者后按最新已提交状态重新匹配，不删除已恢复正常的账号；已废跳过的明细写入失败时，跳过总数与已废跳过数一并回滚。
-- 本轮全量 395 项通过（最终复测 27.161 秒），巡检专项 78 项通过（7.106 秒）；Node 两组 UI 回归、Chrome mock 布局回归、compileall 和 diff 检查通过。
-- 性能样本：临时 SQLite，账号 payload 约 4KB，20% 标记已废，不带 Agent 凭证；1 万条删除 2000 条约 0.508 秒，5 万条删除 1 万条约 2.853 秒；5 万条样本删除后再次空删约 0.294 秒。仅为当前机器样本，不作为耗时承诺。
-- 删除未全量反序列化/重写账号，Python 侧无完整账号清单分配；状态仍在 payload 中，筛选成本随账号数和 payload 大小线性增长。大批量删除期间持有 SQLite 写锁（WAL 可并行读取）；没有为降低锁时长而拆分事务，保留账号和 Agent 凭证删除的原子性。
+- Reproduced and fixed a concurrent refresh defect in the old and new account lists: while an old list request was unfinished, the post-delete refresh was dropped outright. Now follow-up refreshes are merged, stale old responses are discarded, and the latest list is re-read after the current request ends.
+- Also fixed the re-read lock being released too early after the page count shrinks, so list requests stay serialized; the account list gets a 30-second cancel timeout, and on failure/timeout the lock is released and pending refresh requests are handled.
+- Reproduced and fixed the shared `api()` swallowing response-body cancellation: if reading the JSON times out after the headers arrive, the AbortError must not be converted into a successful empty object; previously this could wrongly clear the list or report the delete result as a successful 0.
+- Added `node tests/test_account_list_reload_ui.cjs`, which extracts the real functions directly from the old and new templates and covers refresh merging, no echo of old lists, the shrink-page lock, failure/timeout recovery, and response-body cancellation.
+- The backend adds validation of contention with an external SQLite write transaction: after waiting for other writers it re-matches against the latest committed state and does not delete accounts that have recovered to normal; when writing the details of a deactivated skip fails, the total skip count and the deactivated skip count roll back together.
+- This round the full run passed 395 tests (final re-run 27.161 s) and the inspection-specific run passed 78 tests (7.106 s); the two Node UI regression groups, the Chrome mock layout regression, compileall, and the diff check passed.
+- Performance sample: temporary SQLite, account payload about 4KB, 20% marked deactivated, no Agent credentials; deleting 2000 of 10k rows took about 0.508 s, deleting 10k of 50k took about 2.853 s; an empty delete on the 50k sample afterwards took about 0.294 s. These are samples from the current machine only, not a timing commitment.
+- Deletion does not fully deserialize/rewrite accounts, and Python allocates no complete account list; the status is still inside the payload, so filter cost grows linearly with account count and payload size. A large batch deletion holds the SQLite write lock (WAL allows parallel reads); the transaction was not split to reduce lock time, preserving the atomicity of deleting accounts and Agent credentials.

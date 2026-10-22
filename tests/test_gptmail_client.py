@@ -11,7 +11,7 @@ class GPTMailClientTests(unittest.TestCase):
 
     def test_pick_account_requires_configured_api_key(self):
         with patch.object(gptmail_client._email_cfg, "GPTMAIL_API_KEY", "", create=True):
-            with self.assertRaisesRegex(gptmail_client.GPTMailError, "请填写 GPTMail API Key"):
+            with self.assertRaisesRegex(gptmail_client.GPTMailError, "fill in the GPTMail API Key"):
                 gptmail_client.pick_account()
 
     @patch("core.gptmail_client.requests.get")
@@ -114,7 +114,7 @@ class GPTMailClientTests(unittest.TestCase):
         def sleep_once(seconds):
             sleep_calls.append(seconds)
             if len(sleep_calls) > 1:
-                self.fail("同一封邮件不应重置 OTP settle 计时")
+                self.fail("The same email must not reset the OTP settle timer")
 
         sleep.side_effect = sleep_once
         with patch.object(gptmail_client._email_cfg, "GPTMAIL_API_KEY", "key-123", create=True):

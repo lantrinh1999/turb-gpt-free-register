@@ -20,7 +20,7 @@ class CloudflareWebUiTests(unittest.TestCase):
             response = self.client.post("/api/jobs", json={"count": 1, "workers": 1})
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Cloudflare API 地址", response.get_json()["error"])
+        self.assertIn("Cloudflare API address", response.get_json()["error"])
         submit_registration.assert_not_called()
 
     @patch("webui.app.svc.submit_registration")

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GPT Registrator · 授权码登录</title>
+  <title>GPT Registrator · Authorization Code Login</title>
   <style>
     * { box-sizing: border-box; }
 
@@ -282,8 +282,8 @@
     </div>
 
     <form class="card" method="post" action="{{ login_url }}">
-      <h1>授权码登录</h1>
-      <p class="desc">请输入启动命令或配置文件中设置的授权码</p>
+      <h1>Authorization Code Login</h1>
+      <p class="desc">Enter the authorization code set in the startup command or config file</p>
       {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
       <div class="field">
@@ -291,8 +291,8 @@
           <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
           </svg>
-          <input id="authCodeInput" name="auth_code" type="password" autocomplete="current-password" autofocus placeholder="请输入授权码">
-          <button class="toggle-password" id="togglePassword" type="button" aria-label="显示授权码" title="显示/隐藏">
+          <input id="authCodeInput" name="auth_code" type="password" autocomplete="current-password" autofocus placeholder="Enter authorization code">
+          <button class="toggle-password" id="togglePassword" type="button" aria-label="Show authorization code" title="Show / Hide">
             <svg class="icon-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
               <circle cx="12" cy="12" r="3"/>
@@ -307,12 +307,12 @@
         </div>
         <label class="remember">
           <input id="rememberAuthCode" name="remember" type="checkbox" value="1">
-          记住授权码
+          Remember authorization code
         </label>
       </div>
 
       <input name="next" type="hidden" value="{{ next_url }}">
-      <button class="submit" type="submit">登录</button>
+      <button class="submit" type="submit">Log In</button>
     </form>
   </div>
 
@@ -332,7 +332,7 @@
         const show = input.type === 'password';
         input.type = show ? 'text' : 'password';
         toggle.classList.toggle('is-visible', show);
-        toggle.setAttribute('aria-label', show ? '隐藏授权码' : '显示授权码');
+        toggle.setAttribute('aria-label', show ? 'Hide authorization code' : 'Show authorization code');
       });
 
       document.querySelectorAll('.bg-dots').forEach((grid) => {

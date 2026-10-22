@@ -1,30 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-2FA（TOTP）配置
+2FA(TOTP) configuration
 
-是否在注册成功后自动设置 2FA：
-    True:  注册完成 → 拉新 OTP 邮件 → enroll TOTP → activate → 把 secret 写入 DB
-    False: 跳过整个 2FA 流程，只保存 邮箱 + accessToken
+Whether to set up 2FA automatically after a successful registration:
+    True:  Registration completes -> fetch a new OTP email -> enroll TOTP -> activate -> write the secret into DB
+    False: Skip the whole 2FA flow and only save the email + accessToken
 
-关掉 2FA 不会影响账号可用性，仅意味着账号没有动态口令保护，且少收一封 OTP 邮件。
+Turning 2FA off does not affect account usability; it only means the account has no one-time-password protection and one OTP email fewer is received.
 """
 from config.env_loader import apply_env_overrides
 
 ENABLE_2FA = False
 
-# 2FA 网络代理模式：
-#   saved = 优先使用账号保存的有效代理（无有效代理时回退代理池）
-#   pool  = 忽略账号保存的代理，每次任务都从 PROXY_POOL 随机抽取
+# 2FA network proxy mode:
+#   saved = Prefer the valid proxy saved with the account (fall back to the proxy pool when there is none)
+#   pool  = Ignore the proxy saved with the account and pick one from PROXY_POOL at random for every task
 TWOFA_PROXY_MODE = "saved"
 
-# 发起 reauth（CSRF + signin）时的临时网络错误重试。403 会先清理当前会话的
-# 本地熔断，再按指数退避重试；业务类 4xx 不重试。
-# OTP 提交也复用此次数/退避配置；只重试无业务错误码、无交互挑战的 403/429。
-# OTP 重试复用同一会话/验证码；明确账号拒绝、挑战以及结果未知的网络超时不自动重放。
+# Retries for temporary network errors when starting reauth (CSRF + signin). A 403 first clears the current session
+# local circuit breaker and then retries with exponential backoff; business-level 4xx are not retried.
+# OTP Submission also reuses this count/backoff configuration; only 403/429 without a business error code and without an interactive challenge are retried.
+# OTP Retries reuse the same session/verification code; explicit account rejections, challenges and network timeouts with unknown outcome are not replayed automatically.
 TWOFA_REAUTH_MAX_ATTEMPTS = 3
 TWOFA_REAUTH_RETRY_DELAY = 3.0
 
-# 2FA 后台队列。workers 是实际同时执行的账号数，修改后需重启进程以重建线程池。
+# 2FA Background queue. workers is the number of accounts actually processed at the same time; restart the process after changing it to rebuild the thread pool.
 TWOFA_WORKERS = 4
 TWOFA_QUEUE_LIMIT = 200
 

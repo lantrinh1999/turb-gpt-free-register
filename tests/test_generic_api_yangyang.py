@@ -24,7 +24,7 @@ class FakeSession:
         if "/api/messages/" in url:
             return FakeResponse(data={
                 "items": [
-                    {"id": 1, "subject": "旧码", "received_at": "2026-08-01 10:00:00"},
+                    {"id": 1, "subject": "old code", "received_at": "2026-08-01 10:00:00"},
                     {"id": 2, "subject": "Your OpenAI code is 654321", "received_at": "2026-08-01 10:01:00"},
                 ],
                 "has_more": False,
@@ -34,7 +34,7 @@ class FakeSession:
             body = "data:text/html;charset=utf-8;base64," + base64.b64encode(html.encode()).decode()
             return FakeResponse(data={"subject": "Your OpenAI code is 654321", "body": body, "receivedAt": "2026-08-01 10:01:00"})
         if "/message/1/" in url:
-            return FakeResponse(data={"subject": "旧码", "body": "code 111111", "receivedAt": "2026-08-01 10:00:00"})
+            return FakeResponse(data={"subject": "old code", "body": "code 111111", "receivedAt": "2026-08-01 10:00:00"})
         return FakeResponse(status_code=404, text="not found")
 
 
@@ -49,7 +49,7 @@ class FakeInlineSession:
               <span class="subject">Your temporary ChatGPT verification code</span>
               <span class="date">2026-08-02 13:18:53</span>
             </summary>
-            <div class="meta">发件人：otp@example.com</div>
+            <div class="meta">Sender:otp@example.com</div>
             <pre class="body">Enter this temporary verification code to continue:
 
 541409
@@ -68,7 +68,7 @@ class GenericApiYangyangTests(unittest.TestCase):
         )
 
     def test_decode_data_uri_base64(self):
-        body = "data:text/html;base64," + base64.b64encode("验证码 123456".encode()).decode()
+        body = "data:text/html;base64," + base64.b64encode("verification code 123456".encode()).decode()
         self.assertIn("123456", _decode_data_uri(body))
 
     def test_fetch_yangyang_otp_uses_api_and_detail(self):

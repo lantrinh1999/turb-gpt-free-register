@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CloakBrowser 的 Selenium 风格轻量适配层。"""
+"""CloakBrowser Selenium-style lightweight adapter layer."""
 from __future__ import annotations
 
 import logging
@@ -71,7 +71,7 @@ class CloakElement:
             else:
                 self.handle.fill("", timeout=10000)
         except Exception:
-            # 部分非 input 元素不支持 fill，回退键盘清空。
+            # Some non-input elements do not support fill; fall back to clearing via the keyboard.
             self.click()
             self.page.keyboard.press("Meta+A")
             self.page.keyboard.press("Backspace")
@@ -84,7 +84,7 @@ class CloakElement:
             return ""
 
     def send_keys(self, *values: str) -> None:
-        # 兼容 Selenium: el.send_keys(Keys.COMMAND, 'a')。
+        # Compatible with Selenium: el.send_keys(Keys.COMMAND, 'a').
         text = "".join(str(v or "") for v in values)
         lower = text.lower()
         try:
@@ -92,7 +92,7 @@ class CloakElement:
         except Exception:
             pass
         if "\ue03d" in text or "\ue009" in text or "command" in lower or "control" in lower:
-            # Selenium Keys.CONTROL/COMMAND 编码可能传入私有区字符；这里按全选处理。
+            # Selenium Keys.CONTROL/COMMAND encoding may pass private-use characters; treat it as select-all here.
             try:
                 self.page.keyboard.press("Meta+A")
             except Exception:
@@ -124,7 +124,7 @@ class _SwitchTo:
 
 
 class CloakSeleniumDriver:
-    """只实现本项目 Roxy Selenium 流程实际用到的 WebDriver 子集。"""
+    """Only implements the subset of WebDriver actually used by this project Roxy Selenium flow."""
 
     def __init__(self, browser: Any, context: Any | None, page: Any, proxy_relay: Any | None = None):
         self.browser = browser
@@ -216,7 +216,7 @@ class CloakSeleniumDriver:
     def find_element(self, by: Any, selector: str) -> CloakElement:
         els = self.find_elements(by, selector)
         if not els:
-            raise RuntimeError(f"找不到页面元素: {selector}")
+            raise RuntimeError(f"Page element not found: {selector}")
         return els[0]
 
     def _locator(self, by: Any, selector: str):
@@ -237,24 +237,24 @@ class CloakSeleniumDriver:
             client = self.context.new_cdp_session(self.page) if self.context is not None else self.page.context.new_cdp_session(self.page)
             return client.send(cmd, params)
         except Exception as exc:
-            logger.debug("[Cloak] CDP 命令失败 %s: %s", cmd, exc)
+            logger.debug("[Cloak] CDP command failed %s: %s", cmd, exc)
             return None
 
     def _serialize_args(self, args: tuple[Any, ...]) -> tuple[CloakElement | None, list[Any]]:
-        """拆分 Selenium 脚本参数。
+        """Split Selenium script arguments.
 
-        Playwright 的 JSHandle/ElementHandle 不能可靠地嵌在 dict/list payload 中跨
-        page.evaluate 传递；Selenium 脚本最常见模式是 `arguments[0]` 为元素，
-        因此这里把第一个 CloakElement 作为真实 DOM `el` 传入，其它参数保持
-        JSON 可序列化。
+        Playwright JSHandle/ElementHandle cannot be reliably nested in dict/list payloads passed across
+        page.evaluate calls; the most common Selenium script pattern is `arguments[0]` being the element,
+        so here the first CloakElement is passed in as the real DOM `el`, and the other arguments stay
+        JSON serializable.
         """
         first_el = args[0] if args and isinstance(args[0], CloakElement) else None
         rest = list(args[1:] if first_el else args)
         cleaned = []
         for item in rest:
             if isinstance(item, CloakElement):
-                # 极少数脚本会传多个元素；用真实 handle 直接会在嵌套 payload 中失效，
-                # 这里退化为 None，比把错误对象传进 JS 更安全。
+                # In rare cases a script passes multiple elements; using the real handle directly would break inside a nested payload,
+                # so it degrades to None here, which is safer than passing a wrong object into JS.
                 cleaned.append(None)
             else:
                 cleaned.append(item)
@@ -273,7 +273,7 @@ class CloakSeleniumDriver:
         except Exception as exc:
             msg = str(exc)
             if "Execution context was destroyed" in msg or "navigation" in msg.lower():
-                logger.info("[Cloak] JS 执行后页面发生跳转，忽略返回值读取失败：%s", msg[:160])
+                logger.info("[Cloak] JS page navigated after execution, ignoring the failure to read the return value:%s", msg[:160])
                 return {"ok": True, "reason": "navigation_after_script"}
             raise
         finally:
@@ -310,7 +310,7 @@ class CloakSeleniumDriver:
                 raise TimeoutError("execute_async_script timeout")
             return result
 
-        # Selenium 脚本经常以 `return ...` 为主体；用 Function 保持语义。
+        # Selenium scripts are often built around `return ...`; use Function to preserve semantics.
         wrapper = """({script, args}) => {
           const fn = new Function(...args.map((_, i) => 'a' + i), script);
           return fn(...args);
@@ -335,7 +335,7 @@ def _normalize_proxy(proxy: str | None) -> str | None:
 
 
 def _detect_cloak_exit_geo(proxy_url: str | None = None) -> dict:
-    """按当前/代理出口检测地理信息，供 Cloak 显式 locale/timezone 使用。"""
+    """Detect geo info from the current/proxy egress, for explicit Cloak locale/timezone use."""
     try:
         import requests
         from config import browser as _browser_cfg
@@ -366,23 +366,23 @@ def _detect_cloak_exit_geo(proxy_url: str | None = None) -> dict:
             }
             if geo.get("country") or geo.get("timezone"):
                 logger.info(
-                    "[Cloak] 出口IP地理信息：ip=%s country=%s city=%s timezone=%s",
+                    "[Cloak] Egress IP geo info:ip=%s country=%s city=%s timezone=%s",
                     geo.get("ip") or "?", geo.get("country") or "?", geo.get("city") or "?", geo.get("timezone") or "?",
                 )
                 return geo
         except Exception as exc:
-            logger.debug("[Cloak] 出口 IP 地理检测失败 endpoint=%s: %s: %s", url, type(exc).__name__, exc)
+            logger.debug("[Cloak] Egress IP geo detection failed endpoint=%s: %s: %s", url, type(exc).__name__, exc)
     return {}
 
 
 def _build_cloak_locale_options(proxy_url: str | None = None) -> dict:
-    """生成 Cloak/Playwright 双层语言时区配置。"""
+    """Generate the dual-layer Cloak/Playwright language and timezone config."""
     explicit_locale = str(getattr(_cfg, "CLOAK_LOCALE", "") or "").strip()
     explicit_timezone = str(getattr(_cfg, "CLOAK_TIMEZONE", "") or "").strip()
     out = {}
     if explicit_locale:
         out["locale"] = explicit_locale
-        # Accept-Language 用 config.browser 自动推断更完整；显式时给一个保守值。
+        # Accept-Language is more complete when inferred automatically from config.browser; when explicit, give a conservative value.
         out["accept_language"] = f"{explicit_locale},{explicit_locale.split('-')[0]};q=0.9,en-US;q=0.8,en;q=0.7"
     if explicit_timezone:
         out["timezone"] = explicit_timezone
@@ -399,16 +399,16 @@ def _build_cloak_locale_options(proxy_url: str | None = None) -> dict:
         out.setdefault("accept_language", str(profile.get("accept_language") or ""))
         out["geo"] = geo
     except Exception as exc:
-        logger.debug("[Cloak] 构建自动语言/时区失败：%s: %s", type(exc).__name__, exc)
+        logger.debug("[Cloak] Failed to build auto language/timezone:%s: %s", type(exc).__name__, exc)
     return {k: v for k, v in out.items() if v}
 
 
 def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, CloakOpenResult]:
-    """启动 CloakBrowser 并返回 Selenium 风格 driver。
+    """Launch CloakBrowser and return a Selenium-style driver.
 
-    proxy=None  时按 config.proxy.PROXY_POOL 随机抽取；
-    proxy=""    时显式禁用代理；
-    proxy="..." 时使用指定代理。
+    proxy=None  picks a random proxy from config.proxy.PROXY_POOL;
+    proxy=""    explicitly disables the proxy;
+    proxy="..." uses the specified proxy.
     """
     proxy_relay = None
     proxy_pool_target = ""
@@ -431,7 +431,7 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
     try:
         from cloakbrowser import launch, launch_persistent_context
     except ImportError as exc:
-        raise RuntimeError("未安装 cloakbrowser，请执行：pip install cloakbrowser") from exc
+        raise RuntimeError("cloakbrowser is not installed, please run:pip install cloakbrowser") from exc
 
     launch_args = list(getattr(_cfg, "CLOAK_EXTRA_ARGS", []) or [])
     seed = str(getattr(_cfg, "CLOAK_FINGERPRINT_SEED", "") or "").strip()
@@ -440,9 +440,9 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
 
     proxy_url = _normalize_proxy(proxy) if bool(getattr(_cfg, "CLOAK_USE_PROXY", True)) else None
     locale_opts = _build_cloak_locale_options(proxy_url)
-    # geoip=True 交给 CloakBrowser 根据当前出口 IP 自动匹配 timezone/locale/WebRTC。
-    # 之前只有显式 proxy_url 时才开启；如果用户走系统代理/VPN/透明代理，代码层面
-    # 看不到 proxy_url，会误关 geoip，导致语言/时区不跟随出口。这里改为完全尊重配置。
+    # geoip=True lets CloakBrowser automatically match timezone/locale/WebRTC to the current egress IP.
+    # Previously it was enabled only with an explicit proxy_url; if the user goes through a system proxy/VPN/transparent proxy, at the code level
+    # proxy_url is not visible, so geoip would be wrongly disabled and the language/timezone would not follow the egress. Now the config is fully respected.
     opts = {
         "headless": bool(getattr(_cfg, "CLOAK_HEADLESS", False)),
         "humanize": bool(getattr(_cfg, "CLOAK_HUMANIZE", True)),
@@ -462,10 +462,10 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
 
     user_data_dir = str(getattr(_cfg, "CLOAK_USER_DATA_DIR", "") or "").strip()
     logger.info(
-        "[Cloak] 启动 CloakBrowser：headless=%s humanize=%s geoip=%s proxy=%s locale=%s timezone=%s accept_language=%s persistent=%s",
+        "[Cloak] Launching CloakBrowser:headless=%s humanize=%s geoip=%s proxy=%s locale=%s timezone=%s accept_language=%s persistent=%s",
         opts.get("headless"), opts.get("humanize"), opts.get("geoip"),
-        proxy_url or "无", opts.get("locale") or "自动/默认", opts.get("timezone") or "自动/默认",
-        locale_opts.get("accept_language") or "自动/默认", bool(user_data_dir),
+        proxy_url or "none", opts.get("locale") or "auto/default", opts.get("timezone") or "auto/default",
+        locale_opts.get("accept_language") or "auto/default", bool(user_data_dir),
     )
     context_kwargs = {}
     if locale_opts.get("locale"):
@@ -479,16 +479,16 @@ def build_cloak_driver(proxy: str | None = None) -> tuple[CloakSeleniumDriver, C
         context = launch_persistent_context(user_data_dir, **opts)
         page = context.new_page()
         browser = getattr(context, "browser", None) or context
-        # persistent context 的 locale/timezone 已通过 launch_persistent_context 参数传入。
+        # persistent context locale/timezone are already passed in via the launch_persistent_context arguments.
     else:
         browser = launch(**opts)
         context = browser.new_context(**context_kwargs)
         page = context.new_page()
 
     driver = CloakSeleniumDriver(browser=browser, context=context, page=page, proxy_relay=proxy_relay)
-    # Roxy/Cloak 共用部分页面操作函数；给共享函数一个显式日志前缀，
-    # 避免 Cloak 注册流程里出现 `[Roxy注册]`。
-    driver._registration_log_prefix = "[Cloak注册]"
+    # Roxy/Cloak share some page operation functions; give the shared functions an explicit log prefix,
+    # to avoid `[Roxy registration]` appearing in the Cloak registration flow.
+    driver._registration_log_prefix = "[Cloak registration]"
     driver.set_page_load_timeout(int(getattr(_cfg, "CLOAK_SELENIUM_TIMEOUT", 90) or 90))
     return driver, CloakOpenResult(raw={
         "driver": "cloakbrowser",

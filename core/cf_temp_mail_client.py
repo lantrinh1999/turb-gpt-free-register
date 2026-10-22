@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Cloudflare Worker 临时邮箱客户端（cloudflare_temp_email 兼容）。
+"""Cloudflare Worker Temporary email client (cloudflare_temp_email compatible).
 
-对齐 grokRegister-cpa/email_providers/cloudflare.py：
-  - POST new_address / admin/new_address 自动创建邮箱，拿到 jwt
-  - GET mails 轮询收件箱，提取 OpenAI 六位 OTP
+Aligned with grokRegister-cpa/email_providers/cloudflare.py:
+  - POST new_address / admin/new_address auto-create the email and obtain the jwt
+  - GET mails poll the inbox and extract the OpenAI six-digit OTP
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _DOMAIN_LOCK = threading.Lock()
 
 
 class CFTempMailError(RuntimeError):
-    """Cloudflare Worker 临时邮箱请求或取码失败。"""
+    """Cloudflare Worker Temporary email request or code retrieval failed."""
 
 
 @dataclass
@@ -74,7 +74,7 @@ def _base_url() -> str:
     base = _cfg_str("CLOUDFLARE_API_BASE")
     if not base:
         raise CFTempMailError(
-            "Cloudflare API 地址未配置，请填写 CLOUDFLARE_API_BASE（WebUI「配置 → 邮箱 / OTP」）。"
+            "Cloudflare API address is not configured, fill in CLOUDFLARE_API_BASE (WebUI Settings, Email / OTP section)."
         )
     if not re.match(r"^https?://", base, re.I):
         base = "https://" + base
@@ -198,7 +198,7 @@ def _request(
             timeout=_timeout(),
         )
     except requests.RequestException as exc:
-        raise CFTempMailError(f"Cloudflare 请求失败 ({path}): {type(exc).__name__}: {exc}") from exc
+        raise CFTempMailError(f"Cloudflare Request failed ({path}): {type(exc).__name__}: {exc}") from exc
 
     try:
         payload = response.json()
@@ -206,10 +206,10 @@ def _request(
         text = (getattr(response, "text", "") or "")[:200]
         if response.status_code >= 400:
             raise CFTempMailError(
-                f"Cloudflare 请求失败 ({path}): HTTP {response.status_code}; {text}"
+                f"Cloudflare Request failed ({path}): HTTP {response.status_code}; {text}"
             ) from exc
         raise CFTempMailError(
-            f"Cloudflare 响应不是 JSON ({path}): HTTP {response.status_code}; {text}"
+            f"Cloudflare response is not JSON ({path}): HTTP {response.status_code}; {text}"
         ) from exc
 
     if response.status_code >= 400:
@@ -220,11 +220,11 @@ def _request(
             message = str(payload)[:200]
         hint = ""
         if response.status_code in (401, 403) and "turnstile" in message.lower():
-            hint = "；匿名创建可能被 Turnstile 拦截，请改用 x-admin-auth + /admin/new_address"
+            hint = "; anonymous creation may be blocked by Turnstile, switch to x-admin-auth + /admin/new_address"
         elif response.status_code in (401, 403) and _auth_mode() == "none":
-            hint = "；可尝试 CLOUDFLARE_AUTH_MODE=x-admin-auth 并填写 ADMIN_PASSWORD"
+            hint = "; try CLOUDFLARE_AUTH_MODE=x-admin-auth and fill in ADMIN_PASSWORD"
         raise CFTempMailError(
-            f"Cloudflare 请求失败 ({path}): HTTP {response.status_code}; {message}{hint}"
+            f"Cloudflare Request failed ({path}): HTTP {response.status_code}; {message}{hint}"
         )
     return payload
 
@@ -247,7 +247,7 @@ def _pick_list_payload(data: Any) -> list[dict]:
 
 
 def create_address(domain: str | None = None) -> CFTempMailAccount:
-    """调用 Worker 创建临时邮箱，返回 address + jwt。"""
+    """Call the Worker to create a temporary email, returning address + jwt."""
     accounts_path = _normalize_path(
         _cfg_str("CLOUDFLARE_PATH_ACCOUNTS", "/api/new_address"),
         "/api/new_address",
@@ -260,7 +260,7 @@ def create_address(domain: str | None = None) -> CFTempMailAccount:
     if admin_create or mode in ("x-admin-auth", "bearer", "x-api-key", "query-key"):
         if not key:
             raise CFTempMailError(
-                "Cloudflare admin/鉴权模式需要 CLOUDFLARE_API_KEY（ADMIN_PASSWORD）。"
+                "Cloudflare admin/The auth mode requires CLOUDFLARE_API_KEY (ADMIN_PASSWORD)."
             )
 
     if admin_create:
@@ -271,22 +271,22 @@ def create_address(domain: str | None = None) -> CFTempMailAccount:
         if selected_domain:
             payload["domain"] = selected_domain
     else:
-        # 匿名 /api/new_address：仅 domain；鉴权头仍按 AUTH_MODE 注入（若配置了 Key）
+        # Anonymous /api/new_address: domain only; auth headers are still injected per AUTH_MODE (if a Key is configured)
         payload = {}
         if selected_domain:
             payload["domain"] = selected_domain
 
     data = _request("POST", accounts_path, json_body=payload, content_type=True)
     if not isinstance(data, dict):
-        raise CFTempMailError(f"Cloudflare 创建邮箱响应格式错误: {str(data)[:200]}")
+        raise CFTempMailError(f"Cloudflare malformed create-email response: {str(data)[:200]}")
 
     nested = data.get("data") if isinstance(data.get("data"), dict) else {}
     address = str(data.get("address") or nested.get("address") or nested.get("email") or data.get("email") or "").strip()
     jwt = str(data.get("jwt") or nested.get("jwt") or nested.get("token") or data.get("token") or "").strip()
     if not address or "@" not in address:
-        raise CFTempMailError(f"Cloudflare 创建邮箱响应缺少 address: {str(data)[:200]}")
+        raise CFTempMailError(f"Cloudflare create-email response is missing address: {str(data)[:200]}")
     if not jwt:
-        raise CFTempMailError(f"Cloudflare 创建邮箱响应缺少 jwt: {str(data)[:200]}")
+        raise CFTempMailError(f"Cloudflare create-email response is missing jwt: {str(data)[:200]}")
 
     domain_part = address.split("@", 1)[-1].lower()
     account = CFTempMailAccount(
@@ -295,12 +295,12 @@ def create_address(domain: str | None = None) -> CFTempMailAccount:
         domain=domain_part,
         created_at=time.time(),
     )
-    logger.info("[Cloudflare] 已创建临时邮箱: %s (domain=%s)", address, domain_part)
+    logger.info("[Cloudflare] Created temporary email: %s (domain=%s)", address, domain_part)
     return account
 
 
 def pick_account() -> CFTempMailAccount:
-    """创建并缓存一个 Cloudflare 临时邮箱。"""
+    """Create and cache a Cloudflare temporary email."""
     account = create_address()
     _CONTEXT_CACHE[_cache_key(account.email)] = account
     return account
@@ -313,7 +313,7 @@ def get_account_context(email: str) -> CFTempMailAccount | None:
 def release_account(email: str, status: str = "available", note: str | None = None) -> None:
     _CONTEXT_CACHE.pop(_cache_key(email), None)
     logger.info(
-        "[Cloudflare] 已释放临时邮箱: %s（status=%s, note=%s）",
+        "[Cloudflare] Released temporary email: %s (status=%s, note=%s)",
         email,
         status,
         note or "",
@@ -321,7 +321,7 @@ def release_account(email: str, status: str = "available", note: str | None = No
 
 
 def _message_timestamp(item: dict) -> float | None:
-    """解析邮件时间。Worker 的 created_at 多为 UTC 且无时区后缀，必须按 UTC 解释。"""
+    """Parse the email time. The Worker created_at is mostly UTC without a timezone suffix, so it must be interpreted as UTC."""
     for key in ("timestamp", "created_at", "createdAt", "date", "receivedAt", "time"):
         raw = item.get(key)
         if raw is None or raw == "":
@@ -340,10 +340,10 @@ def _message_timestamp(item: dict) -> float | None:
                 if value > 1e12:
                     value /= 1000.0
                 return value
-            # 兼容 "2026-07-19 12:57:38" / ISO
+            # Supports "2026-07-19 12:57:38" / ISO
             normalized = text.replace("Z", "+00:00")
             if "T" not in normalized and " " in normalized and "+" not in normalized[10:]:
-                # 无时区的空格分隔时间：按 UTC 处理（cloudflare_temp_email 常见）
+                # Space-separated time without timezone: treat as UTC (common in cloudflare_temp_email)
                 dt = datetime.fromisoformat(normalized).replace(tzinfo=timezone.utc)
             else:
                 dt = datetime.fromisoformat(normalized)
@@ -413,14 +413,14 @@ def _decode_mime_header(value: str) -> str:
 
 
 def _parse_raw_email(raw: str) -> dict[str, str]:
-    """把 cloudflare_temp_email 的 raw MIME 解析成 subject/from/text/html。"""
+    """Parse the raw MIME of cloudflare_temp_email into subject/from/text/html."""
     result = {"subject": "", "from": "", "text": "", "html": ""}
     if not (raw or "").strip():
         return result
     try:
         msg = BytesParser(policy=policy.default).parsebytes(raw.encode("utf-8", errors="replace"))
     except Exception:
-        # 回退：至少从头部抠 Subject/From
+        # Fallback: at least extract from the header Subject/From
         for line in raw.splitlines():
             low = line.lower()
             if low.startswith("subject:") and not result["subject"]:
@@ -458,17 +458,17 @@ def _parse_raw_email(raw: str) -> dict[str, str]:
 
 
 def _standalone_otp_from_html(html: str) -> str | None:
-    """OpenAI 邮件常见：验证码单独占一行/单元格，如 >449759<。"""
+    """OpenAI emails commonly have the code alone on its own line/cell, e.g. >449759<."""
     if not html:
         return None
-    # 去 style，减少 #353740 这类颜色误伤
+    # Strip style to reduce false hits from colors like #353740
     cleaned = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.I | re.S)
     for pattern in (
         r">\s*(\d{6})\s*<",
         r"(?m)^\s*(\d{6})\s*$",
     ):
         matches = re.findall(pattern, cleaned)
-        # 过滤明显颜色/追踪号语境在上层做；这里取最后一个独立码更接近正文 OTP
+        # Filtering obvious color/tracking-number contexts is done at the upper layer; taking the last standalone code here is closer to the body text OTP
         if matches:
             return matches[-1]
     return None
@@ -482,7 +482,7 @@ def _otp_item(item: dict) -> dict:
         item.get("from")
         or item.get("from_address")
         or item.get("sender")
-        or item.get("source")  # cloudflare_temp_email 列表字段
+        or item.get("source")  # cloudflare_temp_email list fields
         or parsed.get("from")
         or ""
     )
@@ -492,11 +492,11 @@ def _otp_item(item: dict) -> dict:
     if not html:
         html = parsed.get("html") or ""
 
-    # 若只有 raw 且 MIME 解析失败，保留非 header 的文本兜底
+    # If only raw exists and MIME parsing fails, keep the non-header text as a fallback
     if not text and not html and raw:
         text = raw
 
-    # 独立 6 位码优先塞进 text 开头，帮助 extract_otp 命中正文 OTP 而非邮件头噪声
+    # Put the standalone 6-digit code at the start of text first, so extract_otp hits the body OTP rather than email header noise
     standalone = _standalone_otp_from_html(html) or _standalone_otp_from_html(text)
     if standalone:
         text = f"verification code {standalone}\n{text}"
@@ -516,12 +516,12 @@ def _message_id(item: dict) -> str:
 
 
 def list_messages(jwt: str, *, limit: int = 20, offset: int = 0) -> list[dict]:
-    """拉取收件箱。cloudflare_temp_email 的 /api/mails 要求有效 limit（否则 HTTP 400 Invalid limit）。"""
+    """Fetch the inbox. /api/mails of cloudflare_temp_email requires a valid limit (otherwise HTTP 400 Invalid limit)."""
     path = _normalize_path(
         _cfg_str("CLOUDFLARE_PATH_MESSAGES", "/api/mails"),
         "/api/mails",
     )
-    # 与 grokRegister-cpa 对齐：limit/offset 为必填查询参数
+    # Aligned with grokRegister-cpa: limit/offset are required query parameters
     safe_limit = max(1, min(100, int(limit or 20)))
     safe_offset = max(0, int(offset or 0))
     payload = _request(
@@ -556,7 +556,7 @@ def get_message_detail(jwt: str, message_id: str) -> dict:
             last_error = exc
             continue
     if last_error:
-        logger.debug("[Cloudflare] 邮件详情获取失败 id=%s: %s", message_id, last_error)
+        logger.debug("[Cloudflare] Failed to fetch email details id=%s: %s", message_id, last_error)
     return {}
 
 
@@ -567,15 +567,15 @@ def fetch_latest_otp(
     poll_interval: int | None = None,
     settle_seconds: int | None = None,
 ) -> str:
-    """轮询 Cloudflare 邮箱，返回领取时间后最新的 OpenAI 六位验证码。"""
+    """Poll the Cloudflare mailbox and return the latest OpenAI six-digit verification code received after the claim time."""
     target = str(email or "").strip()
     if not target:
-        raise CFTempMailError("Cloudflare 取码缺少邮箱地址")
+        raise CFTempMailError("Cloudflare code retrieval is missing the email address")
 
     account = get_account_context(target)
     if account is None or not account.jwt:
         raise CFTempMailError(
-            f"Cloudflare 邮箱上下文缺失: {target}。请确认该地址由当前进程 cloudflare 来源创建。"
+            f"Cloudflare Email context missing: {target}. Make sure this address was created by the current process from the cloudflare source."
         )
 
     wait_seconds = int(max_wait if max_wait is not None else _email_cfg.OTP_MAX_WAIT)
@@ -588,22 +588,22 @@ def fetch_latest_otp(
     best_timestamp = float("-inf")
     best_message_key = ""
     settle_until: float | None = None
-    last_error = "收件箱为空或尚未出现新的 OpenAI 验证码"
+    last_error = "Inbox is empty or no new OpenAI verification code has appeared yet"
     target_lower = target.lower()
 
-    logger.info("[Cloudflare] 开始轮询邮箱 %s，最长 %ss", target, wait_seconds)
+    logger.info("[Cloudflare] Start polling email %s, for at most %ss", target, wait_seconds)
 
     while time.monotonic() < deadline:
         try:
             messages = list_messages(account.jwt)
         except CFTempMailError as exc:
             last_error = str(exc)
-            logger.warning("[Cloudflare] 拉取邮件失败: %s", exc)
+            logger.warning("[Cloudflare] Failed to fetch emails: %s", exc)
             time.sleep(interval)
             continue
 
         if messages:
-            logger.debug("[Cloudflare] 本轮收件 %s 封", len(messages))
+            logger.debug("[Cloudflare] Received %s emails this round", len(messages))
 
         for item in messages:
             addresses = _message_addresses(item)
@@ -613,7 +613,7 @@ def fetch_latest_otp(
             detail = item
             msg_id = _message_id(item)
             otp_probe = _otp_item(detail)
-            # 列表字段不足时尝试详情
+            # Try details when list fields are insufficient
             if (not otp_probe.get("text") and not otp_probe.get("html")) or not looks_like_openai_email(otp_probe):
                 if msg_id:
                     fetched = get_message_detail(account.jwt, msg_id)
@@ -626,7 +626,7 @@ def fetch_latest_otp(
             otp_item = otp_probe
             if not looks_like_openai_email(otp_item):
                 logger.debug(
-                    "[Cloudflare] 跳过非 OpenAI 邮件 id=%s from=%s subject=%s",
+                    "[Cloudflare] Skip non-OpenAI email id=%s from=%s subject=%s",
                     msg_id,
                     str(otp_item.get("from") or "")[:80],
                     str(otp_item.get("subject") or "")[:80],
@@ -636,7 +636,7 @@ def fetch_latest_otp(
             ts = _message_timestamp(detail)
             if ts is not None and ts < after:
                 logger.info(
-                    "[Cloudflare] 跳过过旧邮件 id=%s ts=%s after=%s subject=%s",
+                    "[Cloudflare] Skip stale email id=%s ts=%s after=%s subject=%s",
                     msg_id,
                     int(ts),
                     int(after),
@@ -647,7 +647,7 @@ def fetch_latest_otp(
             otp = extract_otp(otp_item)
             if not otp:
                 logger.info(
-                    "[Cloudflare] OpenAI 邮件未能抽取 6 位码 id=%s subject=%s",
+                    "[Cloudflare] OpenAI email: failed to extract a 6-digit code id=%s subject=%s",
                     msg_id,
                     str(otp_item.get("subject") or "")[:80],
                 )
@@ -659,33 +659,33 @@ def fetch_latest_otp(
                 effective_ts == best_timestamp and message_key != best_message_key and best_otp != otp
             ):
                 if best_otp and best_otp != otp:
-                    logger.info("[Cloudflare] 发现更晚 OTP=%s，替换 %s", otp, best_otp)
+                    logger.info("[Cloudflare] Found a later OTP=%s, replacing %s", otp, best_otp)
                 elif not best_otp:
-                    logger.info("[Cloudflare] 锁定 OTP 候选 %s，等待 settle=%ss", otp, settle)
+                    logger.info("[Cloudflare] Locked OTP candidate %s, waiting settle=%ss", otp, settle)
                 best_otp = otp
                 best_timestamp = effective_ts
                 best_message_key = message_key
                 settle_until = time.monotonic() + settle
             elif message_key == best_message_key and best_otp == otp:
-                # 同一封邮件不重置 settle
+                # Same email does not reset settle
                 pass
 
         now = time.monotonic()
         if best_otp and settle_until is not None and now >= settle_until:
-            logger.info("[Cloudflare] settle 完成，返回 OTP=%s", best_otp)
+            logger.info("[Cloudflare] settle completed, returning OTP=%s", best_otp)
             return best_otp
 
         remaining = max(0, int(deadline - now))
         if best_otp and settle_until is not None:
             logger.info(
-                "[Cloudflare] 已有候选 OTP=%s，settle 剩余 ~%ss，总剩余 %ss",
+                "[Cloudflare] Candidate OTP=%s exists, settle remaining ~%ss, total remaining %ss",
                 best_otp,
                 max(0, int(settle_until - now)),
                 remaining,
             )
         else:
             logger.info(
-                "[Cloudflare] 暂未匹配到可用 OTP，%ss 后重试（剩余 %ss；本轮邮件数=%s）",
+                "[Cloudflare] No usable OTP matched yet, retrying in %ss (remaining %ss; emails this round=%s)",
                 interval,
                 remaining,
                 len(messages),
@@ -695,7 +695,7 @@ def fetch_latest_otp(
         time.sleep(min(interval, max(1, remaining)))
 
     if best_otp:
-        logger.warning("[Cloudflare] 总超时但已有候选，返回 OTP=%s", best_otp)
+        logger.warning("[Cloudflare] Overall timeout but a candidate exists, returning OTP=%s", best_otp)
         return best_otp
 
-    raise CFTempMailError(f"等待 Cloudflare 验证码超时: {target}; {last_error}")
+    raise CFTempMailError(f"Timed out waiting for Cloudflare verification code: {target}; {last_error}")

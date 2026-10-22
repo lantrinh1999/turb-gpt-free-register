@@ -18,16 +18,16 @@ class AccountNoteTests(unittest.TestCase):
                  patch.object(db, "_ACCOUNTS_TXT", root / "accounts.txt"), \
                  patch.object(db, "_TOKENS_TXT", root / "tokens.txt"), \
                  patch.object(db, "_VIEWER_HTML", root / "viewer.html"):
-                self.assertTrue(db.update_account_note(1, "备注A"))
-                self.assertFalse(db.update_account_note(99, "不存在"))
-                self.assertEqual(db.get_account(1)["note"], "备注A")
+                self.assertTrue(db.update_account_note(1, "Note A"))
+                self.assertFalse(db.update_account_note(99, "Does not exist"))
+                self.assertEqual(db.get_account(1)["note"], "Note A")
                 self.assertTrue(db.get_account(1)["note_updated_at"])
 
-                updated, skipped = db.update_accounts_note([1, 2, 99], "批量备注")
+                updated, skipped = db.update_accounts_note([1, 2, 99], "Bulk note")
                 self.assertEqual([x["id"] for x in updated], [1, 2])
-                self.assertEqual(skipped, [{"id": 99, "reason": "账号不存在"}])
-                self.assertEqual(db.get_account(1)["note"], "批量备注")
-                self.assertEqual(db.get_account(2)["note"], "批量备注")
+                self.assertEqual(skipped, [{"id": 99, "reason": "Account does not exist"}])
+                self.assertEqual(db.get_account(1)["note"], "Bulk note")
+                self.assertEqual(db.get_account(2)["note"], "Bulk note")
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ class MailNestConfigTests(unittest.TestCase):
 
     def test_webui_exposes_mailnest_fields(self):
         key_field = next(item for item in EDITABLE_FIELDS if item["key"] == "MAIL_NEST_API_KEY")
-        self.assertEqual(key_field["group"], "邮箱 / OTP")
+        self.assertEqual(key_field["group"], "Email / OTP")
         self.assertTrue(key_field["secret"])
         self.assertEqual(key_field["storage"], "env")
         project_field = next(item for item in EDITABLE_FIELDS if item["key"] == "MAIL_NEST_PROJECT_CODE")

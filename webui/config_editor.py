@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-配置读写层（供 WebUI /api/config 使用）。
+Config read/write layer (used by the WebUI /api/config).
 
-设计原则：
-    1. 白名单：只暴露"运行时安全"的开关/数值/默认值，协议级常量
-       （client_id / scope / sentinel 版本等）一律不开放，避免一改就废号。
-    2. 所有 WebUI 可编辑项统一写入项目根 `.env`，不再修改 `config/*.py`。
-    3. `config/*.py` 只保留默认值；运行时通过 config.env_loader 用 `.env` 覆盖。
-    4. 读取时优先 `.env`，缺失时回退解析 `config/*.py` 默认值。
+Design principles:
+    1. Whitelist: only expose switches / values / defaults that are "safe at runtime"; protocol-level constants
+       (client_id / scope / sentinel version etc.) are never opened up, so one edit cannot kill accounts.
+    2. All WebUI-editable items are written uniformly to `.env` in the project root, and `config/*.py` is no longer modified.
+    3. `config/*.py` Only defaults are kept; at runtime they are overridden with `.env` through config.env_loader.
+    4. When reading, `.env` takes priority, and the defaults parsed from `config/*.py` are the fallback when it is missing.
 """
 import ast
 import os
@@ -25,809 +25,809 @@ EXPLICIT_EMPTY_STRING_KEYS = {
 
 
 # ============================================================
-# 白名单：每个可编辑项声明它在哪个文件、键名、类型、分组、说明
-# type 决定前端控件 + 写回时的字面量格式：
+# Whitelist: every editable item declares which file it is in, its key name, type, group and description
+# type decides the front-end control + the literal format when writing back:
 #   bool   -> True/False
-#   int    -> 整数
-#   str    -> 带引号字符串
-#   list_str_multiline -> 多行字符串列表（PROXY_POOL 专用，整块替换）
+#   int    -> integer
+#   str    -> quoted string
+#   list_str_multiline -> Multi-line string list (dedicated to PROXY_POOL, replaced as a whole block)
 # ============================================================
 
 EDITABLE_FIELDS = [
-    # ---- WebUI 授权 ----
+    # ---- WebUI Authorization ----
     {
-        "key": "WEBUI_AUTH_CODE", "file": "codex.py", "type": "str", "group": "WebUI 授权",
-        "label": "WebUI 授权码", "help": "仅保存在 .env（WEBUI_AUTH_CODE），避免出现在进程命令行中；保存后重启 WebUI 生效",
+        "key": "WEBUI_AUTH_CODE", "file": "codex.py", "type": "str", "group": "WebUI Authorization",
+        "label": "WebUI Authorization Code", "help": "Only saved in .env (WEBUI_AUTH_CODE) so it does not show up on the process command line; takes effect after restarting the WebUI after saving",
         "storage": "env", "secret": True,
     },
     {
-        "key": "WEBUI_SESSION_SECRET", "file": "codex.py", "type": "str", "group": "WebUI 授权",
-        "label": "Session 签名密钥", "help": "可选，保存在 .env（WEBUI_SESSION_SECRET）；不填则从固定授权码派生，修改授权码会使已有登录失效",
+        "key": "WEBUI_SESSION_SECRET", "file": "codex.py", "type": "str", "group": "WebUI Authorization",
+        "label": "Session signing key", "help": "Optional, saved in .env (WEBUI_SESSION_SECRET); when empty it is derived from the fixed authorization code, and changing the authorization code invalidates existing logins",
         "storage": "env", "secret": True,
     },
-    # ---- 功能开关 ----
+    # ---- Feature Switches ----
     {
-        "key": "ENABLE_CODEX_AUTO", "file": "codex.py", "type": "bool", "group": "功能开关",
-        "label": "启用 Codex OAuth", "help": "注册成功后自动跑 Codex 授权（全新session+接码），落盘 codex-邮箱.json",
+        "key": "ENABLE_CODEX_AUTO", "file": "codex.py", "type": "bool", "group": "Feature Switches",
+        "label": "Enable Codex OAuth", "help": "Automatically run the Codex authorization after a successful registration (brand new session + code receiving), persisting codex-email.json",
     },
     {
-        "key": "REGISTRATION_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "注册方式",
-        "label": "注册驱动", "help": "默认推荐 roxy；protocol=纯协议，容易封号不建议；roxy=RoxyBrowser；cloak=CloakBrowser；browser_use=Browser Use Cloud+Playwright；skyvern=Skyvern Browser Sessions+Playwright",
+        "key": "REGISTRATION_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "Registration Method",
+        "label": "Registration Driver", "help": "roxy is recommended by default; protocol = pure protocol, easily gets accounts banned and is not recommended; roxy=RoxyBrowser; cloak=CloakBrowser; browser_use=Browser Use Cloud+Playwright;skyvern=Skyvern Browser Sessions+Playwright",
     },
     {
-        "key": "AUTO_PLAN_CHECK_AFTER_REGISTER", "file": "register.py", "type": "bool", "group": "注册方式",
-        "label": "注册后自动查套餐", "help": "注册成功后自动入队查询套餐/Plus 资格；关闭后仅保存账号，不自动查套餐",
+        "key": "AUTO_PLAN_CHECK_AFTER_REGISTER", "file": "register.py", "type": "bool", "group": "Registration Method",
+        "label": "Auto Plan Check After Registration", "help": "Automatically queue a plan / Plus eligibility check after a successful registration; when off, the account is only saved and the plan is not checked automatically",
     },
     {
-        "key": "PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL", "file": "register.py", "type": "bool", "group": "注册方式",
-        "label": "同邮箱保持协议指纹", "help": "仅影响纯协议注册；开启后同一邮箱重复任务复用稳定设备指纹，关闭后每次任务创建全新指纹",
+        "key": "PROTOCOL_REUSE_FINGERPRINT_BY_EMAIL", "file": "register.py", "type": "bool", "group": "Registration Method",
+        "label": "Keep Protocol Fingerprint Per Email", "help": "Only affects pure-protocol registration; when on, repeated tasks for the same email reuse a stable device fingerprint, and when off every task creates a brand new fingerprint",
     },
 
     # ---- CloakBrowser ----
     {
         "key": "CLOAK_HEADLESS", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
-        "label": "Cloak无头", "help": "True=无头运行；False=显示浏览器窗口",
+        "label": "Cloak Headless", "help": "True=Run headless; False = show the browser window",
     },
     {
         "key": "CLOAK_HUMANIZE", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
-        "label": "Cloak人工行为", "help": "启用 CloakBrowser humanize 鼠标/键盘/滚动行为",
+        "label": "Cloak Humanized Behavior", "help": "Enable CloakBrowser humanize mouse / keyboard / scroll behavior",
     },
     {
         "key": "CLOAK_GEOIP", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
-        "label": "Cloak按出口定位", "help": "按当前出口 IP 自动匹配时区/语言/WebRTC IP；支持显式代理、系统代理/VPN",
+        "label": "Cloak Locate By Exit", "help": "Automatically match the timezone / language / WebRTC IP from the current exit IP; supports an explicit proxy or the system proxy/VPN",
     },
     {
         "key": "CLOAK_LOCALE", "file": "cloakbrowser.py", "type": "str", "group": "CloakBrowser",
-        "label": "Cloak语言", "help": "留空自动；日本可填 ja-JP，美国 en-US",
+        "label": "Cloak Language", "help": "Leave empty for automatic; for Japan use ja-JP, for the US use en-US",
     },
     {
         "key": "CLOAK_TIMEZONE", "file": "cloakbrowser.py", "type": "str", "group": "CloakBrowser",
-        "label": "Cloak时区", "help": "留空自动；日本可填 Asia/Tokyo，美国 America/Los_Angeles",
+        "label": "Cloak Timezone", "help": "Leave empty for automatic; for Japan use Asia/Tokyo, for the US use America/Los_Angeles",
     },
     {
         "key": "CLOAK_USE_PROXY", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
-        "label": "Cloak使用代理", "help": "把本项目传入或代理池抽取的代理传给 CloakBrowser",
+        "label": "Cloak Use Proxy", "help": "Pass the proxy given to this project or drawn from the proxy pool on to CloakBrowser",
     },
     {
         "key": "CLOAK_LICENSE_KEY", "file": "cloakbrowser.py", "type": "str", "group": "CloakBrowser",
-        "label": "Cloak License", "help": "Pro license；留空使用免费 binary",
+        "label": "Cloak License", "help": "Pro license; leave empty to use the free binary",
     },
     {
         "key": "CLOAK_FINGERPRINT_SEED", "file": "cloakbrowser.py", "type": "str", "group": "CloakBrowser",
-        "label": "Cloak指纹Seed", "help": "留空每次随机；固定值可保持同一指纹",
+        "label": "Cloak Fingerprint Seed", "help": "Leave empty for random each time; a fixed value keeps the same fingerprint",
     },
     {
         "key": "CLOAK_USER_DATA_DIR", "file": "cloakbrowser.py", "type": "str", "group": "CloakBrowser",
-        "label": "Cloak用户目录", "help": "留空使用临时上下文；填写路径则持久化 cookies/cache",
+        "label": "Cloak User Directory", "help": "Leave empty to use a temporary context; fill in a path to persist cookies/cache",
     },
     {
         "key": "CLOAK_SELENIUM_TIMEOUT", "file": "cloakbrowser.py", "type": "int", "group": "CloakBrowser",
-        "label": "Cloak超时", "help": "页面和元素等待超时时间，秒",
+        "label": "Cloak timeout", "help": "Page and element wait timeout, in seconds",
     },
     {
         "key": "CLOAK_KEEP_BROWSER_OPEN", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
-        "label": "保留Cloak浏览器", "help": "调试时开启，任务结束后不自动关闭",
+        "label": "Keep Cloak Browser", "help": "Enable while debugging; the browser is not closed automatically after the task ends",
     },
 
     # ---- Browser Use Cloud ----
     {
         "key": "BROWSER_USE_API_KEY", "file": "browser_use.py", "type": "str", "group": "Browser Use",
-        "label": "Browser Use API Key", "help": "保存在 .env（BROWSER_USE_API_KEY），不写回 config/*.py",
+        "label": "Browser Use API Key", "help": "Saved in .env (BROWSER_USE_API_KEY), not written back config/*.py",
         "storage": "env", "secret": True,
     },
     {
         "key": "BROWSER_USE_PROXY_COUNTRY_CODE", "file": "browser_use.py", "type": "str", "group": "Browser Use",
-        "label": "代理国家代码", "help": "两位国家码，如 jp/us/sg；配合 Browser Use 内置 residential proxy",
+        "label": "Proxy Country Code", "help": "Two-letter country code, e.g. jp/us/sg; works with the built-in Browser Use residential proxy",
     },
     {
         "key": "BROWSER_USE_USE_PROXY", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
-        "label": "使用内置代理", "help": "True=连接参数带 proxyCountryCode；False=不强制传国家代理参数",
+        "label": "Use Built-in Proxy", "help": "True=connection parameters carry proxyCountryCode; False = do not force the country proxy parameter",
     },
     {
         "key": "BROWSER_USE_PROFILE_ID", "file": "browser_use.py", "type": "str", "group": "Browser Use",
-        "label": "Profile ID", "help": "可选。填写则复用 Browser Use profile 的 cookies/localStorage；批量建议留空",
+        "label": "Profile ID", "help": "Optional. When filled, the cookies/localStorage of the Browser Use profile are reused; leave empty for batches",
     },
     {
         "key": "BROWSER_USE_CDP_BASE", "file": "browser_use.py", "type": "str", "group": "Browser Use",
-        "label": "CDP 地址", "help": "默认 wss://connect.browser-use.com",
+        "label": "CDP Address", "help": "default wss://connect.browser-use.com",
     },
     {
         "key": "BROWSER_USE_TIMEOUT", "file": "browser_use.py", "type": "int", "group": "Browser Use",
-        "label": "操作超时(秒)", "help": "Playwright 默认操作超时",
+        "label": "Operation Timeout (seconds)", "help": "Playwright default operation timeout",
     },
     {
         "key": "BROWSER_USE_SESSION_TIMEOUT", "file": "browser_use.py", "type": "int", "group": "Browser Use",
-        "label": "云端keepAlive(分钟)", "help": "传给 Browser Use connect URL 的 timeout/keepAlive；程序会自动限制到 1-240，建议 240",
+        "label": "Cloud keepAlive (minutes)", "help": "Passed to the timeout/keepAlive of the Browser Use connect URL; the program limits it to 1-240 automatically, recommended 240",
     },
     {
         "key": "BROWSER_USE_FAST_MODE", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
-        "label": "快速模式", "help": "减少 Browser Use 额外等待和 humanize 延迟；建议开启，异常排查时可关闭",
+        "label": "Fast Mode", "help": "Reduces extra Browser Use waits and humanize delays; recommended on, can be turned off when troubleshooting",
     },
     {
         "key": "BROWSER_USE_LOG_TIMING", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
-        "label": "耗时日志", "help": "打印 Browser Use 各阶段耗时：连接、打开页面、邮箱、OTP、手机、callback",
+        "label": "Timing Log", "help": "Print the time spent in each Browser Use stage: connect, open page, email, OTP, phone,callback",
     },
     {
         "key": "BROWSER_USE_KEEP_BROWSER_OPEN", "file": "browser_use.py", "type": "bool", "group": "Browser Use",
-        "label": "保留远端会话", "help": "调试时可不主动 browser.close()；默认 False",
+        "label": "Keep Remote Session", "help": "When debugging, browser.close() may be skipped; default False",
     },
     {
         "key": "BROWSER_USE_START_URL", "file": "browser_use.py", "type": "str", "group": "Browser Use",
-        "label": "起始 URL", "help": "默认 https://chatgpt.com/auth/login",
+        "label": "Start URL", "help": "default https://chatgpt.com/auth/login",
     },
 
     # ---- Skyvern Cloud Browser ----
     {
         "key": "SKYVERN_API_KEY", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "Skyvern API Key", "help": "保存在 .env（SKYVERN_API_KEY），用于创建 Skyvern Browser Session",
+        "label": "Skyvern API Key", "help": "Saved in .env (SKYVERN_API_KEY), used to create Skyvern Browser Session",
         "storage": "env", "secret": True,
     },
     {
         "key": "SKYVERN_API_BASE", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "API 地址", "help": "默认 https://api.skyvern.com",
+        "label": "API Address", "help": "default https://api.skyvern.com",
     },
     {
         "key": "SKYVERN_BROWSER_SESSION_TIMEOUT", "file": "skyvern.py", "type": "int", "group": "Skyvern",
-        "label": "Session 超时(分钟)", "help": "创建 Skyvern Browser Session 时传入的 timeout",
+        "label": "Session Timeout (minutes)", "help": "Passed in when creating a Skyvern Browser Session timeout",
     },
     {
         "key": "SKYVERN_BROWSER_PROFILE_ID", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "Browser Profile ID", "help": "可选，复用 Skyvern browser profile",
+        "label": "Browser Profile ID", "help": "Optional, reuse Skyvern browser profile",
     },
     {
         "key": "SKYVERN_PROXY_LOCATION", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "代理地区", "help": "可填 jp/us/gb 等简写；会自动转为 Skyvern 枚举，如 jp→RESIDENTIAL_JP；留空不传",
+        "label": "Proxy Region", "help": "Short codes such as jp/us/gb can be entered; they are converted to Skyvern enums automatically, e.g. jp -> RESIDENTIAL_JP; leave empty to omit",
     },
     {
         "key": "SKYVERN_BROWSER_TYPE", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "浏览器类型", "help": "Skyvern 支持 msedge / chrome / stealth-chromium；旧值 chromium-headful 会自动转为 stealth-chromium",
+        "label": "Browser Type", "help": "Skyvern Skyvern supports msedge / chrome / stealth-chromium; the old value chromium-headful is converted automatically to stealth-chromium",
     },
     {
         "key": "SKYVERN_AD_BLOCKER", "file": "skyvern.py", "type": "bool", "group": "Skyvern",
-        "label": "广告拦截", "help": "创建 Skyvern Browser Session 时启用 ad_blocker",
+        "label": "Ad Blocking", "help": "Enable ad_blocker when creating a Skyvern Browser Session ad_blocker",
     },
     {
         "key": "SKYVERN_GENERATE_BROWSER_PROFILE", "file": "skyvern.py", "type": "bool", "group": "Skyvern",
-        "label": "保存浏览器Profile", "help": "Session 结束时是否让 Skyvern 生成/保存 browser profile",
+        "label": "Save Browser Profile", "help": "Session Whether Skyvern generates/saves a browser profile when the session ends browser profile",
     },
     {
         "key": "SKYVERN_KEEP_BROWSER_OPEN", "file": "skyvern.py", "type": "bool", "group": "Skyvern",
-        "label": "保留浏览器", "help": "调试时可开启，任务结束后不主动关闭 Skyvern Browser Session",
+        "label": "Keep Browser", "help": "Can be enabled while debugging so the Skyvern Browser Session is not closed after the task ends Skyvern Browser Session",
     },
     {
         "key": "SKYVERN_START_URL", "file": "skyvern.py", "type": "str", "group": "Skyvern",
-        "label": "起始 URL", "help": "默认 https://chatgpt.com/auth/login",
+        "label": "Start URL", "help": "default https://chatgpt.com/auth/login",
     },
     {
         "key": "ROXY_API_BASE", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "Roxy API 地址", "help": "默认 http://127.0.0.1:50000；需在 Roxy 应用 API 配置中开启",
+        "label": "Roxy API Address", "help": "Default http://127.0.0.1:50000; must be enabled in the API settings of the Roxy app",
     },
     {
         "key": "ROXY_API_TOKEN", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "Roxy API Key", "help": "保存在 .env（ROXY_API_TOKEN），不写回 config/*.py",
+        "label": "Roxy API Key", "help": "Saved in .env (ROXY_API_TOKEN), not written back to config/*.py",
         "storage": "env", "secret": True,
     },
     {
         "key": "ROXY_PROFILE_ID", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "Roxy 环境ID", "help": "指定要打开的 Roxy 浏览器环境/Profile ID；留空则尝试创建临时环境",
+        "label": "Roxy environment ID", "help": "The Roxy browser environment / Profile ID to open; when empty, a temporary environment is tried to be created",
     },
     {
         "key": "ROXY_WORKSPACE_ID", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "Roxy 工作区ID", "help": "创建一号一环境时必填，会作为 workspaceId 提交给 Roxy 创建 Profile 接口",
+        "label": "Roxy Workspace ID", "help": "Required when creating one environment per account; submitted to the Roxy Create Profile API as workspaceId",
     },
     {
         "key": "ROXY_PROJECT_ID", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "Roxy 项目ID", "help": "从 /browser/workspace 的 project_details.projectId 获取；创建 Profile 时会作为 projectId 提交",
+        "label": "Roxy Project ID", "help": "Obtained from project_details.projectId of /browser/workspace; submitted as projectId when creating a Profile",
     },
     {
         "key": "ROXY_WORKSPACE_LIST_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "获取团队接口", "help": "默认 /browser/workspace；点击获取团队/项目时会先试此路径，再自动尝试常见兼容路径",
+        "label": "Get Team Endpoint", "help": "Default /browser/workspace; this path is tried first when fetching teams/projects, then common compatible paths automatically",
     },
     {
         "key": "ROXY_OPEN_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "打开接口路径", "help": "默认 /browser/open；如 Roxy 版本不同可在此调整",
+        "label": "Open Endpoint Path", "help": "Default /browser/open; adjust here if your Roxy version differs",
     },
     {
         "key": "ROXY_CREATE_INTERVAL", "file": "roxybrowser.py", "type": "float", "group": "RoxyBrowser",
-        "label": "创建环境间隔", "help": "多线程时相邻 /browser/create 请求的最小间隔，默认 1.5 秒；设为 0 可关闭",
+        "label": "Environment Creation Interval", "help": "Minimum interval between adjacent /browser/create requests with multiple threads, default 1.5 seconds; set to 0 to disable",
     },
     {
         "key": "ROXY_OPEN_HEADLESS", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "无头启动窗口", "help": "打开 Roxy 环境时向 /browser/open 传 headless；False=显示窗口，True=无头启动",
+        "label": "Headless Window Start", "help": "Pass headless to /browser/open when opening a Roxy environment; False = show the window, True = start headless",
     },
     {
         "key": "ROXY_CLOSE_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "关闭接口路径", "help": "默认 /browser/close",
+        "label": "Close Endpoint Path", "help": "default /browser/close",
     },
     {
         "key": "ROXY_KEEP_BROWSER_OPEN", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "保留浏览器", "help": "调试时可开启，任务结束后不自动关闭 Roxy 环境",
+        "label": "Keep Browser", "help": "Enable while debugging; the Roxy environment is not closed automatically after the task ends",
     },
     {
         "key": "ROXY_ONE_PROFILE_PER_ACCOUNT", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "一号一环境", "help": "每个账号强制创建新 Roxy Profile，用完关闭并删除，禁止复用固定环境",
+        "label": "One Environment Per Account", "help": "Every account is forced to create a new Roxy Profile, which is closed and deleted after use; reusing a fixed environment is forbidden",
     },
     {
         "key": "ROXY_DELETE_PROFILE_AFTER_RUN", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "结束后删除环境", "help": "一号一环境模式下，任务结束后删除本轮创建的 Roxy Profile",
+        "label": "Delete Environment After Finish", "help": "In one-environment-per-account mode, delete the Roxy Profile created in this round after the task ends Roxy Profile",
     },
     {
         "key": "ROXY_RANDOM_OS_ON_CREATE", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "创建环境随机OS", "help": "创建 Roxy 环境时每次在 Windows / macOS 中随机，不固定 macOS",
+        "label": "Random Environment Creation OS", "help": "When creating a Roxy environment, Windows / macOS is picked at random each time, not fixed macOS",
     },
     {
         "key": "ROXY_RANDOM_OS_CHOICES", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "随机OS范围", "help": "逗号分隔，默认 Windows,macOS；Roxy 支持 Windows / macOS / Linux / IOS / Android",
+        "label": "Random OS Range", "help": "Comma-separated, default Windows,macOS; Roxy supports Windows / macOS / Linux / IOS / Android",
     },
     {
         "key": "ROXY_RANDOM_PROFILE_NAME_ON_CREATE", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "创建环境随机名称", "help": "创建 Roxy 环境时自动生成不同名称，避免固定 gpt-free-register",
+        "label": "Random Environment Name", "help": "When creating a Roxy environment, a different name is generated automatically, avoiding the fixed gpt-free-register",
     },
     {
         "key": "ROXY_PROFILE_NAME_PREFIX", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "随机名称前缀", "help": "默认 rb；实际名称格式类似 rb-时间戳-随机码",
+        "label": "Random Name Prefix", "help": "Default rb; the actual name format is like rb-timestamp-randomcode",
     },
     {
         "key": "ROXY_CREATE_USE_PROXY_POOL", "file": "roxybrowser.py", "type": "bool", "group": "RoxyBrowser",
-        "label": "创建环境使用代理池", "help": "创建 Roxy 环境时从配置页「代理池」随机取一个代理，写入 Roxy proxyInfo",
+        "label": "Use Proxy Pool For Environments", "help": "When creating a Roxy environment, one proxy is picked at random from the 'Proxy pool' on the config page and written to Roxy proxyInfo",
     },
     {
         "key": "ROXY_PROXY_CHECK_CHANNEL", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "代理检测通道", "help": "写入 Roxy proxyInfo.checkChannel；留空则不传，默认 IPRust.io",
+        "label": "Proxy Check Channel", "help": "Written to Roxy proxyInfo.checkChannel; omitted when empty, default IPRust.io",
     },
     {
         "key": "ROXY_DELETE_PATH", "file": "roxybrowser.py", "type": "str", "group": "RoxyBrowser",
-        "label": "删除接口路径", "help": "默认 /browser/delete；如 Roxy 版本不同可调整",
+        "label": "Delete Endpoint Path", "help": "Default /browser/delete; adjust if your Roxy version differs",
     },
     {
         "key": "CODEX_OAUTH_DRIVER", "file": "codex.py", "type": "str", "group": "Codex",
-        "label": "Codex授权驱动", "help": "默认推荐 roxy；protocol=原协议授权；roxy=用 RoxyBrowser；cloak=用 CloakBrowser；browser_use=用 Browser Use Cloud；skyvern=用 Skyvern；same_as_registration=跟随注册驱动",
+        "label": "Codex Authorization Driver", "help": "roxy is recommended by default; protocol = original protocol authorization; roxy = use RoxyBrowser; cloak = use CloakBrowser; browser_use = use Browser Use Cloud; skyvern = use Skyvern; same_as_registration = follow the registration driver",
     },
     {
         "key": "ROXY_CODEX_CALLBACK_TIMEOUT", "file": "roxybrowser.py", "type": "int", "group": "RoxyBrowser",
-        "label": "Codex回调超时", "help": "Roxy Codex OAuth 等待 localhost:1455 callback 的最长秒数",
+        "label": "Codex Callback Timeout", "help": "Roxy Codex OAuth Maximum seconds to wait for the localhost:1455 callback",
     },
     {
-        "key": "ENABLE_2FA", "file": "twofa.py", "type": "bool", "group": "功能开关",
-        "label": "启用 2FA(TOTP)", "help": "注册完成后自动设置动态口令（会多收一封 OTP 邮件）",
+        "key": "ENABLE_2FA", "file": "twofa.py", "type": "bool", "group": "Feature Switches",
+        "label": "Enable 2FA(TOTP)", "help": "Set up a one-time password automatically after registration completes (one more OTP email is received)",
     },
     {
-        "key": "TWOFA_PROXY_MODE", "file": "twofa.py", "type": "str", "group": "功能开关",
-        "label": "2FA代理模式", "help": "saved=优先使用账号保存的代理；pool=忽略保存代理，每次从代理池随机取一个；修改后需重启服务",
+        "key": "TWOFA_PROXY_MODE", "file": "twofa.py", "type": "str", "group": "Feature Switches",
+        "label": "2FA Proxy Mode", "help": "saved=Prefer the proxy saved with the account; pool = ignore the saved proxy and pick one from the proxy pool each time; restart the service after changing",
         "choices": [
-            {"value": "saved", "label": "使用账号保存的代理"},
-            {"value": "pool", "label": "每次从代理池随机获取"},
+            {"value": "saved", "label": "Use the proxy saved with the account"},
+            {"value": "pool", "label": "Pick one from the proxy pool each time"},
         ],
     },
     {
-        "key": "TWOFA_WORKERS", "file": "twofa.py", "type": "int", "group": "功能开关",
-        "label": "2FA并发数", "help": "同时执行的2FA设置任务数，默认4，范围1-16；保存后立即生效",
+        "key": "TWOFA_WORKERS", "file": "twofa.py", "type": "int", "group": "Feature Switches",
+        "label": "2FA Concurrency", "help": "Number of 2FA setup tasks run at the same time, default 4, range 1-16; takes effect immediately after saving",
     },
     {
-        "key": "TWOFA_QUEUE_LIMIT", "file": "twofa.py", "type": "int", "group": "功能开关",
-        "label": "2FA队列容量", "help": "允许排队和执行中的2FA任务总数，默认200；保存后立即生效",
+        "key": "TWOFA_QUEUE_LIMIT", "file": "twofa.py", "type": "int", "group": "Feature Switches",
+        "label": "2FA Queue Capacity", "help": "Total number of 2FA tasks allowed to be queued and running, default 200; takes effect immediately after saving",
     },
     {
-        "key": "ENABLE_FLOW_TRIGGER", "file": "flow_trigger.py", "type": "bool", "group": "功能开关",
-        "label": "启用 Flow 触发", "help": "注册成功后自动调用内部 Flow 接口（不影响注册结果）",
+        "key": "ENABLE_FLOW_TRIGGER", "file": "flow_trigger.py", "type": "bool", "group": "Feature Switches",
+        "label": "Enable Flow Trigger", "help": "Automatically call the internal Flow API after a successful registration (does not affect the registration result)",
     },
     {
-        "key": "ENABLE_HUMANIZE_DELAY", "file": "humanize.py", "type": "bool", "group": "人工节奏",
-        "label": "启用随机停顿", "help": "在注册、OTP、授权等步骤之间加入随机等待，更接近人工操作节奏",
+        "key": "ENABLE_HUMANIZE_DELAY", "file": "humanize.py", "type": "bool", "group": "Human Pacing",
+        "label": "Enable Random Pauses", "help": "Add random waits between steps such as registration, OTP and authorization, closer to human operation pacing",
     },
     {
-        "key": "HUMANIZE_DELAY_FACTOR", "file": "humanize.py", "type": "float", "group": "人工节奏",
-        "label": "停顿倍率", "help": "随机停顿整体倍率；1.0=默认，0.5=减半，2.0=加倍",
+        "key": "HUMANIZE_DELAY_FACTOR", "file": "humanize.py", "type": "float", "group": "Human Pacing",
+        "label": "Pause Multiplier", "help": "Overall multiplier of the random pauses; 1.0 = default, 0.5 = halved, 2.0 = doubled",
     },
     {
-        "key": "ENABLE_HUMANIZE_BROWSER_ACTIONS", "file": "humanize.py", "type": "bool", "group": "人工节奏",
-        "label": "浏览器动作随机化", "help": "Roxy/Cloak 点击、输入、页面观察使用随机鼠标落点和逐字输入，降低机械操作痕迹",
+        "key": "ENABLE_HUMANIZE_BROWSER_ACTIONS", "file": "humanize.py", "type": "bool", "group": "Human Pacing",
+        "label": "Randomized Browser Actions", "help": "Roxy/Cloak Roxy/Cloak clicks, typing and page observation use random mouse landing points and character-by-character typing, reducing mechanical traces",
     },
-    # ---- 邮箱 / OTP ----
+    # ---- Email / OTP ----
     {
-        "key": "USE_EMAIL_SERVICE", "file": "email.py", "type": "bool", "group": "邮箱 / OTP",
-        "label": "自动取邮箱+收码", "help": "True=从邮箱池自动领邮箱并自动收 OTP；False=手动模式：用 REGISTER_EMAIL，OTP 在任务页手填",
-    },
-    {
-        "key": "REGISTER_EMAIL", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "手动注册邮箱", "help": "USE_EMAIL_SERVICE=False 时必填。例如你的 outlook.com 地址；OTP 去网页邮箱看，再回任务页提交",
+        "key": "USE_EMAIL_SERVICE", "file": "email.py", "type": "bool", "group": "Email / OTP",
+        "label": "Auto Claim Email + Receive Code", "help": "True=True = claim an email from the email pool automatically and receive the OTP automatically; False = manual mode: use REGISTER_EMAIL and type the OTP by hand on the task page",
     },
     {
-        "key": "REGISTER_NAME", "file": "register.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "显示名称", "help": "留空则自动生成英文名",
+        "key": "REGISTER_EMAIL", "file": "register.py", "type": "str", "group": "Email / OTP",
+        "label": "Manual Registration Email", "help": "USE_EMAIL_SERVICE=False Required when USE_EMAIL_SERVICE=False. For example your outlook.com address; read the OTP in the web mailbox and submit it back on the task page",
     },
     {
-        "key": "OTP_MAX_WAIT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "OTP 最长等待(秒)", "help": "等待验证码邮件的最长秒数，超时判失败",
+        "key": "REGISTER_NAME", "file": "register.py", "type": "str", "group": "Email / OTP",
+        "label": "Display Name", "help": "Leave empty to generate an English name automatically",
     },
     {
-        "key": "OTP_POLL_INTERVAL", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "OTP 轮询间隔(秒)", "help": "每隔多少秒查一次新邮件",
+        "key": "OTP_MAX_WAIT", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "OTP Max Wait (seconds)", "help": "Maximum seconds to wait for the verification code email; the task fails on timeout",
     },
     {
-        "key": "GENERIC_API_PROXY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "通用 API 取码代理", "help": "仅用于 generic_api 接口取码；不读取注册代理池，也不套用代理池上游链式；留空则直连，例如可填 http://127.0.0.1:7897",
+        "key": "OTP_POLL_INTERVAL", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "OTP Poll Interval (seconds)", "help": "How many seconds between checks for new emails",
+    },
+    {
+        "key": "GENERIC_API_PROXY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Generic API Code Retrieval Proxy", "help": "Only used for generic_api code retrieval; it does not read the registration proxy pool and does not apply the proxy-pool upstream chain; leave empty for a direct connection, for example http://127.0.0.1:7897",
         "storage": "env",
     },
     {
-        "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,imap,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail,remail,xigua,mailcode",
+        "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Email Source", "help": "One or several, comma-separated and used as fallbacks in order:outlook,generic_api,imap,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail,remail,xigua,mailcode",
     },
     {
-        "key": "IMAP_MAILBOX", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "通用 IMAP 收件箱", "help": "通用 IMAP 邮箱默认目录，通常为 INBOX；服务器、端口、用户名和密码在邮箱池导入",
+        "key": "IMAP_MAILBOX", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Generic IMAP Inbox", "help": "Default folder of generic IMAP emails, normally INBOX; the server, port, username and password are imported with the email pool",
     },
     {
-        "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "GPTMail API Key", "help": "选择 gptmail 邮箱来源时必填；保存在 .env，不会写入 config 源码",
+        "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "GPTMail API Key", "help": "Required when the gptmail email source is selected; saved in .env and not written into the config source",
         "storage": "env", "secret": True,
     },
     {
-        "key": "CLOUDFLARE_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare API 地址", "help": "Worker 临时邮箱 API 根地址，如 https://mail.example.com；选择 cloudflare 时必填",
+        "key": "CLOUDFLARE_API_BASE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare API Address", "help": "Worker Root address of the temporary email API, e.g. https://mail.example.com; required when cloudflare is selected",
         "storage": "env",
     },
     {
-        "key": "CLOUDFLARE_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare API Key", "help": "匿名可空；admin 模式填 ADMIN_PASSWORD；保存在 .env",
+        "key": "CLOUDFLARE_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare API Key", "help": "May be empty in anonymous mode; in admin mode fill in ADMIN_PASSWORD; saved in .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "CLOUDFLARE_AUTH_MODE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare 鉴权模式", "help": "none / bearer / x-api-key / x-admin-auth / query-key",
+        "key": "CLOUDFLARE_AUTH_MODE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare Auth Mode", "help": "none / bearer / x-api-key / x-admin-auth / query-key",
     },
     {
-        "key": "CLOUDFLARE_CUSTOM_AUTH", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare 全局密码", "help": "Worker PASSWORDS，注入 x-custom-auth；保存在 .env",
+        "key": "CLOUDFLARE_CUSTOM_AUTH", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare global password", "help": "Worker PASSWORDS, injected into x-custom-auth; saved in .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "CLOUDFLARE_PATH_ACCOUNTS", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare 创建路径", "help": "默认 /api/new_address；admin 常用 /admin/new_address",
+        "key": "CLOUDFLARE_PATH_ACCOUNTS", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare Create Path", "help": "Default /api/new_address; commonly for admin /admin/new_address",
     },
     {
-        "key": "CLOUDFLARE_PATH_MESSAGES", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare 邮件路径", "help": "默认 /api/mails",
+        "key": "CLOUDFLARE_PATH_MESSAGES", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare Mail Path", "help": "default /api/mails",
     },
     {
-        "key": "CLOUDFLARE_PATH_DOMAINS", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare 域名路径", "help": "默认 /api/domains（预留）",
+        "key": "CLOUDFLARE_PATH_DOMAINS", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare Domain Path", "help": "Default /api/domains (reserved)",
     },
     {
-        "key": "CLOUDFLARE_PATH_TOKEN", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Cloudflare Token路径", "help": "默认 /api/token（fallback 预留）",
+        "key": "CLOUDFLARE_PATH_TOKEN", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Cloudflare Token Path", "help": "Default /api/token (reserved as a fallback)",
     },
     {
-        "key": "CLOUDFLARE_DEFAULT_DOMAINS", "file": "email.py", "type": "list_str_multiline", "group": "邮箱 / OTP",
-        "label": "Cloudflare 默认域名", "help": "收信域名，每行一个或逗号分隔；创建时轮询使用，可留空",
+        "key": "CLOUDFLARE_DEFAULT_DOMAINS", "file": "email.py", "type": "list_str_multiline", "group": "Email / OTP",
+        "label": "Cloudflare Default Domains", "help": "Receiving domains, one per line or comma-separated; used in rotation when creating, may be left empty",
     },
     {
-        "key": "CLOUDFLARE_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "Cloudflare 请求超时(秒)", "help": "HTTP 请求超时，默认 20",
+        "key": "CLOUDFLARE_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Cloudflare Request Timeout (seconds)", "help": "HTTP request timeout, default 20",
     },
     {
-        "key": "CLOUDFLARE_NAME_LENGTH", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "Cloudflare 随机名前缀长度", "help": "admin 创建时 local-part 长度，默认 10",
+        "key": "CLOUDFLARE_NAME_LENGTH", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Cloudflare Random Name Prefix Length", "help": "admin Length of the local-part when creating, default 10",
     },
     {
-        "key": "OUTLOOK_FETCH_MODE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Outlook取件模式", "help": "auto=远端优先，远端 402/DEPLOYMENT_DISABLED 自动切 Graph 直连；direct=只用 Microsoft Graph 直连；remote=只用远端服务",
+        "key": "OUTLOOK_FETCH_MODE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Outlook Retrieval Mode", "help": "auto=Remote first, automatically switching to a direct Graph connection on remote 402/DEPLOYMENT_DISABLED; direct = only use a direct Microsoft Graph connection; remote = only use the remote service",
     },
     {
-        "key": "EMAIL_DOMAIN", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "转发域名(cloudflare_domain)", "help": "仅 cloudflare_domain 使用：Email Routing 的域名，如 mydomain.com；与 EMAIL_SOURCE=cloudflare 无关",
+        "key": "EMAIL_DOMAIN", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Forwarding Domain (cloudflare_domain)", "help": "Only used by cloudflare_domain: the Email Routing domain, e.g. mydomain.com; unrelated to EMAIL_SOURCE=cloudflare",
     },
     {
-        "key": "QQ_EMAIL", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "QQ 邮箱地址", "help": "仅 cloudflare_domain：接收 Email Routing 转发的 QQ 邮箱，如 123456@qq.com",
+        "key": "QQ_EMAIL", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "QQ Mailbox Address", "help": "Only cloudflare_domain: the QQ mailbox that receives the Email Routing forwards, e.g. 123456@qq.com",
     },
     {
-        "key": "QQ_IMAP_PASSWORD", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "QQ 邮箱 IMAP 授权码", "help": "仅 cloudflare_domain：QQ IMAP 授权码，保存在 .env，不写回 config/*.py",
+        "key": "QQ_IMAP_PASSWORD", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "QQ Mailbox IMAP Authorization Code", "help": "Only cloudflare_domain: the QQ IMAP authorization code, saved in .env and not written back config/*.py",
         "storage": "env", "secret": True,
     },
     {
-        "key": "MAIL_NEST_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "MailNest API Key", "help": "选择 mailnest 邮箱来源时必填；保存在 .env，不会写入 config 源码",
+        "key": "MAIL_NEST_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "MailNest API Key", "help": "Required when the mailnest email source is selected; saved in .env and not written into the config source",
         "storage": "env", "secret": True,
     },
     {
-        "key": "MAIL_NEST_PROJECT_CODE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "MailNest 项目代码", "help": "项目代码 默认 chatgpt001 获取页面 mailnest.top/buy-email",
+        "key": "MAIL_NEST_PROJECT_CODE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "MailNest Project Code", "help": "Project code, default chatgpt001, get it at mailnest.top/buy-email",
     },
     {
-        "key": "CLOUDMAIL_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "CloudMail API 地址", "help": "Cloud Mail Worker/API 地址，例如 https://mail.example.com",
+        "key": "CLOUDMAIL_API_BASE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "CloudMail API Address", "help": "Cloud Mail Worker/API address, e.g. https://mail.example.com",
     },
     {
-        "key": "CLOUDMAIL_ADMIN_EMAIL", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "CloudMail管理员邮箱", "help": "用于生成 Token；域名被平台隐藏时也会用它登录读取域名",
+        "key": "CLOUDMAIL_ADMIN_EMAIL", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "CloudMail Admin Email", "help": "Used to generate the Token; also used to log in and read the domains when the platform hides them",
         "storage": "env",
     },
     {
-        "key": "CLOUDMAIL_PASSWORD", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "CloudMail 密码", "help": "用于自动获取 Token；保存在 .env",
+        "key": "CLOUDMAIL_PASSWORD", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "CloudMail Password", "help": "Used to obtain the Token automatically; saved in .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "CLOUDMAIL_TOKEN_PATH", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "CloudMail Token路径", "help": "固定使用 /api/public/genToken；如部署版本不同可修改",
+        "key": "CLOUDMAIL_TOKEN_PATH", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "CloudMail Token Path", "help": "/api/public/genToken is always used; it can be changed if your deployment version differs",
     },
     {
-        "key": "CLOUDMAIL_AUTH_TOKEN", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "CloudMail Token", "help": "CloudMail/Cloud Mail API Authorization Token；保存在 .env",
+        "key": "CLOUDMAIL_AUTH_TOKEN", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "CloudMail Token", "help": "CloudMail/Cloud Mail API Authorization Token; saved in .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "CLOUDMAIL_DOMAINS", "file": "email.py", "type": "list_str_multiline", "group": "邮箱 / OTP",
-        "label": "CloudMail 域名列表", "help": "可留空；运行时会自动从平台获取。也可点“获取 CloudMail 域名”缓存到这里",
+        "key": "CLOUDMAIL_DOMAINS", "file": "email.py", "type": "list_str_multiline", "group": "Email / OTP",
+        "label": "CloudMail Domain List", "help": "May be left empty; it is fetched from the platform automatically at runtime. You can also click 'Get CloudMail domains' to cache it here",
     },
     {
-        "key": "CLOUDMAIL_AUTO_ADD_USER", "file": "email.py", "type": "bool", "group": "邮箱 / OTP",
-        "label": "CloudMail自动创建用户", "help": "生成随机邮箱后调用 /api/public/addUser 创建用户",
+        "key": "CLOUDMAIL_AUTO_ADD_USER", "file": "email.py", "type": "bool", "group": "Email / OTP",
+        "label": "CloudMail Auto Create User", "help": "After a random email is generated, call /api/public/addUser to create the user",
     },
     {
-        "key": "CLOUDMAIL_RANDOM_LOCAL_LENGTH", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "CloudMail随机名前缀长度", "help": "生成邮箱 local-part 的长度，建议 10-16",
+        "key": "CLOUDMAIL_RANDOM_LOCAL_LENGTH", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "CloudMail Random Name Prefix Length", "help": "Length of the generated email local-part, recommended 10-16",
     },
     {
-        "key": "MAILCODE_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "MailCode API Key", "help": "在官网 API 密钥页面创建；需要购买和读取权限，密钥保存在 .env；服务地址固定使用官网",
+        "key": "MAILCODE_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "MailCode API Key", "help": "Create it on the API keys page of the official site; it needs purchase and read permissions and the key is saved in .env; the service address is fixed to the official site",
         "external_url": "https://mailcode.bzb.qzz.io",
-        "external_label": "打开官网",
+        "external_label": "Open Official Site",
         "storage": "env", "secret": True,
     },
     {
-        "key": "MAILCODE_PRODUCT_ID", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "MailCode 商品 ID", "help": "查询 /api/open/v1/products 返回的 id；每个注册任务仅购买一个邮箱，不自动切换商品",
+        "key": "MAILCODE_PRODUCT_ID", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "MailCode product ID", "help": "The id returned by /api/open/v1/products; each registration task buys only one email and does not switch products automatically",
     },
     {
-        "key": "MAILCODE_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "MailCode 请求超时(秒)", "help": "单次 HTTP 请求超时，默认 20 秒",
+        "key": "MAILCODE_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "MailCode Request Timeout (seconds)", "help": "Timeout of a single HTTP request, default 20 seconds",
     },
     {
-        "key": "MAILCODE_CHANNEL_WAIT_SECONDS", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "MailCode 通道准备超时(秒)", "help": "购买后先初始化 IMAP 并等待 READY，再将邮箱交给注册流程；默认 60 秒",
+        "key": "MAILCODE_CHANNEL_WAIT_SECONDS", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "MailCode Channel Preparation Timeout (seconds)", "help": "After purchase, initialize IMAP first and wait for READY before handing the email to the registration flow; default 60 seconds",
     },
     {
-        "key": "REMAIL_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Remail API 地址", "help": "默认 https://remail.aishop6.com；也可填写文档地址 https://remail.aishop6.com/docs",
+        "key": "REMAIL_API_BASE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Remail API Address", "help": "Default https://remail.aishop6.com; the docs address can also be entered https://remail.aishop6.com/docs",
         "external_url": "https://remail.aishop6.com/register?aff=AFFLGYQMTYIXH",
-        "external_label": "打开 Remail 官网",
+        "external_label": "Open Remail Official Site",
     },
     {
-        "key": "REMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Remail API Key", "help": "Remail 控制台生成的 rk- 开头 API Key；选择 remail 来源时必填，保存在 .env",
+        "key": "REMAIL_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Remail API Key", "help": "Remail API Key generated in the console, starting with rk-; required when the remail source is selected, saved in .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "REMAIL_PROJECT_ID", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "Remail 项目 ID", "help": "Remail API 项目列表中的 projectId，用于匹配 ChatGPT/OpenAI 验证码项目",
+        "key": "REMAIL_PROJECT_ID", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Remail Project ID", "help": "Remail API The projectId in the project list, used to match the ChatGPT/OpenAI verification code project",
     },
     {
-        "key": "REMAIL_EMAIL_SUFFIX", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Remail 邮箱后缀", "help": "下单时使用的邮箱后缀，默认 outlook.com；不要填写完整邮箱",
+        "key": "REMAIL_EMAIL_SUFFIX", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Remail Email Suffix", "help": "The email suffix used when ordering, default outlook.com; do not enter a full email",
     },
     {
-        "key": "REMAIL_SERVICE_MODE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Remail 服务模式", "help": "code=短效接码；purchase=长效购买（可重复收件，默认）",
+        "key": "REMAIL_SERVICE_MODE", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Remail Service Mode", "help": "code=short-lived code receiving; purchase = long-lived purchase (can receive repeatedly, default)",
     },
     {
-        "key": "REMAIL_SUPPLY_POLICY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "Remail 库存策略", "help": "private_first 优先自有库存；public_only 只使用公开库存（默认）",
+        "key": "REMAIL_SUPPLY_POLICY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Remail Stock Policy", "help": "private_first Prefer your own stock; public_only only uses public stock (default)",
     },
     {
-        "key": "REMAIL_ORDER_WAIT_SECONDS", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "Remail 订单等待(秒)", "help": "下单后未立即返回 service token 时等待订单补齐凭证，默认 30 秒",
+        "key": "REMAIL_ORDER_WAIT_SECONDS", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Remail Order Wait (seconds)", "help": "When no service token is returned right after ordering, wait for the order to supply the credentials, default 30 seconds",
     },
     {
-        "key": "REMAIL_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "Remail 请求超时(秒)", "help": "Remail API 单次 HTTP 请求超时，默认 20 秒",
+        "key": "REMAIL_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Remail Request Timeout (seconds)", "help": "Remail API Timeout of a single HTTP request, default 20 seconds",
     },
     {
-        "key": "XIGUA_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "西瓜 API Key", "help": "西瓜 API 密钥，选择 xigua 来源时必填，保存在 .env",
+        "key": "XIGUA_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Xigua API Key", "help": "Xigua API key, required when the xigua source is selected, saved in .env",
         "storage": "env", "secret": True,
         "external_url": "https://xigua.dasiqo.com/#register?invite=XGMKWMW4Z7",
-        "external_label": "打开西瓜官网",
+        "external_label": "Open Xigua Official Site",
     },
     {
-        "key": "XIGUA_OFFER_ID", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "西瓜 Offer ID", "help": "手动填写西瓜项目方案的 offer_id",
+        "key": "XIGUA_OFFER_ID", "file": "email.py", "type": "str", "group": "Email / OTP",
+        "label": "Xigua Offer ID", "help": "Manually fill in the Xigua project plan offer_id",
     },
     {
-        "key": "XIGUA_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "西瓜请求超时(秒)", "help": "西瓜 API 单次 HTTP 请求超时，默认 20 秒",
+        "key": "XIGUA_REQUEST_TIMEOUT", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Xigua Request Timeout (seconds)", "help": "Timeout of a single HTTP request of the Xigua API, default 20 seconds",
     },
     {
-        "key": "XIGUA_POLL_ATTEMPTS", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "西瓜轮询次数", "help": "每次等待验证码最多请求次数，默认 10 次",
+        "key": "XIGUA_POLL_ATTEMPTS", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Xigua Poll Count", "help": "Maximum number of requests per wait for a verification code, default 10",
     },
     {
-        "key": "XIGUA_POLL_INTERVAL", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
-        "label": "西瓜轮询间隔(秒)", "help": "西瓜每次查询验证码的间隔，默认 5 秒",
+        "key": "XIGUA_POLL_INTERVAL", "file": "email.py", "type": "int", "group": "Email / OTP",
+        "label": "Xigua Poll Interval (seconds)", "help": "Interval of each Xigua verification code query, default 5 seconds",
     },
-    # ---- 浏览器地区画像 ----
+    # ---- Browser Region Profile ----
     {
-        "key": "BROWSER_LOCALE_PROFILE", "file": "browser.py", "type": "str", "group": "浏览器画像",
-        "label": "地区画像", "help": "应与代理出口地区一致；可选 jp/cn/us/sg。当前本地代理实测为日本东京，推荐 jp",
-    },
-
-    {
-        "key": "AUTO_BROWSER_LOCALE_FROM_IP", "file": "browser.py", "type": "bool", "group": "浏览器画像",
-        "label": "按出口IP自动画像", "help": "开启后每个 BrowserSession 会用当前代理出口 IP 自动选择语言/时区；失败时回退到地区画像",
-    },
-    {
-        "key": "IP_GEO_TIMEOUT", "file": "browser.py", "type": "float", "group": "浏览器画像",
-        "label": "IP定位超时(秒)", "help": "出口 IP 地理信息接口的单次请求超时；接口失败会自动回退，不影响注册",
-    },
-    {
-        "key": "BROWSER_DATA_SAVER_MODE", "file": "browser.py", "type": "bool", "group": "浏览器画像",
-        "label": "本地浏览器省流量模式", "help": "仅 Roxy/Cloak 拦截可选资源，并通过本地代理中继阻断配置的后台下载域名；Browser Use/Skyvern 不启用；默认关闭",
-    },
-    {
-        "key": "BROWSER_DATA_SAVER_BLOCKED_PROXY_HOSTS", "file": "browser.py", "type": "list_str_multiline", "group": "浏览器画像",
-        "label": "省流量代理域名屏蔽", "help": "仅开启省流量模式且使用本地浏览器代理中继时生效；连接上游前阻断启动/后台下载。每行一个域名（包含子域名），默认 dl.google.com、gvt1.com；填 [] 关闭，不填 URL 或路径",
-    },
-    {
-        "key": "BROWSER_DATA_SAVER_BLOCKED_RESOURCE_TYPES", "file": "browser.py", "type": "list_str_multiline", "group": "浏览器画像",
-        "label": "本地浏览器省流量拦截类型", "help": "仅 Roxy/Cloak 生效；每行一种，默认 image、media；可选 stylesheet、font、manifest、texttrack。不要填写 script/xhr/fetch/document/websocket",
-    },
-    {
-        "key": "BROWSER_DATA_SAVER_BLOCKED_URL_PATTERNS", "file": "browser.py", "type": "list_str_multiline", "group": "浏览器画像",
-        "label": "本地浏览器省流量 URL 屏蔽规则", "help": "仅 Roxy/Cloak 生效；每行一条 URL glob；默认拦截 RUM/广告统计和 Google GSI（不用 Google 登录时）。不要屏蔽核心 API/sentinel；填 [] 可关闭默认规则",
-    },
-    {
-        "key": "BROWSER_TRAFFIC_DETAIL_LOG", "file": "browser.py", "type": "bool", "group": "浏览器画像",
-        "label": "本地浏览器流量明细日志", "help": "仅 Roxy/Cloak 生效；注册结束时输出每个资源的 URL、类型、方法、状态码和上传/下载大小；URL 查询值会脱敏，默认关闭",
-    },
-    {
-        "key": "BROWSER_TRAFFIC_DETAIL_MAX_ENTRIES", "file": "browser.py", "type": "int", "group": "浏览器画像",
-        "label": "流量明细最多条数", "help": "按单请求总字节降序输出，默认 2000，最大 10000；用于后续分析可屏蔽资源",
-    },
-    {
-        "key": "BROWSER_JS_COVERAGE_LOG", "file": "browser.py", "type": "bool", "group": "浏览器画像",
-        "label": "记录本地浏览器 JS 覆盖率", "help": "仅 Roxy/Cloak 生效；通过 Chrome CDP 记录本次注册实际执行的 JS 函数和 offset；Browser Use/Skyvern 不启用；默认关闭",
-    },
-    {
-        "key": "BROWSER_JS_COVERAGE_MAX_ENTRIES", "file": "browser.py", "type": "int", "group": "浏览器画像",
-        "label": "本地浏览器 JS 覆盖率最多条数", "help": "仅 Roxy/Cloak 生效；日志最多输出的已执行函数数，同时限制保存的脚本摘要数量，默认 1000，最大 10000",
+        "key": "BROWSER_LOCALE_PROFILE", "file": "browser.py", "type": "str", "group": "Browser Profile",
+        "label": "Region Profile", "help": "Should match the proxy exit region; options jp/cn/us/sg. The current local proxy was measured as Tokyo, Japan, recommended jp",
     },
 
-    # ---- 代理池 ----
     {
-        "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "代理池(每行一个)", "help": "每行一个代理 URL，留空行会被忽略；为空则不使用代理",
+        "key": "AUTO_BROWSER_LOCALE_FROM_IP", "file": "browser.py", "type": "bool", "group": "Browser Profile",
+        "label": "Auto Profile By Exit IP", "help": "When on, every BrowserSession picks the language/timezone from the current proxy exit IP automatically; on failure it falls back to the region profile",
+    },
+    {
+        "key": "IP_GEO_TIMEOUT", "file": "browser.py", "type": "float", "group": "Browser Profile",
+        "label": "IP Locate Timeout (seconds)", "help": "Timeout of a single request of the exit IP geolocation API; a failure falls back automatically and does not affect registration",
+    },
+    {
+        "key": "BROWSER_DATA_SAVER_MODE", "file": "browser.py", "type": "bool", "group": "Browser Profile",
+        "label": "Local browser traffic-saving mode", "help": "Only Roxy/Cloak block optional resources and block the configured background download domains through the local proxy relay; not enabled for Browser Use/Skyvern; off by default",
+    },
+    {
+        "key": "BROWSER_DATA_SAVER_BLOCKED_PROXY_HOSTS", "file": "browser.py", "type": "list_str_multiline", "group": "Browser Profile",
+        "label": "Traffic-Saving Proxy Domain Block", "help": "Only effective when traffic-saving mode is on and the local browser proxy relay is used; blocks startup/background downloads before connecting upstream. One domain per line (subdomains included), default dl.google.com, gvt1.com; enter [] to disable, do not enter URLs or paths",
+    },
+    {
+        "key": "BROWSER_DATA_SAVER_BLOCKED_RESOURCE_TYPES", "file": "browser.py", "type": "list_str_multiline", "group": "Browser Profile",
+        "label": "Local browser traffic-saving block types", "help": "Only effective for Roxy/Cloak; one per line, default image, media; options stylesheet, font, manifest, texttrack. Do not enter script/xhr/fetch/document/websocket",
+    },
+    {
+        "key": "BROWSER_DATA_SAVER_BLOCKED_URL_PATTERNS", "file": "browser.py", "type": "list_str_multiline", "group": "Browser Profile",
+        "label": "Local browser traffic-saving URL block rules", "help": "Only effective for Roxy/Cloak; one URL glob per line; by default RUM/ad analytics and Google GSI (when Google sign-in is not used) are blocked. Do not block core APIs/sentinel; enter [] to disable the default rules",
+    },
+    {
+        "key": "BROWSER_TRAFFIC_DETAIL_LOG", "file": "browser.py", "type": "bool", "group": "Browser Profile",
+        "label": "Local browser traffic detail log", "help": "Only effective for Roxy/Cloak; at the end of registration outputs the URL, type, method, status code and upload/download size of every resource; URL query values are masked; off by default",
+    },
+    {
+        "key": "BROWSER_TRAFFIC_DETAIL_MAX_ENTRIES", "file": "browser.py", "type": "int", "group": "Browser Profile",
+        "label": "Max Traffic Detail Entries", "help": "Output sorted by total bytes per request in descending order, default 2000, max 10000; used to analyze blockable resources later",
+    },
+    {
+        "key": "BROWSER_JS_COVERAGE_LOG", "file": "browser.py", "type": "bool", "group": "Browser Profile",
+        "label": "Record local browser JS coverage", "help": "Only effective for Roxy/Cloak; records the JS functions and offsets actually executed in this registration through Chrome CDP; not enabled for Browser Use/Skyvern; off by default",
+    },
+    {
+        "key": "BROWSER_JS_COVERAGE_MAX_ENTRIES", "file": "browser.py", "type": "int", "group": "Browser Profile",
+        "label": "Max entries of local browser JS coverage", "help": "Only effective for Roxy/Cloak; maximum number of executed functions written to the log, which also limits the number of saved script summaries, default 1000, max 10000",
+    },
+
+    # ---- Proxy pool ----
+    {
+        "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "Proxy pool",
+        "label": "Proxy Pool (one per line)", "help": "One proxy URL per line, blank lines are ignored; when empty no proxy is used",
         "recommended_links": [
             {
-                "label": "IPWO 家宽",
+                "label": "IPWO Residential",
                 "url": "https://www.ipwo.net/?code=XEP358YGZ",
-                "description": "IPWO 住宅代理提供覆盖195+国家和地区的住宅 IP 资源，支持多地区网络环境配置，适用于 AI 应用、浏览器自动化、海外服务访问及数据采集等场景。重点！2GB 动态住宅流量无门槛发放，",
-                "description_link_label": "领取入口",
+                "description": "IPWO Residential proxies cover residential IP resources in 195+ countries and regions, support multi-region network environments, and suit AI applications, browser automation, overseas service access and data collection. Highlight: 2GB of dynamic residential traffic is granted with no threshold,",
+                "description_link_label": "Claim Entry",
                 "description_link_url": "https://www.ipwo.net/?code=XEP358YGZ",
-                "description_after_link": "，进群不定时 IP 福利发放。",
+                "description_after_link": "; join the group for occasional IP perks.",
             },
             {
-                "label": "IPRocket 家宽",
+                "label": "IPRocket Residential",
                 "url": "https://iprocket.io?viteCode=1PVNyLuJ",
-                "description": "高性价比家宽，可通过 TG 联系作者购买流量",
+                "description": "Good value residential proxies; contact the author via TG to buy traffic",
             },
             {
-                "label": "Rola-IP 家宽",
+                "label": "Rola-IP Residential",
                 "url": "https://rola-ip.co/?code=0326C5HA",
-                "description": "Roxy 合作伙伴高质量家宽，注册可享 15% 优惠",
+                "description": "Roxy High-quality residential proxies from a partner, with a 15% discount on registration",
             },
         ],
     },
     {
-        "key": "PROXY_POOL_UPSTREAM_PROXY", "file": "proxy.py", "type": "str", "group": "代理池",
-        "label": "代理池上游代理", "help": "可选；代理池每个目标代理通过此本地上游连接。留空则不链式。地址明文显示，仅保存到 .env",
+        "key": "PROXY_POOL_UPSTREAM_PROXY", "file": "proxy.py", "type": "str", "group": "Proxy pool",
+        "label": "Proxy Pool Upstream Proxy", "help": "Optional; every target proxy of the proxy pool connects through this local upstream. Leave empty for no chaining. The address is shown in plain text and only saved to .env",
         "storage": "env",
     },
     {
-        "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",
-        "label": "套餐/Agent网络模式", "help": "用于查套餐和生成 Agent Token；auto=本地代理可用则走代理、未监听则直连；proxy=强制代理；direct=强制直连",
+        "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "Proxy pool",
+        "label": "Plan/Agent Network Mode", "help": "Used for plan checks and Agent Token generation; auto = use the proxy if the local proxy is available, connect directly if nothing is listening; proxy = force the proxy; direct = force a direct connection",
     },
     {
-        "key": "PLAN_CHECK_PROXY", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
-        "label": "套餐/Agent专用代理(每行一个)", "help": "用于查套餐、查活和生成 Agent Token；支持动态代理 URL，每行一条。仅保存到 .env",
+        "key": "PLAN_CHECK_PROXY", "file": "proxy.py", "type": "list_str_multiline", "group": "Proxy pool",
+        "label": "Plan/Agent Dedicated Proxy (one per line)", "help": "Used for plan checks, liveness checks and Agent Token generation; dynamic proxy URLs are supported, one per line. Only saved to .env",
         "storage": "env", "secret": True,
     },
     {
-        "key": "PLAN_CHECK_UPSTREAM_PROXY", "file": "proxy.py", "type": "str", "group": "代理池",
-        "label": "套餐/Agent本地上游代理", "help": "可选；仅用于套餐/Agent专用代理，形成“本地代理 -> 动态代理 -> ChatGPT”的代理链。留空则不链式。地址明文显示。仅保存到 .env",
+        "key": "PLAN_CHECK_UPSTREAM_PROXY", "file": "proxy.py", "type": "str", "group": "Proxy pool",
+        "label": "Plan/Agent Local Upstream Proxy", "help": "Optional; only for the plan/Agent dedicated proxy, forming the chain 'local proxy -> dynamic proxy -> ChatGPT”proxy chain. Leave empty for no chaining. The address is shown in plain text. Only saved to .env",
         "storage": "env",
     },
     {
-        "key": "PLAN_CHECK_TIMEOUT", "file": "proxy.py", "type": "float", "group": "代理池",
-        "label": "套餐/Agent超时(秒)", "help": "查套餐和生成 Agent Token 的单次请求超时，建议 10-20 秒；独立于注册请求超时",
+        "key": "PLAN_CHECK_TIMEOUT", "file": "proxy.py", "type": "float", "group": "Proxy pool",
+        "label": "Plan/Agent Timeout (seconds)", "help": "Timeout of a single request of plan checks and Agent Token generation, recommended 10-20 seconds; independent of the registration request timeout",
     },
     {
-        "key": "PLAN_CHECK_MAX_ATTEMPTS", "file": "proxy.py", "type": "int", "group": "代理池",
-        "label": "套餐/Agent最大尝试次数", "help": "查套餐和生成 Agent Token 遇到 403、429、5xx 或网络错误时的重试次数，建议 3 次",
+        "key": "PLAN_CHECK_MAX_ATTEMPTS", "file": "proxy.py", "type": "int", "group": "Proxy pool",
+        "label": "Plan/Agent Max Attempts", "help": "Retry count of plan checks and Agent Token generation on 403, 429, 5xx or network errors, recommended 3",
     },
     {
-        "key": "PLAN_CHECK_RETRY_DELAY", "file": "proxy.py", "type": "float", "group": "代理池",
-        "label": "套餐/Agent重试间隔(秒)", "help": "查套餐和生成 Agent Token 的重试间隔，按尝试次数递增；服务端 Retry-After 优先",
+        "key": "PLAN_CHECK_RETRY_DELAY", "file": "proxy.py", "type": "float", "group": "Proxy pool",
+        "label": "Plan/Agent Retry Interval (seconds)", "help": "Retry interval of plan checks and Agent Token generation, growing with the attempt count; the server Retry-After takes priority",
     },
     {
-        "key": "PLAN_CHECK_REGISTRATION_RECHECK_DELAY", "file": "proxy.py", "type": "float", "group": "代理池",
-        "label": "新账号资格复查延迟(秒)", "help": "新注册 free 账号未发现试用资格或首次查询失败时复查一次；0 表示关闭",
+        "key": "PLAN_CHECK_REGISTRATION_RECHECK_DELAY", "file": "proxy.py", "type": "float", "group": "Proxy pool",
+        "label": "New Account Eligibility Recheck Delay (seconds)", "help": "A newly registered free account is rechecked once when no trial eligibility is found or the first check failed; 0 means off",
     },
     {
-        "key": "PLAN_CHECK_WORKERS", "file": "proxy.py", "type": "int", "group": "代理池",
-        "label": "套餐查询并发数", "help": "自动、手动和批量查套餐共用；Agent Token 生成使用独立队列；建议 2-4 个线程",
+        "key": "PLAN_CHECK_WORKERS", "file": "proxy.py", "type": "int", "group": "Proxy pool",
+        "label": "Plan Check Concurrency", "help": "Shared by automatic, manual and batch plan checks; Agent Token generation uses a separate queue; 2-4 threads recommended",
     },
     {
-        "key": "PLAN_CHECK_QUEUE_LIMIT", "file": "proxy.py", "type": "int", "group": "代理池",
-        "label": "套餐查询队列上限", "help": "防止异常批量操作无限堆积，建议 100-1000",
+        "key": "PLAN_CHECK_QUEUE_LIMIT", "file": "proxy.py", "type": "int", "group": "Proxy pool",
+        "label": "Plan Check Queue Limit", "help": "Prevents unlimited pile-up from abnormal batch operations, recommended 100-1000",
     },
     {
-        "key": "PLAN_CHECK_MIN_INTERVAL", "file": "proxy.py", "type": "float", "group": "代理池",
-        "label": "套餐/Agent请求最小间隔(秒)", "help": "限制查套餐和生成 Agent Token 的请求启动频率，降低 429 风险",
+        "key": "PLAN_CHECK_MIN_INTERVAL", "file": "proxy.py", "type": "float", "group": "Proxy pool",
+        "label": "Plan/Agent Min Request Interval (seconds)", "help": "Limits the request start frequency of plan checks and Agent Token generation, lowering the 429 risk",
     },
     {
-        "key": "PLAN_CHECK_JITTER", "file": "proxy.py", "type": "float", "group": "代理池",
-        "label": "套餐/Agent请求随机抖动(秒)", "help": "在查套餐和生成 Agent Token 的最小间隔上增加随机延迟，避免请求过于规律",
+        "key": "PLAN_CHECK_JITTER", "file": "proxy.py", "type": "float", "group": "Proxy pool",
+        "label": "Plan/Agent Request Random Jitter (seconds)", "help": "Adds a random delay on top of the minimum interval of plan checks and Agent Token generation, so requests are not too regular",
     },
-    # ---- 提链 ----
+    # ---- Link Extraction ----
     {
-        "key": "EXTRACT_LINK_API_BASE", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链服务地址", "help": "填写提链服务 API 地址",
+        "key": "EXTRACT_LINK_API_BASE", "file": "extract_link.py", "type": "str", "group": "Link Extraction",
+        "label": "Link extraction service address", "help": "Fill in the link extraction service API address",
     },
     {
-        "key": "EXTRACT_LINK_CDK", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链 CDK", "help": "创建提链任务和监听任务事件使用；成功提链扣 1 次",
+        "key": "EXTRACT_LINK_CDK", "file": "extract_link.py", "type": "str", "group": "Link Extraction",
+        "label": "Link Extraction CDK", "help": "Used for creating link extraction tasks and listening to task events; a successful extraction deducts 1 use",
         "storage": "env", "secret": True,
     },
     {
-        "key": "EXTRACT_LINK_TYPE", "file": "extract_link.py", "type": "str", "group": "提链",
-        "label": "提链类型", "help": "支持 pix / upi / kakao_pay / ideal",
+        "key": "EXTRACT_LINK_TYPE", "file": "extract_link.py", "type": "str", "group": "Link Extraction",
+        "label": "Link Type", "help": "Supports pix / upi / kakao_pay / ideal",
     },
     {
-        "key": "EXTRACT_LINK_WORKERS", "file": "extract_link.py", "type": "int", "group": "提链",
-        "label": "提链并发数", "help": "批量提链后台线程数，建议 1-4",
+        "key": "EXTRACT_LINK_WORKERS", "file": "extract_link.py", "type": "int", "group": "Link Extraction",
+        "label": "Link Concurrency", "help": "Number of background threads for batch link extraction, recommended 1-4",
     },
-    # ---- Codex 配置 ----
+    # ---- Codex Config ----
     {
         "key": "SUB2API_AUTO_EXPORT", "file": "sub2api.py", "type": "bool", "group": "Codex",
-        "label": "Agent sub2 自动同步", "help": "生成 Codex Agent Token 成功后自动同步到 sub2api",
+        "label": "Agent sub2 Auto Sync", "help": "Automatically sync to sub2api after a Codex Agent Token is generated successfully sub2api",
     },
     {
         "key": "SUB2API_SYNC_MODE", "file": "sub2api.py", "type": "str", "group": "Codex",
-        "label": "Agent sub2 同步模式", "help": "api=直接上传接口；file=写本地json；both=接口+本地json",
+        "label": "Agent sub2 Sync Mode", "help": "api=direct upload API; file = write a local json; both = API + local json",
     },
     {
         "key": "SUB2API_API_BASE", "file": "sub2api.py", "type": "str", "group": "Codex",
-        "label": "sub2 API基址", "help": "sub2api 服务地址；Agent Token 上传和 Codex OAuth 共用，例如 http://127.0.0.1:8080",
+        "label": "sub2 API Base URL", "help": "sub2api Service address; shared by Agent Token upload and Codex OAuth, for example http://127.0.0.1:8080",
     },
     {
         "key": "SUB2API_API_KEY", "file": "sub2api.py", "type": "str", "group": "Codex",
-        "label": "sub2 API Key", "help": "sub2api 管理接口 API Key；请求头使用 x-api-key；为空则不带鉴权头", "storage": "env", "secret": True,
+        "label": "sub2 API Key", "help": "sub2api Management API Key; the request header uses x-api-key; if empty no auth header is sent", "storage": "env", "secret": True,
     },
     {
         "key": "SUB2API_API_TIMEOUT", "file": "sub2api.py", "type": "int", "group": "Codex",
-        "label": "sub2 超时", "help": "sub2api 请求超时秒数",
+        "label": "sub2 timeout", "help": "sub2api Request timeout in seconds",
     },
     {
         "key": "SUB2API_OUTPUT_PATH", "file": "sub2api.py", "type": "str", "group": "Codex",
-        "label": "Agent sub2 本地路径", "help": "仅 SUB2API_SYNC_MODE=file/both 时使用；相对路径按项目根目录解析",
+        "label": "Agent sub2 Local Path", "help": "Only used when SUB2API_SYNC_MODE=file/both; a relative path is resolved against the project root",
     },
     {
         "key": "SUB2API_PROXY_KEY", "file": "sub2api.py", "type": "str", "group": "Codex",
-        "label": "Agent sub2 代理键", "help": "可选；写入 account.proxy_key，并在 proxies 为空时初始化 proxies[0].proxy_key",
+        "label": "Agent sub2 Proxy Key", "help": "Optional; written to account.proxy_key, and used to initialize when proxies is empty proxies[0].proxy_key",
     },
-    # ---- 接码平台 ----
-    # ---- Codex：基础 / CPA / sub2api 配置 ----
+    # ---- Code-Receiving Platform ----
+    # ---- Codex: base / CPA / sub2api settings ----
     {
         "key": "CODEX_AUTH_URL_SOURCE", "file": "codex.py", "type": "str", "group": "Codex",
-        "label": "授权地址来源", "help": "cpa=CPA生成并上传CPA；sub2=sub2生成并上传sub2；local=本地PKCE",
+        "label": "Authorization URL Source", "help": "cpa=CPA generated by CPA and uploaded to CPA; sub2 = generated by sub2 and uploaded to sub2; local = local PKCE",
     },
     {
         "key": "CPA_MANAGEMENT_URL", "file": "codex.py", "type": "str", "group": "Codex",
-        "label": "CPA 管理地址", "help": "例如 http://localhost:8317/admin/oauth；程序会取 origin 调用 /v0/management/*",
+        "label": "CPA Management Address", "help": "For example http://localhost:8317/admin/oauth; the program takes the origin and calls /v0/management/*",
     },
     {
         "key": "CPA_MANAGEMENT_KEY", "file": "codex.py", "type": "str", "group": "Codex",
-        "label": "管理密钥", "help": "保存在 .env（CPA_MANAGEMENT_KEY），不写回 config/*.py",
+        "label": "Management Key", "help": "Saved in .env (CPA_MANAGEMENT_KEY), not written back to config/*.py",
         "storage": "env", "secret": True,
     },
     {
         "key": "CPA_REQUEST_TIMEOUT", "file": "codex.py", "type": "int", "group": "Codex",
-        "label": "CPA 超时(秒)", "help": "请求 CPA 管理接口的超时时间",
+        "label": "CPA Timeout (seconds)", "help": "Timeout of requests to the CPA management API",
     },
     {
         "key": "CPA_SAVE_CALLBACK_RECEIPT", "file": "codex.py", "type": "bool", "group": "Codex",
-        "label": "保存CPA回执", "help": "CPA 未返回完整授权文件时，本地仍保存一份回调提交记录",
+        "label": "Save CPA Receipt", "help": "CPA When CPA does not return the complete authorization file, a callback submission record is still saved locally",
     },
 
     {
-        "key": "SMS_PROVIDER", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "接码通道", "help": "grizzly / smsbower / l / h；smsbower 使用 SMSBower handler_api，l/h 使用本地取号服务",
+        "key": "SMS_PROVIDER", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "Code-Receiving Channel", "help": "grizzly / smsbower / l / h; smsbower uses the SMSBower handler_api, l/h use the local number service",
     },
     {
-        "key": "SMS_COUNTRY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "国家代码", "help": "传给接码平台的 country；SMSBower 按其国家表填写，GrizzlySMS 常用美国=187；H 通道作为 H_API.md 的 country",
+        "key": "SMS_COUNTRY", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "Country Code", "help": "The country passed to the code-receiving platform; for SMSBower fill it in per its country table, for GrizzlySMS the US is commonly 187; for the H channel it is used as the country of H_API.md country",
     },
     {
-        "key": "SMS_SERVICE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "服务/项目代码", "help": "GrizzlySMS/L/SMSBower 作为 service；SMSBower 的 OpenAI (ChatGPT) 推荐填 dr，填 openai/chatgpt 时程序会自动转换；H 通道作为 projectId",
+        "key": "SMS_SERVICE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "Service/Project Code", "help": "GrizzlySMS/L/SMSBower as service; for OpenAI (ChatGPT) on SMSBower dr is recommended, and openai/chatgpt is converted automatically by the program; for the H channel it is used as projectId",
     },
     {
-        "key": "SMS_MAX_PRICE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "最高号码价格", "help": "透传给接码平台的 maxPrice；留空不限。SMSBower 可用它筛选价格/号码等级",
+        "key": "SMS_MAX_PRICE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "Max Number Price", "help": "Passed through to maxPrice of the code-receiving platform; leave empty for unlimited. SMSBower can use it to filter price / number tier",
     },
     {
-        "key": "SMS_MAX_RETRIES", "file": "codex.py", "type": "int", "group": "接码平台",
-        "label": "换号重试次数", "help": "一个号收不到短信/被OpenAI拒时换下一个号，最多重试几次",
+        "key": "SMS_MAX_RETRIES", "file": "codex.py", "type": "int", "group": "Code-Receiving Platform",
+        "label": "Number Switch Retries", "help": "When a number receives no SMS or is rejected by OpenAI, switch to the next number; the maximum number of retries",
     },
     {
-        "key": "SMS_CODE_WAIT", "file": "codex.py", "type": "int", "group": "接码平台",
-        "label": "单号等短信(秒)", "help": "单个号等待短信到达的最长秒数，超时则换号",
+        "key": "SMS_CODE_WAIT", "file": "codex.py", "type": "int", "group": "Code-Receiving Platform",
+        "label": "Per-Number SMS Wait (seconds)", "help": "Maximum seconds one number waits for an SMS to arrive; on timeout the number is switched",
     },
     {
-        "key": "SMS_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "GrizzlySMS API密钥", "help": "GrizzlySMS 平台 API Key，保存在 .env（SMS_API_KEY），不写回 config/*.py",
+        "key": "SMS_API_KEY", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "GrizzlySMS API Key", "help": "GrizzlySMS platform API Key, saved in .env (SMS_API_KEY), not written back config/*.py",
         "storage": "env", "secret": True,
     },
     {
-        "key": "SMSBOWER_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower API 地址", "help": "默认 https://smsbower.page/stubs/handler_api.php",
+        "key": "SMSBOWER_API_BASE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower API Address", "help": "default https://smsbower.page/stubs/handler_api.php",
     },
     {
-        "key": "SMSBOWER_API_KEY", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower API密钥", "help": "SMSBower 控制台 API Key，保存在 .env，不写回 config/*.py",
+        "key": "SMSBOWER_API_KEY", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower API Key", "help": "SMSBower Console API Key, saved in .env, not written back to config/*.py",
         "storage": "env", "secret": True,
     },
     {
-        "key": "SMSBOWER_USE_V2", "file": "codex.py", "type": "bool", "group": "接码平台",
-        "label": "SMSBower 使用V2取号", "help": "官方客户端文档使用 getNumber；通常保持关闭。仅在确认账号支持 getNumberV2 时开启",
+        "key": "SMSBOWER_USE_V2", "file": "codex.py", "type": "bool", "group": "Code-Receiving Platform",
+        "label": "SMSBower Use V2 Number Taking", "help": "The official client docs use getNumber; normally keep it off. Only enable it after confirming the account supports getNumberV2",
     },
     {
-        "key": "SMSBOWER_PROVIDER_IDS", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower 供应商筛选", "help": "可选，供应商 ID 用逗号分隔；留空由平台自动选择",
+        "key": "SMSBOWER_PROVIDER_IDS", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower Supplier Filter", "help": "Optional, supplier IDs separated by commas; leave empty to let the platform choose automatically",
     },
     {
-        "key": "SMSBOWER_EXCEPT_PROVIDER_IDS", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower 排除供应商", "help": "可选，排除的供应商 ID 用逗号分隔",
+        "key": "SMSBOWER_EXCEPT_PROVIDER_IDS", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower Exclude Suppliers", "help": "Optional, excluded supplier IDs separated by commas",
     },
     {
-        "key": "SMSBOWER_PHONE_EXCEPTION", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower 排除号码前缀", "help": "可选，号码前缀用逗号分隔；用于避开已知不可用号段",
+        "key": "SMSBOWER_PHONE_EXCEPTION", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower Exclude Number Prefixes", "help": "Optional, number prefixes separated by commas; used to avoid known unusable number ranges",
     },
     {
-        "key": "SMSBOWER_MIN_PRICE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "SMSBower 最低价格", "help": "可选，透传 minPrice；与最高价格一起限定号码价格区间",
+        "key": "SMSBOWER_MIN_PRICE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "SMSBower Minimum Price", "help": "Optional, passes minPrice through; together with the maximum price it limits the number price range",
     },
     {
-        "key": "H_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "H API 地址", "help": "H 取号服务基础地址，例如 http://localhost:8788",
+        "key": "H_API_BASE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "H API Address", "help": "H Base address of the number service, e.g. http://localhost:8788",
     },
     {
-        "key": "H_ADMIN_AUTH_CODE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "H 授权码", "help": "保存在 .env（H_ADMIN_AUTH_CODE），不写回 config/*.py",
+        "key": "H_ADMIN_AUTH_CODE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "H Authorization Code", "help": "Saved in .env (H_ADMIN_AUTH_CODE), not written back config/*.py",
         "storage": "env", "secret": True,
     },
     {
-        "key": "H_PHONE_PREFIX", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "H 号码前缀", "help": "H 返回号码不含国家码时填写，例如美国 10 位本地号填 1；留空则不补",
+        "key": "H_PHONE_PREFIX", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "H Number Prefix", "help": "H Fill in when the number returned by H has no country code, e.g. enter 1 for a US 10-digit local number; leave empty to add none",
     },
     {
-        "key": "H_PHONE_ACQUIRE_MODE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "H 取号方式", "help": "reusable=优先复用历史可用号码；new=每次都取一个新号码",
+        "key": "H_PHONE_ACQUIRE_MODE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "H Taking Method", "help": "reusable=Prefer reusing historical available numbers; new = take a new number every time",
     },
     {
-        "key": "L_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "L API 地址", "help": "L 取号服务基础地址，例如 http://localhost:8788",
+        "key": "L_API_BASE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "L API Address", "help": "L Base address of the number service, e.g. http://localhost:8788",
     },
     {
-        "key": "L_ADMIN_AUTH_CODE", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "L 授权码", "help": "保存在 .env（L_ADMIN_AUTH_CODE），不写回 config/*.py",
+        "key": "L_ADMIN_AUTH_CODE", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "L Authorization Code", "help": "Saved in .env (L_ADMIN_AUTH_CODE), not written back config/*.py",
         "storage": "env", "secret": True,
     },
     {
-        "key": "L_PHONE_PREFIX", "file": "codex.py", "type": "str", "group": "接码平台",
-        "label": "L 号码前缀", "help": "L 返回号码不含国家码时填写，例如美国 10 位本地号填 1；留空则不补",
+        "key": "L_PHONE_PREFIX", "file": "codex.py", "type": "str", "group": "Code-Receiving Platform",
+        "label": "L Number Prefix", "help": "L Fill in when the number returned by H has no country code, e.g. enter 1 for a US 10-digit local number; leave empty to add none",
     },
 ]
 
@@ -835,21 +835,21 @@ _FIELD_BY_KEY = {f["key"]: f for f in EDITABLE_FIELDS}
 
 
 # ============================================================
-# 读：解析源码取当前值（不 import，避免缓存/副作用）
+# Read: parse the source to get the current value (no import, to avoid caching/side effects)
 # ============================================================
 
 def _config_path(filename: str) -> Path:
     path = (_CONFIG_DIR / filename).resolve()
-    # 防目录穿越：必须落在 config/ 下
+    # Prevent directory traversal: it must be under config/
     if _CONFIG_DIR not in path.parents:
-        raise ValueError(f"非法配置路径: {filename}")
+        raise ValueError(f"Invalid config path: {filename}")
     return path
 
 
 def _literal_default_from_expr(node):
-    """尽量从赋值表达式中取“源码默认值”，不执行模块代码。
+    """Take the "source default value" from the assignment expression as far as possible, without executing module code.
 
-    兼容：
+    Compatible:
       KEY = "literal"
       KEY: str = env_str("KEY", "default")
       KEY = env_bool("KEY", True)
@@ -867,7 +867,7 @@ def _literal_default_from_expr(node):
         elif isinstance(node.func, ast.Attribute):
             func_name = node.func.attr
 
-        # env_str/env_bool/env_int/env_float/env_list 的第二个位置参数是默认值。
+        # env_str/env_bool/env_int/env_float/env_list the second positional argument is the default value.
         if func_name in {"env_str", "env_bool", "env_int", "env_float", "env_list"}:
             if len(node.args) >= 2:
                 try:
@@ -905,9 +905,9 @@ def _find_assignment_value_node(source: str, key: str):
 
 
 def _parse_value_from_source(source: str, key: str, vtype: str):
-    """从源码里解析 KEY 的当前值。失败返回 None。"""
+    """Parse the current value of KEY from the source. Returns None on failure."""
     if vtype == "list_str_multiline":
-        # 用 AST 解析整个模块，取这个赋值的 list 字面量
+        # Parse the whole module with the AST and take the list literal of this assignment
         value_node = _find_assignment_value_node(source, key)
         if value_node is None:
             return None
@@ -919,14 +919,14 @@ def _parse_value_from_source(source: str, key: str, vtype: str):
             return None
         return None
 
-    # 标量：优先 AST 取默认值，避免 env_str("KEY", "") 被当成普通字符串。
+    # Scalars: prefer the AST for the default value, so env_str("KEY", "") is not treated as an ordinary string.
     value_node = _find_assignment_value_node(source, key)
     if value_node is not None:
         value = _literal_default_from_expr(value_node)
         if value is not None:
             return value
 
-    # AST 失败时再回退到旧的正则解析。
+    # AST Fall back to the old regex parsing when it fails.
     m = re.search(
         rf"^{re.escape(key)}\s*(?::[^=\n]+)?=\s*(.+?)\s*(?:#.*)?$",
         source, re.MULTILINE,
@@ -941,7 +941,7 @@ def _parse_value_from_source(source: str, key: str, vtype: str):
 
 
 def _parse_env_typed_value(raw: str, fallback, vtype: str):
-    """把 .env 字符串按字段类型转换；失败时回退 fallback。"""
+    """Convert the .env string by field type; fall back to fallback on failure."""
     from config.env_loader import env_value
     return env_value("__NO_SUCH_ENV_KEY__", fallback, vtype) if raw is None else _coerce_raw_value(raw, fallback, vtype)
 
@@ -971,9 +971,9 @@ def _coerce_raw_value(raw: str, fallback, vtype: str):
 
 
 def get_config() -> list[dict]:
-    """返回所有可编辑项的当前值 + 元信息，供前端渲染表单。
+    """Return the current values + metadata of all editable items, for the front end to render the form.
 
-    优先读取 `.env` / 环境变量；没有配置时回退到 `config/*.py` 默认值。
+    `.env` / environment variables are read first; when not configured, fall back to the `config/*.py` defaults.
     """
     from config.env_loader import load_env, read_env_file
     load_env(override=True)
@@ -1013,17 +1013,17 @@ def get_config() -> list[dict]:
 
 
 # ============================================================
-# 写：统一写 .env，不修改 config/*.py
+# Write: always write .env, never modify config/*.py
 # ============================================================
 
 
 _PLACEHOLDER_EMPTY = {
-    "", "-", "—", "无", "空", "none", "null", "n/a", "na", "未设置", "未配置",
+    "", "-", "—", "无", "空", "none", "null", "n/a", "na", "Not set", "未配置",
 }
 
 
 def _normalize_config_value(value, vtype: str):
-    """把前端/历史占位空值规范化，避免 '-' 被当成真实配置。"""
+    """Normalize the front-end / historical placeholder empty values, to avoid '-' being treated as a real setting."""
     if vtype == "str":
         s = "" if value is None else str(value).strip()
         if s.lower() in {x.lower() for x in _PLACEHOLDER_EMPTY}:
@@ -1049,7 +1049,7 @@ def _normalize_config_value(value, vtype: str):
 
 
 def _format_literal(value, vtype: str) -> str:
-    """把前端传来的值格式化成 Python 字面量字符串。"""
+    """Format the value sent by the front end into a Python literal string."""
     if vtype == "bool":
         if isinstance(value, str):
             value = value.strip().lower() in ("true", "1", "yes", "on")
@@ -1060,13 +1060,13 @@ def _format_literal(value, vtype: str) -> str:
         return repr(float(value))
     if vtype == "str":
         s = str(value)
-        # 用 repr 保证转义安全，但统一成双引号风格
+        # Use repr to guarantee safe escaping, but unify it into the double-quote style
         return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    raise ValueError(f"_format_literal 不支持的类型: {vtype}")
+    raise ValueError(f"_format_literal Unsupported type: {vtype}")
 
 
 def _replace_scalar(source: str, key: str, literal: str) -> str:
-    """替换 `KEY[: 类型] = 旧值` 行的右值，保留行内注释和类型标注。"""
+    """Replace `KEY[: type] = old value` the right-hand value of the line, keeping the inline comment and the type annotation."""
     pattern = re.compile(
         rf"^(?P<head>{re.escape(key)}\s*(?::[^=\n]+)?=\s*)"
         rf"(?P<val>.+?)"
@@ -1074,12 +1074,12 @@ def _replace_scalar(source: str, key: str, literal: str) -> str:
         re.MULTILINE,
     )
     if not pattern.search(source):
-        raise ValueError(f"未在源码中找到可替换的赋值: {key}")
+        raise ValueError(f"No replaceable assignment found in the source: {key}")
     return pattern.sub(lambda m: f"{m.group('head')}{literal}{m.group('tail')}", source, count=1)
 
 
 def _replace_proxy_pool(source: str, lines: list[str]) -> str:
-    """整块替换 PROXY_POOL = [ ... ] 列表字面量（保留前面的赋值头）。"""
+    """Replace the PROXY_POOL = [ ... ] list literal as a whole block (keeping the preceding assignment head)."""
     items = [ln.strip() for ln in lines if ln.strip()]
     if items:
         body = "\n".join(
@@ -1090,7 +1090,7 @@ def _replace_proxy_pool(source: str, lines: list[str]) -> str:
     else:
         literal = "[]"
 
-    # 匹配 PROXY_POOL = [ ... ]（含跨行），用 AST 定位起止偏移最稳
+    # Match PROXY_POOL = [ ... ] (including across lines); locating the start/end offsets with the AST is the most reliable
     tree = ast.parse(source)
     for node in tree.body:
         targets = node.targets if isinstance(node, ast.Assign) else (
@@ -1099,12 +1099,12 @@ def _replace_proxy_pool(source: str, lines: list[str]) -> str:
         for t in targets:
             if isinstance(t, ast.Name) and t.id == "PROXY_POOL":
                 src_lines = source.splitlines(keepends=True)
-                start = node.value.lineno          # 值（[）所在行，1-based
-                end = node.value.end_lineno        # 值（]）所在行，1-based
-                col = node.value.col_offset         # [ 在起始行的列偏移
-                # 保留起始行 [ 之前的内容（即 "PROXY_POOL = " 或 "PROXY_POOL: list = "）
+                start = node.value.lineno          # the line of the value ([),1-based
+                end = node.value.end_lineno        # the line of the value (]),1-based
+                col = node.value.col_offset         # [ the column offset in the start line
+                # Keep the content before [ on the start line (that is "PROXY_POOL = " or "PROXY_POOL: list = ")
                 prefix = src_lines[start - 1][:col]
-                # 保留结束行 ] 之后的内容（行内注释 / 换行）
+                # Keep the content after ] on the end line (inline comment / newline)
                 end_line = src_lines[end - 1]
                 suffix = end_line[node.value.end_col_offset:]
                 new_lines = (
@@ -1113,7 +1113,7 @@ def _replace_proxy_pool(source: str, lines: list[str]) -> str:
                     + src_lines[end:]
                 )
                 return "".join(new_lines)
-    raise ValueError("未找到 PROXY_POOL 赋值")
+    raise ValueError("PROXY_POOL assignment not found")
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -1123,7 +1123,7 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def _format_env_value(value, vtype: str, fallback=None) -> str:
-    """把前端值格式化成适合写入 .env 的字符串。"""
+    """Format the front-end value into a string suitable for writing to .env."""
     if value is None:
         value = fallback
     if vtype == "bool":
@@ -1149,7 +1149,7 @@ def _format_env_value(value, vtype: str, fallback=None) -> str:
 
 
 def update_config(updates: dict) -> dict:
-    """批量更新配置。所有 WebUI 可编辑项只写项目根 `.env`。"""
+    """Batch update the config. All WebUI-editable items are only written to the project root `.env`."""
     from config.env_loader import write_env_values, load_env
 
     updated, ignored = [], []
@@ -1168,7 +1168,7 @@ def update_config(updates: dict) -> dict:
         if choices:
             allowed = {str(item.get("value")) for item in choices}
             if str(value) not in allowed:
-                raise ValueError(f"{key} 的值无效，可选：{', '.join(sorted(allowed))}")
+                raise ValueError(f"{key} has an invalid value, options:{', '.join(sorted(allowed))}")
         env_updates[key] = _format_env_value(
             value,
             field["type"],

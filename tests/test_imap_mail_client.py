@@ -98,7 +98,7 @@ class ImapMailClientTests(unittest.TestCase):
         mail = MagicMock()
         mail.login.side_effect = imap_client.imaplib.IMAP4.error("bad credentials")
         with patch.object(imap_client.imaplib, "IMAP4_SSL", return_value=mail):
-            with self.assertRaisesRegex(imap_client.ImapMailError, "登录失败"):
+            with self.assertRaisesRegex(imap_client.ImapMailError, "Log In failed"):
                 imap_client._connect(account)
         mail.shutdown.assert_called_once()
 
@@ -150,10 +150,10 @@ class ImapMailClientTests(unittest.TestCase):
             with self.assertRaises(TimeoutError):
                 imap_client._operation_timeout(100.0)
         with patch.object(imap_client, "get_account_context", return_value=account), \
-             patch.object(imap_client, "_connect", side_effect=imap_client.ImapMailError("连接失败")), \
+             patch.object(imap_client, "_connect", side_effect=imap_client.ImapMailError("connection failed")), \
              patch.object(imap_client.time, "monotonic", side_effect=lambda: clock[0]), \
              patch.object(imap_client.time, "sleep", side_effect=lambda n: clock.__setitem__(0, clock[0] + n)):
-            with self.assertRaisesRegex(imap_client.ImapMailError, "最后取件错误.*连接失败"):
+            with self.assertRaisesRegex(imap_client.ImapMailError, "last fetch error.*connection failed"):
                 imap_client.fetch_latest_otp(account.email, max_wait=2, poll_interval=10)
         self.assertEqual(clock[0], 102.0)
 

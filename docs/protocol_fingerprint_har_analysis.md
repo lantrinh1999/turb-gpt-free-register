@@ -1,53 +1,53 @@
-# Default-all-domains-1784468371563.json 纯协议链路与指纹补齐说明
+# Default-all-domains-1784468371563.json Pure-protocol flow and fingerprint completion notes
 
-来源文件：`Default-all-domains-1784468371563.json`，Reqorder HAR，抓包时间窗口：2026-07-19 21:36:16 ~ 21:37:30（Asia/Shanghai）。
+Source file: `Default-all-domains-1784468371563.json`, a Reqorder HAR; capture time window: 2026-07-19 21:36:16 ~ 21:37:30 (Asia/Shanghai).
 
-## 1. 总览
+## 1. Overview
 
-- 总请求：236
-- 域名分布：`chatgpt.com` 125、`browser-intake-datadoghq.com` 107、`auth.openai.com` 2、`ab.chatgpt.com` 1、测试回调 1
-- 主要状态：200 共 112、202 共 111、0 共 13（Datadog/octet-stream 中断或被采集器标记）
-- 主浏览器画像：macOS + Chrome 149；语言/时区由代理出口 IP 自动决定，本 HAR 样本为 zh-CN + Asia/Shanghai
-- ChatGPT 前端版本：`prod-fb4a8a2a751dfec391053cfd7b01c52699ccf78c`
-- OAI build number：`8370486`
-- Sentinel SDK：`20260219f9f6`
+- Total requests:236
+- Domain distribution: `chatgpt.com` 125, `browser-intake-datadoghq.com` 107, `auth.openai.com` 2, `ab.chatgpt.com` 1, test callback 1
+- Main statuses: 200 x 112, 202 x 111, 0 x 13 (Datadog/octet-stream interrupted or flagged by the capture tool)
+- Main browser profile: macOS + Chrome 149; language/timezone are determined automatically by the proxy egress IP, and this HAR sample is zh-CN + Asia/Shanghai
+- ChatGPT frontend version:`prod-fb4a8a2a751dfec391053cfd7b01c52699ccf78c`
+- OAI build number:`8370486`
+- Sentinel SDK:`20260219f9f6`
 
-## 2. 关键链路顺序
+## 2. Key flow order
 
-### A. ChatGPT 匿名态首页/模型预热
+### A. ChatGPT anonymous home page / model warm-up
 
-1. `POST /ces/v1/rgstr`：Statsig 注册/flush，上报头包含 `oai-client-build-number`、`oai-client-version`、`oai-device-id`、`oai-language`、`oai-session-id`。
+1. `POST /ces/v1/rgstr`: Statsig register/flush; the reporting headers include `oai-client-build-number`, `oai-client-version`, `oai-device-id`, `oai-language`, `oai-session-id`.
 2. `GET /ces/v1/projects/oai/settings`
 3. `GET /backend-anon/accounts/check/v4-2023-04-27?timezone_offset_min=-480`
 4. `GET /backend-anon/me`
 5. `POST /backend-anon/sentinel/chat-requirements/prepare`
-6. `GET /backend-anon/system_hints?...`、`GET /backend-anon/models?...`
+6. `GET /backend-anon/system_hints?...`,`GET /backend-anon/models?...`
 7. `POST /backend-anon/conversation/init`
 8. `POST /backend-anon/sentinel/chat-requirements/finalize`
 
-### B. NextAuth 发起 OpenAI OAuth
+### B. NextAuth initiating OpenAI OAuth
 
 1. `GET /api/auth/providers`
 2. `GET /api/auth/csrf`
 3. `POST /api/auth/signin/openai?...screen_hint=login_or_signup&login_hint=<email>`
-   - form：`callbackUrl=https://chatgpt.com/&csrfToken=<csrf>&json=true`
-   - 响应返回 `auth.openai.com/api/accounts/authorize?...` URL。
+   - form:`callbackUrl=https://chatgpt.com/&csrfToken=<csrf>&json=true`
+   - The response returns the `auth.openai.com/api/accounts/authorize?...` URL.
 
-### C. Auth Web 邮箱 OTP / about-you / create_account
+### C. Auth Web Email OTP / about-you / create_account
 
-抓包中 `auth.openai.com` 业务接口只有两条：
+In the capture, `auth.openai.com` has only two business endpoints:
 
 1. `POST https://auth.openai.com/api/accounts/email-otp/validate`
-   - body：`{"code":"<6位OTP>"}`
-   - 本次抓包未带 `openai-sentinel-token`。
+   - body: `{"code":"<6-digit OTP>"}`
+   - This capture did not carry `openai-sentinel-token`.
 2. `POST https://auth.openai.com/api/accounts/create_account`
-   - body：`{"name":"<name>","birthdate":"YYYY-MM-DD"}`
-   - 带 `openai-sentinel-token` 和 `openai-sentinel-so-token`。
-   - token 内 `flow=oauth_create_account`。
+   - body:`{"name":"<name>","birthdate":"YYYY-MM-DD"}`
+   - Carries `openai-sentinel-token` and `openai-sentinel-so-token`.
+   - token contains `flow=oauth_create_account`.
 
-### D. 登录态 ChatGPT bootstrap
+### D. logged-in ChatGPT bootstrap
 
-创建成功后回调到 ChatGPT，并进入登录态 bootstrap：
+After creation succeeds, it calls back to ChatGPT and enters the logged-in bootstrap:
 
 - `GET /backend-api/accounts/optimized/check`
 - `GET /backend-api/user_granular_consent`
@@ -55,199 +55,199 @@
 - `GET /backend-api/accounts/check/v4-2023-04-27?timezone_offset_min=-480`
 - `GET /backend-api/settings/user`
 - `POST /backend-api/sentinel/chat-requirements/prepare`
-- `GET /backend-api/system_hints?...`、`GET /backend-api/models?...`
+- `GET /backend-api/system_hints?...`,`GET /backend-api/models?...`
 - `POST /backend-api/conversation/init`
 - `POST /backend-api/sentinel/chat-requirements/finalize`
-- `GET /backend-api/conversations?...`、`GET /backend-api/client/strings` 等 sidebar/home 初始化接口。
+- `GET /backend-api/conversations?...`, `GET /backend-api/client/strings`, and other sidebar/home initialization endpoints.
 
-完整逐条请求已抽取到：`docs/protocol_har_summary.json`。
+The full per-request list has been extracted to: `docs/protocol_har_summary.json`.
 
-## 3. 指纹 p 数组字段补齐
+## 3. Fingerprint p array field completion
 
-抓包里的 `p` 解码后均为 25 项数组：
+The `p` in the capture decodes to a 25-element array in every case:
 
-| 下标 | 含义 | 本次抓包样本 |
+| Index | Meaning | Sample from this capture |
 |---:|---|---|
-| 0 | `screen.width + screen.height` | HAR 样本为 `2730`（`1680x1050`），代码中只作为候选画像之一 |
-| 1 | `new Date().toString()` | `Sun Jul 19 2026 ... GMT+0800 (中国标准时间)` |
+| 0 | `screen.width + screen.height` | HAR sample is `2730` (`1680x1050`), used in code only as one of the candidate profiles |
+| 1 | `new Date().toString()` | `Sun Jul 19 2026 ... GMT+0800 (China Standard Time)` |
 | 2 | `performance.memory.jsHeapSizeLimit` | `4395630592` |
-| 3 | 初始/PoW attempt | 初始 `1`，create_account token 为 `5` |
+| 3 | Initial/PoW attempt | initially `1`, create_account token is `5` |
 | 4 | UA | `Mozilla/5.0 ... Chrome/149.0.0.0 Safari/537.36` |
-| 5 | script src | 见下方 JS 入口 |
-| 6 | build id / data-build | ChatGPT prepare 为 `prod-fb4a8a...`；Auth token 为 `null` |
+| 5 | script src | see the JS entries below |
+| 6 | build id / data-build | ChatGPT prepare is `prod-fb4a8a...`; Auth token is `null` |
 | 7 | `navigator.language` | `zh-CN` |
 | 8 | `navigator.languages.join(',')` | `zh-CN` |
-| 9 | 随机/耗时 | `1.2`、`1.4`、`4` 等 |
-| 10 | navigator 原型/属性样本 | `createAuctionNonce`、`clearOriginJoinedAdInterestGroups`、`login` |
-| 11 | document key / React key | `_reactListening...` 或 `__reactContainer$...` |
-| 12 | window key | `scrollX`、`locationbar`、`ondevicemotion` |
-| 13 | `performance.now()` | 浮点毫秒 |
-| 14 | Sentinel 内部 sid | UUID，和 `oai-device-id` 不同 |
-| 15 | URL search params | 空字符串 |
+| 9 | Random/elapsed time | `1.2`, `1.4`, `4`, etc. |
+| 10 | navigator prototype/property samples | `createAuctionNonce`, `clearOriginJoinedAdInterestGroups`,`login` |
+| 11 | document key / React key | `_reactListening...` or `__reactContainer$...` |
+| 12 | window key | `scrollX`, `locationbar`,`ondevicemotion` |
+| 13 | `performance.now()` | floating-point milliseconds |
+| 14 | Sentinel internal sid | UUID, different from `oai-device-id` |
+| 15 | URL search params | empty string |
 | 16 | `navigator.hardwareConcurrency` | `6` |
-| 17 | `performance.timeOrigin` | 毫秒时间戳 |
-| 18-24 | window feature flags | 本次均为 `0`，但 Chrome runner 保留 `requestIdleCallback` 可控 |
+| 17 | `performance.timeOrigin` | millisecond timestamp |
+| 18-24 | window feature flags | all `0` this time, but the Chrome runner keeps `requestIdleCallback` controllable |
 
-## 4. JS 入口补齐
+## 4. JS entry completion
 
-HAR 没有直接保存 `.js` 响应正文，但从 Sentinel `p[5]` 还原出被采样到的 JS 入口：
+HAR No `.js` response body was saved directly, but the sampled JS entries were recovered from Sentinel `p[5]`:
 
 1. `https://accounts.google.com/gsi/client`
 2. `https://chatgpt.com/cdn-cgi/challenge-platform/scripts/jsd/api.js?onload=jsdOnload`
 3. `https://sentinel.openai.com/sentinel/20260219f9f6/sdk.js`
 
-项目本地已有 SDK 文件：`sentinel/sdk.js`；Node VM 执行器为 `sentinel/sentinel-runner.js`。本轮已按 HAR 补齐 runner 的 Chrome 149 DOM/Navigator/Window 样本。
+The project already has a local SDK file: `sentinel/sdk.js`; the Node VM runner is `sentinel/sentinel-runner.js`. This round the runner Chrome 149 DOM/Navigator/Window samples were completed according to the HAR.
 
-## 5. 已同步到代码的纯协议细节
+## 5. Pure-protocol details already synced into code
 
 - `config/openai_protocol.py`
-  - 更新 `OPENAI_BUILD_ID=prod-fb4a8a2a751dfec391053cfd7b01c52699ccf78c`
-  - 新增 `OAI_CLIENT_BUILD_NUMBER=8370486`、`OAI_CLIENT_VERSION`
-  - 补齐 Statsig/AB SDK key/version 常量。
+  - Updated `OPENAI_BUILD_ID=prod-fb4a8a2a751dfec391053cfd7b01c52699ccf78c`
+  - Added `OAI_CLIENT_BUILD_NUMBER=8370486`,`OAI_CLIENT_VERSION`
+  - Completed the Statsig/AB SDK key/version constants.
 - `config/browser.py`
-  - 切到 Chrome 149 HTTP/JS 画像：UA、Client Hints、动态语言/时区；窗口/屏幕尺寸从画像池随机选择，HAR 的 `1680x1050` / `hardwareConcurrency=6` / `jsHeapSizeLimit=4395630592` 只作为候选之一。
-  - 补齐 `createAuctionNonce`、`clearOriginJoinedAdInterestGroups`、`login`、`locationbar`、`scrollX`、`ondevicemotion` 等 HAR 出现的采样键。
+  - Switched to the Chrome 149 HTTP/JS profile: UA, Client Hints, dynamic language/timezone; window/screen sizes are chosen randomly from the profile pool, and the HAR values `1680x1050` / `hardwareConcurrency=6` / `jsHeapSizeLimit=4395630592` are only one of the candidates.
+  - Completed the sampled keys that appear in the HAR, such as `createAuctionNonce`, `clearOriginJoinedAdInterestGroups`, `login`, `locationbar`, `scrollX`, `ondevicemotion`.
 - `core/session.py`
-  - 所有前端 API 请求统一补 `oai-client-build-number`、`oai-client-version`、`oai-session-id`。
-  - 会话内新增稳定 `react_container_key`，与 `react_listening_key` 一起供 p[11] 抽样。
+  - All frontend API requests uniformly gain `oai-client-build-number`, `oai-client-version`, `oai-session-id`.
+  - Added a stable `react_container_key` per session, which together with `react_listening_key` is used by p[11] sampling.
 - `core/sentinel.py`
-  - p[11] 候选补齐 `__reactContainer$...`。
+  - p[11] candidates now include `__reactContainer$...`.
 - `sentinel/sentinel-runner.js`
-  - Chrome Navigator/DOM/Window 样本补齐。
-  - Auth Sentinel token 支持 `data-build=null` 形态。
-  - 默认 SDK src 对齐 `https://sentinel.openai.com/sentinel/20260219f9f6/sdk.js`。
+  - Chrome Navigator/DOM/Window samples completed.
+  - Auth Sentinel token supports the `data-build=null` form.
+  - The default SDK src is aligned to `https://sentinel.openai.com/sentinel/20260219f9f6/sdk.js`.
 
-## 6. 重新生成摘要
+## 6. Regenerate summary
 
 ```bash
 ./tools/analyze_har_protocol.py Default-all-domains-1784468371563.json -o docs/protocol_har_summary.json
 ```
 
-## 7. `.env` 覆盖项
+## 7. `.env` overrides
 
-语言/时区不固定，按代理出口 IP 自动设置：
+Language/timezone are not fixed and are set automatically from the proxy egress IP:
 
 ```env
 AUTO_BROWSER_LOCALE_FROM_IP="True"
 ```
 
-`BROWSER_LOCALE_PROFILE="jp"` 仅作为 GeoIP 检测失败时的兜底画像；正常情况下会根据出口国家/时区生成 `Accept-Language`、`navigator.language`、`navigator.languages`、`Date`/`Intl` 时区。
+`BROWSER_LOCALE_PROFILE="jp"` is used only as a fallback profile when GeoIP detection fails; normally `Accept-Language`, `navigator.language`, `navigator.languages`, and the `Date`/`Intl` timezone are generated from the egress country/timezone.
 
-## 8. runner 继续补齐项
+## 8. runner follow-up completion items
 
-`sentinel/sentinel-runner.js` 不只补 HAR 中直接命中的几个 key，还需要保证 Python 画像传入 Node VM 后一致：
+`sentinel/sentinel-runner.js` Beyond the few keys directly hit in the HAR, the Python profile must also stay consistent after being passed into the Node VM:
 
-- `--language` / `--languages`：由 `BrowserSession.browser_profile` 传入。
-- `--time-zone` / `--timezone-name` / `--timezone-offset-minutes`：由代理 GeoIP 画像传入。
-- `process.env.TZ`：runner 启动时按 `--time-zone` 设置，使 VM 里的 `Date.toString()` 与代理时区一致。
-- `Intl.DateTimeFormat().resolvedOptions().timeZone`：在 VM 内覆盖为同一个 `timeZone`。
-- `document` React key：同时支持 `_reactListening...` 和 `__reactContainer$...`。
-- `navigator` Chrome 专有采样：`createAuctionNonce`、`clearOriginJoinedAdInterestGroups`、`canLoadAdAuctionFencedFrame`、`login` 等。
-- `window` Chrome/页面采样：`locationbar`、`scrollX`、`scrollY`、`ondevicemotion` 等。
+- `--language` / `--languages`: passed in from `BrowserSession.browser_profile`.
+- `--time-zone` / `--timezone-name` / `--timezone-offset-minutes`: passed in from the proxy GeoIP profile.
+- `process.env.TZ`: set by the runner at startup according to `--time-zone`, so `Date.toString()` inside the VM matches the proxy timezone.
+- `Intl.DateTimeFormat().resolvedOptions().timeZone`: overridden inside the VM to the same `timeZone`.
+- `document` React key: supports both `_reactListening...` and `__reactContainer$...`.
+- `navigator` Chrome specific sampling: `createAuctionNonce`, `clearOriginJoinedAdInterestGroups`, `canLoadAdAuctionFencedFrame`, `login`, etc.
+- `window` Chrome/page sampling: `locationbar`, `scrollX`, `scrollY`, `ondevicemotion`, etc.
 
-因此语言/时区最终链路是：代理出口 IP → `pick_browser_profile()` → Python Sentinel `p` → runner CLI 参数 → Node VM `Date`/`Intl`/`navigator`。
+So the final language/timezone chain is: proxy egress IP → `pick_browser_profile()` → Python Sentinel `p` → runner CLI arguments → Node VM `Date`/`Intl`/`navigator`.
 
-## 9. 二次对齐检查与补齐
+## 9. second alignment check and completion
 
-根据本文件再次对照代码后，继续补齐了这些容易漏掉的协议细节：
+After comparing against the code again based on this file, the following easily missed protocol details were also completed:
 
-1. **Auth Web JSON 接口头部**
-   - HAR 中 `auth.openai.com/api/accounts/email-otp/validate`、`create_account` 没有 `oai-client-*` 头。
-   - 已将 `core.session.BrowserSession.get_auth_headers()` 改为 Auth RUM 形态：
+1. **Auth Web JSON endpoint headers**
+   - HAR shows that `auth.openai.com/api/accounts/email-otp/validate` and `create_account` carry no `oai-client-*` headers.
+   - Changed `core.session.BrowserSession.get_auth_headers()` to the Auth RUM shape:
      - `traceparent`
      - `tracestate`
      - `x-access-flow-invocation-id`
      - `x-datadog-*`
-   - `chatgpt.com` 前端接口仍保留 `oai-client-*` / `oai-session-id`。
+   - `chatgpt.com` frontend endpoints still keep `oai-client-*` / `oai-session-id`.
 
 2. **NextAuth signin callbackUrl**
-   - HAR form body 为 `callbackUrl=https://chatgpt.com/`。
-   - 已将 `core.chatgpt_auth.signin_openai()` 从 `/login` 对齐为根路径 `/`。
+   - HAR form body is `callbackUrl=https://chatgpt.com/`.
+   - Changed `core.chatgpt_auth.signin_openai()` from `/login` to the root path `/`.
 
-3. **email-otp/validate Sentinel 策略**
-   - HAR 样本中 `email-otp/validate` 未携带 `openai-sentinel-token`。
-   - 已新增开关：`config.openai_protocol.SEND_SENTINEL_ON_EMAIL_OTP_VALIDATE = False`。
-   - 默认按 HAR 不带 Sentinel；如后续服务端要求，可改为 `True` 回退旧逻辑。
+3. **email-otp/validate Sentinel policy**
+   - HAR samples show that `email-otp/validate` did not carry `openai-sentinel-token`.
+   - Added a switch: `config.openai_protocol.SEND_SENTINEL_ON_EMAIL_OTP_VALIDATE = False`.
+   - By default it follows the HAR and sends no Sentinel; if the server requires it later, set it to `True` to fall back to the old logic.
 
-4. **timezone_offset_min 符号**
-   - ChatGPT `accounts/check` URL 使用 JS `Date.getTimezoneOffset()` 语义：东八区是 `-480`，日本是 `-540`。
-   - 已新增 `BrowserSession.js_timezone_offset_min()`，避免把内部 `timezone_offset_minutes`（东区为正）直接用于 URL。
+4. **timezone_offset_min sign**
+   - ChatGPT `accounts/check` URL uses JS `Date.getTimezoneOffset()` semantics: UTC+8 is `-480` and Japan is `-540`.
+   - Added `BrowserSession.js_timezone_offset_min()`, to avoid using the internal `timezone_offset_minutes` (positive for east of UTC) directly in the URL.
 
-5. **兜底地区**
-   - 代理 GeoIP 检测失败时兜底日本：`BROWSER_LOCALE_PROFILE="jp"`。
-   - GeoIP 成功时仍按出口 IP 自动设置语言/时区。
+5. **Fallback region**
+   - When proxy GeoIP detection fails, fall back to Japan: `BROWSER_LOCALE_PROFILE="jp"`.
+   - GeoIP when it succeeds, language/timezone are still set automatically from the egress IP.
 
-### 当前仍未强制补的链路
+### Paths still not forced to be completed
 
-- `browser-intake-datadoghq.com` 的高频 RUM 批量上报：对注册业务不是必需链路，且会显著增加请求噪音，暂不强制模拟。
-- `chatgpt.com/backend-anon/sentinel/chat-requirements/prepare/finalize` 与登录态 `backend-api/sentinel/...`：文档已记录其顺序；当前注册核心仍使用 `sentinel.openai.com/backend-api/sentinel/req` 生成 create_account 所需头。若后续要做到“首页 bootstrap 全量同形态”，可单独加一个可开关的 `chatgpt_bootstrap()` 预热模块。
+- `browser-intake-datadoghq.com` high-frequency RUM batch reporting: not a required path for the registration flow and would significantly increase request noise, so it is not forced to be simulated for now.
+- `chatgpt.com/backend-anon/sentinel/chat-requirements/prepare/finalize` and the logged-in `backend-api/sentinel/...`: the document already records their order; the registration core still uses `sentinel.openai.com/backend-api/sentinel/req` to generate the headers required by create_account. If the home-page bootstrap later needs to have exactly the same shape, a separate switchable `chatgpt_bootstrap()` warm-up module can be added.
 
 
-## 10. 窗口/屏幕尺寸策略
+## 10. Window/screen size policy
 
-窗口/屏幕尺寸不应全局固定为 HAR 的单个样本。当前策略：
+The window/screen size should not be fixed globally to the single HAR sample. Current policy:
 
-- 同一个 `BrowserSession` 内：尺寸、DPR、CPU、JS heap 保持稳定，并同步传给 Python Sentinel `p` 和 Node runner。
-- 不同 `BrowserSession`：从 `BROWSER_PROFILE_POOL` 随机挑选，形成自然分散。
-- HAR 样本 `1680x1050 / hardwareConcurrency=6 / jsHeapSizeLimit=4395630592` 保留在池中，但不强制使用。
-- 如果要复现实验抓包，可显式调用 `build_browser_environment(..., HAR_CAPTURE_BASE_PROFILE)`。
+- Within the same `BrowserSession`: size, DPR, CPU, and JS heap stay stable, and are passed in sync to the Python Sentinel `p` and the Node runner.
+- Across different `BrowserSession`s: chosen randomly from `BROWSER_PROFILE_POOL`, giving a natural spread.
+- HAR sample `1680x1050 / hardwareConcurrency=6 / jsHeapSizeLimit=4395630592` is kept in the pool but not forced.
+- To reproduce the experimental capture, call `build_browser_environment(..., HAR_CAPTURE_BASE_PROFILE)` explicitly.
 
-## 11. 第三轮细节优化
+## 11. Third round of detail optimization
 
-再次对齐 HAR 后，补齐/收敛了以下细节：
+After aligning with the HAR again, the following details were completed/converged:
 
-1. **`navigator.languages` 收敛**
-   - HAR 解码的 `p[8]` 为单值 `zh-CN`，不是 `zh-CN,zh,en-US,en`。
-   - 当前各地区画像的 `navigator.languages` 默认收敛为主语言单值，例如：
-     - JP：`["ja-JP"]`
-     - CN：`["zh-CN"]`
-     - US：`["en-US"]`
-   - `Accept-Language` 仍保留浏览器请求头常见的 q 权重链；二者不再强行完全相同。
+1. **`navigator.languages` convergence**
+   - HAR decoded `p[8]` is the single value `zh-CN`, not `zh-CN,zh,en-US,en`.
+   - The `navigator.languages` of each regional profile now converges by default to a single primary language, for example:
+     - JP:`["ja-JP"]`
+     - CN:`["zh-CN"]`
+     - US:`["en-US"]`
+   - `Accept-Language` still keeps the q-weight chain common in browser request headers; the two are no longer forced to be identical.
 
-2. **`requestIdleCallback` 默认关闭**
-   - HAR 中 p[24] 为 `0`。
-   - 已将 `WINDOW_FEATURE_FLAGS["requestIdleCallback"]` 默认改为 `0`，并从 `WINDOW_KEY_SAMPLES` 中移除，避免“p[24]=0 但 window key 抽到 requestIdleCallback”的自相矛盾。
-   - runner 仍保留 `--request-idle-callback` 参数，必要时可显式开启。
+2. **`requestIdleCallback` is off by default**
+   - HAR shows p[24] is `0`.
+   - Changed the default of `WINDOW_FEATURE_FLAGS["requestIdleCallback"]` to `0` and removed it from `WINDOW_KEY_SAMPLES`, avoiding the self-contradiction of p[24]=0 while a window key samples requestIdleCallback.
+   - runner still keeps the `--request-idle-callback` parameter, which can be enabled explicitly when needed.
 
-3. **runner 独立运行兜底地区改为日本**
-   - Python 正常调用 runner 时会传入代理 GeoIP 画像。
-   - 如果手动直接运行 `sentinel-runner.js` 且未传语言/时区，默认兜底已改为：
+3. **runner fallback region for standalone runs changed to Japan**
+   - Python normally passes the proxy GeoIP profile in when calling the runner.
+   - If `sentinel-runner.js` is run directly by hand without a language/timezone, the default fallback is now:
      - `ja-JP`
      - `Asia/Tokyo`
      - `Japan Standard Time`
      - offset `540`
 
-4. **NextAuth `/api/auth/*` header 单独拆分**
-   - HAR 中 `/api/auth/providers`、`/api/auth/csrf`、`/api/auth/signin/openai` 未携带 `oai-client-*`。
-   - 已新增 `BrowserSession.get_nextauth_headers()`，用于 NextAuth 和 `/api/auth/session`。
-   - `get_chatgpt_headers()` 继续用于 `backend-api` / `backend-anon` / ChatGPT 前端 API，保留 `oai-client-*`。
+4. **NextAuth `/api/auth/*` header split out separately**
+   - HAR shows that `/api/auth/providers`, `/api/auth/csrf`, and `/api/auth/signin/openai` carry no `oai-client-*`.
+   - Added `BrowserSession.get_nextauth_headers()`, used for NextAuth and `/api/auth/session`.
+   - `get_chatgpt_headers()` continues to be used for `backend-api` / `backend-anon` / ChatGPT frontend APIs, keeping `oai-client-*`.
 
-## 12. 合规稳定性优化（降低误伤，不做规避）
+## 12. Compliance stability optimization (reduce false positives, no evasion)
 
-本轮检查把优化边界限定为“减少异常状态下的误请求/重复请求/状态不一致”，不做绕过风控的指纹伪装增强。
+This round limits the optimization boundary to reducing wrong requests / repeated requests / inconsistent state under abnormal conditions, and does not add fingerprint spoofing to bypass risk control.
 
-### 12.1 会话级熔断器
+### 12.1 Session-level circuit breaker
 
-已在 `BrowserSession` 增加会话级熔断：
+Added a session-level circuit breaker to `BrowserSession`:
 
-- 命中 HTTP `429`：按 `Retry-After` 或默认 300 秒冷却。
-- 命中 HTTP `403`：默认 900 秒冷却。
-- 冷却期间当前 `BrowserSession` 的后续请求直接停止，避免在异常状态下继续打接口。
-- 冷却上限为 3600 秒。
+- On HTTP `429`: cool down for `Retry-After` or the default 300 seconds.
+- On HTTP `403`: default cooldown of 900 seconds.
+- During the cooldown, later requests of the current `BrowserSession` stop directly, to avoid continuing to hit endpoints in an abnormal state.
+- The cooldown cap is 3600 seconds.
 
-实现位置：
+Implementation location:
 
 - `core/session.py`
   - `_raise_if_circuit_open()`
   - `_parse_retry_after()`
   - `_observe_response_for_circuit_breaker()`
-  - `get()` / `post()` 自动接入
+  - `get()` / `post()` integrated automatically
 
-### 12.2 当前推荐策略
+### 12.2 Current recommended policy
 
-- authorize 触发 403 后立即停止当前账号/代理会话，不重复重放一次性的 OAuth state。
-- 429 按 `Retry-After` 冷却；TLS、超时、连接重置等网络故障才执行有限重试。
-- OTP 错误只按现有有限次数重发，不无限轮询。
-- 保持代理 GeoIP、语言、时区、`Accept-Language`、`navigator.language`、`Date/Intl` 在同一会话内一致。
-- 不强制模拟高频 Datadog RUM，避免引入大量非业务请求噪音。
-- 不固定单一窗口尺寸；同一会话稳定，不同会话从合理桌面画像池随机。
+- authorize returning 403 immediately stops the current account/proxy session; the one-time OAuth state is not replayed.
+- 429 cools down per `Retry-After`; only network faults such as TLS, timeouts, and connection resets get limited retries.
+- OTP errors are resent only up to the existing limited count, with no unbounded polling.
+- Keep proxy GeoIP, language, timezone, `Accept-Language`, `navigator.language`, and `Date/Intl` consistent within the same session.
+- Do not force simulation of high-frequency Datadog RUM, to avoid introducing a lot of non-business request noise.
+- Do not fix a single window size; keep it stable within a session, and choose randomly from a reasonable desktop profile pool across sessions.

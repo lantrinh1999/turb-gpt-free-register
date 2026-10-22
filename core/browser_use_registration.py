@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Browser Use Cloud + Playwright 注册驱动。
+Browser Use Cloud + Playwright registration driver.
 
-目标：
-  - 不依赖本机 RoxyBrowser
-  - 通过 Browser Use stealth Chromium + 可选 residential proxy 完成 ChatGPT 注册
-  - 复用本仓库邮箱 OTP / 账号落盘逻辑
-  - 默认不做 Codex（需要时可后续再接）
+Goals:
+  - does not depend on a local RoxyBrowser
+  - Complete the ChatGPT registration through Browser Use stealth Chromium + optional residential proxy
+  - Reuse the email OTP / account persistence logic of this repository
+  - Codex is not run by default (can be hooked up later when needed)
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def _log_timing_enabled() -> bool:
 
 
 def _cloud_typing_delay(kind: str = "normal") -> tuple[int, int]:
-    """统一控制人工输入速度：可见逐字，但不慢到一分钟一页。"""
+    """Centrally control the human typing speed: characters are visibly typed one by one, but not so slowly that one page takes a minute."""
     if kind == "email":
         return (45, 115) if _fast_mode() else (75, 180)
     if kind == "otp":
@@ -91,19 +91,19 @@ def _cloud_typing_delay(kind: str = "normal") -> tuple[int, int]:
 
 
 def _close_browser_use_session(browser, *, reason: str = "") -> None:
-    """关闭 Browser Use 注册阶段 CDP 会话。
+    """Close the CDP session of the Browser Use registration phase.
 
-    Codex OAuth 会重新打开自己的干净 session；注册成功后若直接跑 Codex，
-    必须先断开注册阶段的 Browser Use 会话，避免两个远端浏览器 session 同时占用资源。
+    Codex OAuth Codex re-opens its own clean session; if Codex runs right after a successful registration,
+    the Browser Use session of the registration phase must be disconnected first, so two remote browser sessions do not hold resources at the same time.
     """
     if browser is None:
         return
-    label = f"：{reason}" if reason else ""
+    label = f":{reason}" if reason else ""
     try:
-        logger.info("[BrowserUse] 关闭注册浏览器 session%s", label)
+        logger.info("[BrowserUse] Closing the registration browser session%s", label)
         browser.close()
     except Exception as exc:
-        logger.warning("[BrowserUse] 关闭注册浏览器 session 失败%s：%s: %s", label, type(exc).__name__, str(exc)[:180])
+        logger.warning("[BrowserUse] Failed to close the registration browser session%s:%s: %s", label, type(exc).__name__, str(exc)[:180])
 
 
 def _bu_delay(kind: str, seconds: float | None = None) -> None:
@@ -123,7 +123,7 @@ def _bu_delay(kind: str, seconds: float | None = None) -> None:
 
 
 def _human_pause(min_s: float = 0.08, max_s: float = 0.28) -> None:
-    """Browser Use / Skyvern 始终保留随机停顿，避免毫秒级连贯操作。"""
+    """Browser Use / Skyvern Always keep random pauses, to avoid millisecond-level continuous operations."""
     try:
         time.sleep(random.uniform(float(min_s), float(max_s)))
     except Exception:
@@ -131,12 +131,12 @@ def _human_pause(min_s: float = 0.08, max_s: float = 0.28) -> None:
 
 
 def _safe_scroll_locator(loc, *, timeout: int = 1800) -> None:
-    """Skyvern/远端 CDP 上元素常有动画，scroll 等 stable 超时不能直接中断流程。"""
+    """Skyvern/Elements on a remote CDP often animate; a timeout of scroll waiting for stable must not abort the flow directly."""
     try:
         loc.scroll_into_view_if_needed(timeout=timeout)
         return
     except Exception as exc:
-        logger.debug("[BrowserUse] scroll_into_view_if_needed 不稳定，使用轻量滚动兜底：%s", str(exc)[:160])
+        logger.debug("[BrowserUse] scroll_into_view_if_needed unstable, using the lightweight scroll fallback:%s", str(exc)[:160])
     try:
         loc.evaluate("el => { try { el.scrollIntoView({block:'center', inline:'center', behavior:'instant'}); } catch(e) {} }")
     except Exception:
@@ -144,7 +144,7 @@ def _safe_scroll_locator(loc, *, timeout: int = 1800) -> None:
 
 
 def _human_click_locator(loc, *, timeout: int = 3000) -> None:
-    """Playwright locator 人工化点击：滚动到可见区域、hover、停顿后再点击。"""
+    """Playwright locator Humanized click: scroll into the visible area, hover, pause, then click."""
     _safe_scroll_locator(loc, timeout=min(1800, max(700, timeout)))
     _human_pause(0.25, 0.75)
     try:
@@ -155,19 +155,19 @@ def _human_click_locator(loc, *, timeout: int = 3000) -> None:
     try:
         loc.click(timeout=timeout, delay=random.randint(80, 260))
     except Exception as exc:
-        # Skyvern 远端页面偶发一直等待 stable；这里退一步用 force click，但仍保留前置滚动/hover/停顿。
-        logger.debug("[BrowserUse] 常规点击失败，使用 force click 兜底：%s", str(exc)[:160])
+        # Skyvern Remote pages occasionally wait for stable forever; here we step back to a force click, but still keep the preceding scroll/hover/pause.
+        logger.debug("[BrowserUse] Regular click failed, falling back to force click:%s", str(exc)[:160])
         loc.click(timeout=timeout, delay=random.randint(80, 220), force=True)
     _human_pause(0.18, 0.5)
 
 
 def _human_focus_for_typing(loc, *, timeout: int = 2500) -> None:
-    """输入框聚焦：优先像真人点击；Skyvern click 卡住时退回 focus，不做瞬时填值。"""
+    """Input focus: prefer a human-like click; when a Skyvern click hangs, fall back to focus, without filling the value instantly."""
     try:
         _human_click_locator(loc, timeout=timeout)
         return
     except Exception as exc:
-        logger.debug("[BrowserUse] 输入框点击聚焦失败，改用 focus 聚焦继续键盘输入：%s", str(exc)[:180])
+        logger.debug("[BrowserUse] Clicking to focus the input failed, using focus to continue keyboard input:%s", str(exc)[:180])
     _safe_scroll_locator(loc, timeout=1200)
     _human_pause(0.15, 0.45)
     try:
@@ -175,13 +175,13 @@ def _human_focus_for_typing(loc, *, timeout: int = 2500) -> None:
         _human_pause(0.12, 0.35)
         return
     except Exception as exc:
-        logger.debug("[BrowserUse] locator.focus 失败，改用 DOM focus：%s", str(exc)[:160])
+        logger.debug("[BrowserUse] locator.focus failed, using DOM focus:%s", str(exc)[:160])
     try:
         loc.evaluate("el => { try { el.scrollIntoView({block:'center', inline:'center', behavior:'instant'}); } catch(e) {} try { el.focus({preventScroll:true}); } catch(e) { el.focus && el.focus(); } }")
         _human_pause(0.12, 0.35)
         return
     except Exception as exc:
-        raise RuntimeError(f"输入框无法聚焦: {type(exc).__name__}: {exc}") from exc
+        raise RuntimeError(f"The input box cannot be focused: {type(exc).__name__}: {exc}") from exc
 
 
 def _human_fill_locator(
@@ -193,7 +193,7 @@ def _human_fill_locator(
     typing_delay_range: tuple[int, int] | None = None,
     per_char: bool = True,
 ) -> None:
-    """模拟人工键盘输入；不使用瞬时 fill/evaluate 写入表单。"""
+    """Simulate human keyboard input; do not write the form with instant fill/evaluate."""
     text = str(value)
     delay_min, delay_max = typing_delay_range or _cloud_typing_delay("normal")
 
@@ -209,7 +209,7 @@ def _human_fill_locator(
             page.keyboard.press("Backspace")
 
     def _type_slowly() -> None:
-        # 始终逐字符发送，并在 Python 侧 sleep，避免云端 CDP 把整串 type 压缩成秒填。
+        # Always send character by character, and sleep on the Python side, so the cloud CDP does not compress the whole type string into an instant fill.
         for idx, ch in enumerate(text):
             page.keyboard.type(ch, delay=random.randint(delay_min, delay_max))
             if ch in "@._-+ /":
@@ -234,7 +234,7 @@ def _human_fill_locator(
             _type_slowly()
             return
         except Exception as exc:
-            raise RuntimeError(f"人工输入失败，已禁止瞬时 fill 兜底: {type(exc).__name__}: {exc}") from exc
+            raise RuntimeError(f"Human-like input failed, the instant fill fallback is forbidden: {type(exc).__name__}: {exc}") from exc
 
 
 class _StepTimer:
@@ -242,12 +242,12 @@ class _StepTimer:
         self.label = label
         self.t0 = time.perf_counter()
         if _log_timing_enabled():
-            logger.info("[BrowserUse][耗时] %s 开始", label)
+            logger.info("[BrowserUse][timing] %s started", label)
 
     def done(self, extra: str = "") -> None:
         if _log_timing_enabled():
             cost = time.perf_counter() - self.t0
-            logger.info("[BrowserUse][耗时] %s 完成 %.2fs%s", self.label, cost, (" " + extra) if extra else "")
+            logger.info("[BrowserUse][timing] %s finished %.2fs%s %.2fs%s", self.label, cost, (" " + extra) if extra else "")
 
 
 
@@ -260,7 +260,7 @@ def _check_manual_stop() -> None:
 
 
 def _is_manual_stop_exception(exc: Exception) -> bool:
-    return type(exc).__name__ == "StopRequested" or "手动停止" in str(exc)
+    return type(exc).__name__ == "StopRequested" or "manual stop" in str(exc)
 
 
 def _generate_password(length: int = 14) -> str:
@@ -297,26 +297,26 @@ def _timeout_ms(seconds: int | None = None) -> int:
 
 
 def _build_playwright_stealth(provider_prefix: str, *, label: str):
-    """构建默认增强版 playwright-stealth。
+    """Build the default enhanced playwright-stealth.
 
-    Browser Use / Skyvern 云端浏览器通常已有基础 stealth 指纹；这里默认叠加
-    playwright-stealth init scripts，并保持不覆盖 UA / Client Hints / WebGL，避免把
-    云端原生画像改乱。
+    Browser Use / Skyvern Cloud browsers usually already have a basic stealth fingerprint; here we apply on top by default
+    playwright-stealth init scripts, and keep UA / Client Hints / WebGL unoverridden, to avoid messing up
+    the native cloud profile.
     """
     try:
         from playwright_stealth import Stealth
     except ImportError:
-        logger.warning("[%s] 缺少 playwright-stealth；请执行: uv pip install playwright-stealth --python .venv/bin/python", label)
+        logger.warning("[%s] playwright-stealth is missing; please run: uv pip install playwright-stealth --python .venv/bin/python", label)
         return None
 
     return Stealth(
-        # 默认增强但不重写云端原生画像。
+        # Enhanced by default but without rewriting the native cloud profile.
         navigator_user_agent=False,
         navigator_user_agent_data=False,
         navigator_platform=False,
         sec_ch_ua=False,
         webgl_vendor=False,
-        # 增强自动化特征修正。
+        # Enhanced automation-trait corrections.
         chrome_runtime=True,
         chrome_app=True,
         chrome_csi=True,
@@ -337,7 +337,7 @@ def _build_playwright_stealth(provider_prefix: str, *, label: str):
 
 
 def _apply_cloud_browser_automation_mask(context, page, *, label: str, provider_prefix: str = "browser_use", proxy_country_code: str | None = None) -> dict:
-    """给 Browser Use / Skyvern 应用 playwright-stealth。"""
+    """Apply playwright-stealth to Browser Use / Skyvern."""
     result: dict[str, Any] = {"playwright_stealth": False}
     stealth = _build_playwright_stealth(provider_prefix, label=label)
     if stealth is None:
@@ -345,29 +345,29 @@ def _apply_cloud_browser_automation_mask(context, page, *, label: str, provider_
     try:
         stealth.apply_stealth_sync(context)
         result["playwright_stealth"] = True
-        logger.info("[%s] 已对 BrowserContext 应用 playwright-stealth", label)
+        logger.info("[%s] Applied to the BrowserContext playwright-stealth", label)
     except Exception as exc:
-        logger.debug("[%s] 对 BrowserContext 应用 playwright-stealth 失败：%s", label, str(exc)[:180])
+        logger.debug("[%s] Failed to apply playwright-stealth to the BrowserContext:%s", label, str(exc)[:180])
     try:
         stealth.apply_stealth_sync(page)
         result["playwright_stealth"] = True
-        logger.info("[%s] 已对当前 Page 应用 playwright-stealth", label)
+        logger.info("[%s] Applied to the current Page playwright-stealth", label)
     except Exception as exc:
-        logger.debug("[%s] 对 Page 应用 playwright-stealth 失败：%s", label, str(exc)[:180])
+        logger.debug("[%s] Failed to apply playwright-stealth to the Page:%s", label, str(exc)[:180])
     return result
 
 
 def _should_apply_cloud_automation_mask(provider_prefix: str) -> bool:
-    # Browser Use / Skyvern 全部默认增强处理，不再暴露额外开关。
+    # Browser Use / Skyvern All enhancements are applied by default and no extra switch is exposed.
     return True
 
 
 def _post_register_dwell(page, context, *, provider_prefix: str, email: str) -> None:
-    """注册成功后随机停留再断开，模拟手动注册后短暂观察。"""
+    """After a successful registration stay for a random time and then disconnect, simulating a brief look after a manual registration."""
     seconds = _post_register_dwell_seconds()
     if seconds <= 0:
         return
-    logger.info("[%s] 注册成功后随机停留 %.1fs 再关闭连接：%s", _log_provider_label(), seconds, email)
+    logger.info("[%s] Staying randomly for %.1fs after successful registration before closing the connection:%s", _log_provider_label(), seconds, email)
     end = time.time() + seconds
     last_touch = 0.0
     while time.time() < end:
@@ -405,7 +405,7 @@ def _visible_locator(page, selectors: list[str], timeout_ms: int = 1500):
 
 
 def _visible_textbox_locator(page, timeout_ms: int = 1500):
-    """更宽松的可见输入框定位：兼容 textbox / contenteditable / 普通 input/textarea。"""
+    """More lenient locating of visible input boxes: compatible with textbox / contenteditable / ordinary input/textarea."""
     candidates = [
         "input:not([type='hidden'])",
         "textarea",
@@ -484,7 +484,7 @@ def _maybe_accept_cookies(page) -> None:
 
 
 def _maybe_dismiss_chatgpt_onboarding(page) -> None:
-    """登录后 ChatGPT 欢迎/介绍弹窗兜底点击，避免 Skyvern 停在弹窗层。"""
+    """Fallback click on the ChatGPT welcome/intro popup after login, so Skyvern does not stay on the popup layer."""
     selectors = [
         "button:has-text('Get started')",
         "button:has-text('Start using ChatGPT')",
@@ -523,11 +523,11 @@ def _assert_not_external_idp(page, stage: str) -> None:
         "facebook.com/login",
     )
     if any(h in url for h in bad_hosts):
-        raise RuntimeError(f"[BrowserUse] {stage} 误入第三方登录：{url}")
+        raise RuntimeError(f"[BrowserUse] {stage} entered third-party login by mistake:{url}")
 
 
 def _quick_auth_state(page) -> dict:
-    """一次 JS 查询判断当前 auth 页面状态，避免多组 locator 逐个等待导致几十秒卡顿。"""
+    """Determine the current auth page state with one JS query, to avoid several locators waiting one by one and stalling for tens of seconds."""
     try:
         return page.evaluate(
             """() => {
@@ -569,8 +569,8 @@ def _quick_auth_state(page) -> dict:
                 qv("input[name='password']") ||
                 qv("input[autocomplete='new-password']");
               let state = 'other';
-              // /log-in/password 代表该邮箱已走登录密码分支；即便页面 DOM 里有 code/otp 字样，
-              // 注册流程也按不可用邮箱处理，不能误判成邮箱验证码页。
+              // /log-in/password indicates the email has taken the login password branch; even if code/otp wording exists in the page DOM,
+              // the registration flow also treats it as an unusable email and must not mistake it for the email verification code page.
               if (url.includes('/log-in/password')) state = 'login_password';
               else if (hasOtp) state = 'email_verification';
               else if (hasPassword) state = 'password';
@@ -586,7 +586,7 @@ def _quick_auth_state(page) -> dict:
 
 
 def _email_entry_state_pw(page) -> dict:
-    """Playwright 版 Roxy 邮箱入口诊断：只采集技术属性，不依赖页面文案。"""
+    """Playwright Roxy-style email entry diagnosis: collect only technical attributes, not depending on page wording."""
     try:
         return page.evaluate(r"""
         () => {
@@ -634,9 +634,9 @@ def _is_oauth_consent_like_pw(page) -> bool:
 
 
 def _click_email_entry_option_pw(page) -> bool:
-    """Roxy 同款：按 DOM 技术属性点击邮箱入口，排除第三方登录，不依赖可见文字。"""
+    """Roxy Same as above: click the email entry by DOM technical attributes, excluding third-party logins, not depending on visible text."""
     if _is_oauth_consent_like_pw(page):
-        logger.info("[BrowserUse] 当前疑似 OAuth 授权页，跳过邮箱入口兜底点击")
+        logger.info("[BrowserUse] The current page looks like an OAuth authorization page, skipping the email entry fallback click")
         return False
     try:
         result = page.evaluate(r"""
@@ -669,19 +669,19 @@ def _click_email_entry_option_pw(page) -> bool:
         }
         """) or {}
         if not isinstance(result, dict) or not result.get("ok"):
-            logger.info("[BrowserUse] 邮箱入口 DOM 兜底未命中：%s", result)
+            logger.info("[BrowserUse] Email entry DOM fallback did not match:%s", result)
             return False
         loc = page.locator('button,a,[role="button"],input[type="button"],input[type="submit"]').nth(int(result.get("idx") or 0))
         _human_click_locator(loc, timeout=3000)
-        logger.info("[BrowserUse] 已按 DOM 属性点击邮箱入口：%s", result)
+        logger.info("[BrowserUse] Clicked the email entry by DOM attributes:%s", result)
         return True
     except Exception as exc:
-        logger.info("[BrowserUse] 邮箱入口 DOM 兜底点击失败：%s: %s", type(exc).__name__, str(exc)[:180])
+        logger.info("[BrowserUse] Email entry DOM fallback click failed:%s: %s", type(exc).__name__, str(exc)[:180])
         return False
 
 
 def _find_email_input_locator_pw(page, timeout_ms: int = 1000):
-    """Roxy 同款邮箱输入框选择器，先严格 email/username，再宽松 textbox。"""
+    """Roxy Same email input selectors: strict email/username first, then the lenient textbox."""
     strict = [
         "input[type='email']",
         "input[name='email']",
@@ -707,7 +707,7 @@ def _find_email_input_locator_pw(page, timeout_ms: int = 1000):
 
 
 def _submit_email_step_pw(page, email: str) -> bool:
-    """Playwright 版 Roxy 安全提交：只提交邮箱输入框所在 form 附近的非第三方按钮。"""
+    """Playwright Roxy-style safe submit: only submit non-third-party buttons near the form that contains the email input."""
     try:
         result = page.evaluate(r"""
         (email) => {
@@ -794,25 +794,25 @@ def _submit_email_step_pw(page, email: str) -> bool:
         }
         """, email) or {}
         if isinstance(result, dict) and result.get("ok"):
-            logger.info("[BrowserUse] 邮箱表单安全提交：%s", result)
+            logger.info("[BrowserUse] Email form safe submit:%s", result)
             _human_pause(0.8, 1.4)
-            _assert_not_external_idp(page, "提交邮箱后")
+            _assert_not_external_idp(page, "after submitting the email")
             return True
-        logger.warning("[BrowserUse] 邮箱安全提交未命中，回退 Enter：%s", result)
+        logger.warning("[BrowserUse] Email safe submit did not match, falling back to Enter:%s", result)
     except Exception as exc:
-        logger.warning("[BrowserUse] 邮箱安全提交异常，回退 Enter：%s: %s", type(exc).__name__, str(exc)[:180])
+        logger.warning("[BrowserUse] Email safe submit error, falling back to Enter:%s: %s", type(exc).__name__, str(exc)[:180])
     try:
         _human_pause(0.25, 0.65)
         page.keyboard.press("Enter")
         _human_pause(0.8, 1.4)
-        _assert_not_external_idp(page, "Enter 提交邮箱后")
+        _assert_not_external_idp(page, "Enter after submitting the email")
         return True
     except Exception:
         return False
 
 
 def _wait_for_email_input_pw(page, timeout_ms: int | None = None):
-    """进入邮箱登录/注册方式并返回已找到的可见邮箱输入框。"""
+    """Enter the email login/registration method and return the visible email input box that was found."""
     fill_timeout_ms = timeout_ms if timeout_ms is not None else min(_timeout_ms(), 24000)
     end = time.time() + (fill_timeout_ms / 1000.0)
     clicked_email_option = False
@@ -825,7 +825,7 @@ def _wait_for_email_input_pw(page, timeout_ms: int | None = None):
 
         last_state = _email_entry_state_pw(page)
         if not clicked_email_option:
-            # 先尝试原来的多语言显式 selector，再用 Roxy DOM 属性兜底。
+            # Try the original multilingual explicit selectors first, then fall back to the Roxy DOM attributes.
             clicked_email_option = _click_first(
                 page,
                 [
@@ -851,16 +851,16 @@ def _wait_for_email_input_pw(page, timeout_ms: int | None = None):
             ) or _click_email_entry_option_pw(page)
             if clicked_email_option:
                 _human_pause(0.8, 1.6)
-                _assert_not_external_idp(page, "点击邮箱入口后")
+                _assert_not_external_idp(page, "after clicking the email entry")
                 continue
 
         time.sleep(0.35 if _fast_mode() else 0.55)
 
-    raise RuntimeError(f"找不到邮箱输入框/邮箱入口，页面={_page_url(page) or '-'} state={last_state}")
+    raise RuntimeError(f"Cannot find the email input box / email entry, page={_page_url(page) or '-'} state={last_state}")
 
 
 def _type_email(page, email: str, timeout_ms: int | None = None) -> None:
-    """找到邮箱输入框后人工逐字输入并提交邮箱。"""
+    """After the email input box is found, type the email character by character like a human and submit it."""
     loc = _wait_for_email_input_pw(page, timeout_ms=timeout_ms)
     _human_fill_locator(
         page,
@@ -872,11 +872,11 @@ def _type_email(page, email: str, timeout_ms: int | None = None) -> None:
     )
     _human_pause(0.3, 0.8)
     if not _submit_email_step_pw(page, email):
-        raise RuntimeError(f"邮箱已输入但提交失败，页面={_page_url(page) or '-'} state={_email_entry_state_pw(page)}")
+        raise RuntimeError(f"Email entered but submission failed, page={_page_url(page) or '-'} state={_email_entry_state_pw(page)}")
 
 
 def _wait_after_email_submit_transition(page, context=None, timeout: int = 14) -> str:
-    """提交邮箱后确认页面真的离开邮箱输入页，避免直接空等 OTP。"""
+    """After submitting the email, confirm the page really left the email input page, to avoid waiting idly for the OTP."""
     end = time.time() + timeout
     last_state = "other"
     last_url = ""
@@ -918,24 +918,24 @@ def _submit_email_until_transition(
     email_supplier: Callable[[], str] | None = None,
 ) -> str:
     """
-    填写并提交邮箱，并确认进入 password/OTP/后续页面。
-    若仍停留 chatgpt.com/auth/login?email=...，重试一次，避免无效等待邮箱验证码。
+    Fill in and submit the email, and confirm entering the password/OTP/following page.
+    If still on chatgpt.com/auth/login?email=..., retry once, to avoid waiting for the email verification code uselessly.
     """
     last_state = "other"
     current_email = str(email or "").strip()
     for attempt in range(1, max(1, attempts) + 1):
         _check_manual_stop()
-        logger.info("[BrowserUse] 提交邮箱尝试 %s/%s：%s", attempt, attempts, current_email or "页面找到输入框后分配")
+        logger.info("[BrowserUse] Submit email attempt %s/%s:%s", attempt, attempts, current_email or "Allocated once the input box is found on the page")
         if current_email:
             _type_email(page, current_email, timeout_ms=timeout_ms)
         else:
-            # 先确认页面已有可用输入框，再领取邮箱；不能把领取动作放在页面导航之前。
+            # First confirm the page has a usable input box, then claim the email; the claim must not happen before the page navigation.
             email_input = _wait_for_email_input_pw(page, timeout_ms=timeout_ms)
             if email_supplier is None:
-                raise RuntimeError("已找到邮箱输入框，但未提供邮箱分配器")
+                raise RuntimeError("An email input box was found, but no email allocator was provided")
             current_email = str(email_supplier() or "").strip()
             if not current_email:
-                raise RuntimeError("邮箱分配器返回了空邮箱地址")
+                raise RuntimeError("The email allocator returned an empty email address")
             _human_fill_locator(
                 page,
                 email_input,
@@ -946,17 +946,17 @@ def _submit_email_until_transition(
             )
             _human_pause(0.3, 0.8)
             if not _submit_email_step_pw(page, current_email):
-                raise RuntimeError(f"邮箱已输入但提交失败，页面={_page_url(page) or '-'} state={_email_entry_state_pw(page)}")
+                raise RuntimeError(f"Email entered but submission failed, page={_page_url(page) or '-'} state={_email_entry_state_pw(page)}")
         _check_manual_stop()
         last_state = _wait_after_email_submit_transition(page, context=context, timeout=10 if _fast_mode() else 16)
-        logger.info("[BrowserUse] 邮箱提交后状态：%s url=%s", last_state, _page_url(page) or "-")
+        logger.info("[BrowserUse] State after the email was submitted:%s url=%s", last_state, _page_url(page) or "-")
         if last_state == "login_password":
-            raise RuntimeError(f"邮箱提交后进入登录密码页，按已注册/不可用邮箱处理并停用: url={_page_url(page) or 'https://auth.openai.com/log-in/password'}")
+            raise RuntimeError(f"After submitting the email it entered the login password page; treated as a registered/unusable email and deactivated: url={_page_url(page) or 'https://auth.openai.com/log-in/password'}")
         if last_state != "email_page":
             return last_state
         if attempt < attempts:
-            logger.warning("[BrowserUse] 邮箱提交后仍停留登录页，准备重试提交：%s", _page_url(page) or "-")
-    raise RuntimeError(f"邮箱提交后仍停留登录页，未触发密码/验证码页面：state={last_state} url={_page_url(page) or '-'}")
+            logger.warning("[BrowserUse] After submitting the email it still stays on the login page, preparing to retry the submit:%s", _page_url(page) or "-")
+    raise RuntimeError(f"After submitting the email it still stays on the login page and the password/verification code page was not triggered:state={last_state} url={_page_url(page) or '-'}")
 
 
 def _is_password_page(page) -> bool:
@@ -982,7 +982,7 @@ def _is_password_page(page) -> bool:
 
 
 def _is_signup_password_page(page) -> bool:
-    """更稳妥地识别注册密码页：优先看 URL，其次看密码输入框。"""
+    """Recognize the registration password page more reliably: look at the URL first, then at the password input box."""
     try:
         url = str(_page_url(page) or "").lower()
     except Exception:
@@ -1037,7 +1037,7 @@ def _is_email_verification_page(page) -> bool:
 
 
 def _click_passwordless_signup_if_present(page) -> bool:
-    """在注册/登录密码页优先点击“使用一次性验证码”，进入邮箱 OTP 流。"""
+    """On the registration/login password page, prefer clicking 'use a one-time code' to enter the email OTP flow."""
     selectors = [
         "button[name='intent'][value='passwordless_signup_send_otp']",
         "input[type='submit'][name='intent'][value='passwordless_signup_send_otp']",
@@ -1133,7 +1133,7 @@ def _click_passwordless_signup_if_present(page) -> bool:
 
 
 def _click_continue_with_password_if_present(page) -> bool:
-    """在邮箱验证码页点击“使用密码继续”，切到 /create-account/password 创建密码账号。"""
+    """On the email verification code page click 'continue with password' to switch to /create-account/password and create a password account."""
     selectors = [
         "a[href*='/create-account/password']",
         "a[href='/create-account/password']",
@@ -1190,16 +1190,16 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
     last_heartbeat = 0.0
     last_log = 0.0
     while time.time() < end:
-        # 邮箱提交后若已经在验证码页，优先点击“使用密码继续”切到密码创建页。
+        # If already on the verification code page after submitting the email, prefer clicking "continue with password" to switch to the password creation page.
         try:
             if not _is_signup_password_page(page):
                 quick = _quick_auth_state(page)
                 if str(quick.get("state") or "") == "email_verification":
                     if _click_continue_with_password_if_present(page):
-                        logger.info("[BrowserUse] 邮箱验证码页已点击“使用密码继续”：url=%s", quick.get("url") or _page_url(page) or "-")
+                        logger.info("[BrowserUse] Clicked 'continue with password' on the email verification code page:url=%s", quick.get("url") or _page_url(page) or "-")
                         time.sleep(0.4 if _fast_mode() else 1.0)
                         continue
-                    logger.info("[BrowserUse] 已在邮箱验证码页，但未找到“使用密码继续”按钮，继续等待密码页：url=%s", quick.get("url") or _page_url(page) or "-")
+                    logger.info("[BrowserUse] Already on the email verification code page, but the 'continue with password' button was not found, continuing to wait for the password page:url=%s", quick.get("url") or _page_url(page) or "-")
         except Exception:
             pass
         if time.time() - last_heartbeat > 3:
@@ -1209,7 +1209,7 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
                 if _is_target_closed_error(exc):
                     raise
                 if _is_transient_navigation_error(exc):
-                    logger.info("[BrowserUse] 密码页检测遇到页面跳转，稍后重试：%s", str(exc)[:140])
+                    logger.info("[BrowserUse] Password page detection hit a page navigation, retrying shortly:%s", str(exc)[:140])
                     time.sleep(0.4 if _fast_mode() else 1.0)
                     continue
                 raise
@@ -1217,55 +1217,55 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
         state_info = _quick_auth_state(page)
         state = "password" if _is_signup_password_page(page) else str(state_info.get("state") or "other")
         if time.time() - last_log > 3:
-            logger.info("[BrowserUse] 检测密码/验证码页：state=%s url=%s", state, state_info.get("url") or "-")
+            logger.info("[BrowserUse] Detecting the password/verification code page:state=%s url=%s", state, state_info.get("url") or "-")
             last_log = time.time()
         if state == "email_verification" and not _is_signup_password_page(page):
             if _click_continue_with_password_if_present(page):
-                logger.info("[BrowserUse] 邮箱验证码页已点击“使用密码继续”：email=%s", email)
+                logger.info("[BrowserUse] Clicked 'continue with password' on the email verification code page:email=%s", email)
                 time.sleep(0.4 if _fast_mode() else 1.0)
                 continue
             try:
-                logger.info("[BrowserUse] 邮箱验证码页未命中按钮，直接跳转到密码页兜底：email=%s", email)
+                logger.info("[BrowserUse] No button matched on the email verification code page, falling back to jumping directly to the password page:email=%s", email)
                 page.goto("https://auth.openai.com/create-account/password", wait_until="domcontentloaded", timeout=_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
                 time.sleep(0.6 if _fast_mode() else 1.2)
                 continue
             except Exception as exc:
-                logger.info("[BrowserUse] 邮箱验证码页兜底跳转密码页失败：%s", str(exc)[:180])
-                # 不要直接退出，继续等页面自己切到密码页
+                logger.info("[BrowserUse] Fallback jump from the email verification code page to the password page failed:%s", str(exc)[:180])
+                # Do not exit directly, keep waiting for the page to switch to the password page by itself
                 time.sleep(0.8 if _fast_mode() else 1.5)
                 continue
         if state not in ("password", "login_password"):
-            # 提交邮箱后如果仍显示 /auth/login 但页面其实已经渲染验证码输入框，
-            # 某些 Browser Use target 上 DOM 状态会短暂滞后。不要在“密码页检测”里长等，
-            # 直接交给后面的 OTP 阶段处理，避免云端会话被拖到关闭。
-            # fast 模式也不要 3 秒就放弃：提交邮箱后常仍停在 /auth/login，
-            # 需等跳到 auth.openai.com 或出现密码/OTP 控件。
+            # If /auth/login is still shown after submitting the email but the page has actually rendered the verification code input box,
+            # the DOM state on some Browser Use targets can lag briefly. Do not wait long in the "password page detection";
+            # hand it directly to the later OTP stage, so the cloud session is not dragged until it is closed.
+            # fast mode must not give up after 3 seconds either: after submitting the email it often still stays on /auth/login,
+            # and one has to wait for the jump to auth.openai.com or for password/OTP controls to appear.
             if _fast_mode() and time.time() - started >= 8:
-                logger.info("[BrowserUse] 未检测到密码页，提前进入 OTP 阶段：state=%s url=%s", state, state_info.get("url") or "-")
+                logger.info("[BrowserUse] Password page not detected, entering the OTP stage early:state=%s url=%s", state, state_info.get("url") or "-")
                 return None
             time.sleep(0.15 if _fast_mode() else 0.4)
             continue
         if state == "login_password" and _click_passwordless_signup_if_present(page):
-            logger.info("[BrowserUse] 检测到密码页，已点击一次性验证码入口：state=%s email=%s", state, email)
+            logger.info("[BrowserUse] Password page detected, clicked the one-time code entry:state=%s email=%s", state, email)
             wait_end = time.time() + 20
             while time.time() < wait_end:
                 state_after = _quick_auth_state(page)
                 if state_after.get("state") == "email_verification":
-                    logger.info("[BrowserUse] 一次性验证码入口已进入邮箱验证码页")
+                    logger.info("[BrowserUse] Entered the email verification code page through the one-time code entry")
                     return None
                 if state_after.get("state") == "chatgpt":
-                    logger.info("[BrowserUse] 一次性验证码入口后已进入 ChatGPT")
+                    logger.info("[BrowserUse] Entered after the one-time code entry ChatGPT")
                     return None
                 if state_after.get("state") not in ("password", "login_password"):
                     return None
                 time.sleep(0.2 if _fast_mode() else 0.5)
-            logger.info("[BrowserUse] 已点击一次性验证码入口，未立即检测到 OTP 页，交给后续 OTP 阶段继续处理")
+            logger.info("[BrowserUse] Clicked the one-time code entry, the OTP page was not detected immediately, leaving it to the following OTP stage")
             return None
         if state == "login_password":
-            logger.info("[BrowserUse] 当前是登录密码页但未找到一次性验证码入口，跳过密码填写并交给 OTP 阶段：url=%s", state_info.get("url") or "-")
+            logger.info("[BrowserUse] This is the login password page but no one-time code entry was found, skipping the password fill and leaving it to the OTP stage:url=%s", state_info.get("url") or "-")
             return None
         password = _registration_password()
-        logger.info("[BrowserUse] 检测到密码页，设置密码（%s 位）：%s", len(password), email)
+        logger.info("[BrowserUse] Password page detected, setting the password (%s characters):%s", len(password), email)
         submit_result = page.evaluate(
             r"""(password) => {
               const visible = el => !!el && !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
@@ -1340,8 +1340,8 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
             password,
         ) or {}
         if not submit_result.get("ok"):
-            raise RuntimeError(f"密码页找不到可点击的 Continue 按钮：{submit_result} state={state_info}")
-        logger.info("[BrowserUse] 已填写并点击密码页 Continue：detail=%s", {k: v for k, v in submit_result.items() if k != "button"})
+            raise RuntimeError(f"Cannot find a clickable Continue button on the password page:{submit_result} state={state_info}")
+        logger.info("[BrowserUse] Filled in and clicked Continue on the password page:detail=%s", {k: v for k, v in submit_result.items() if k != "button"})
         _bu_delay("form")
         wait_end = time.time() + (8 if _fast_mode() else 14)
         retried_submit = False
@@ -1349,11 +1349,11 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
             state_after = _quick_auth_state(page)
             state_name = str(state_after.get("state") or "other")
             if state_name in ("email_verification", "profile", "chatgpt"):
-                logger.info("[BrowserUse] 密码页提交后已进入后续状态：state=%s url=%s", state_name, state_after.get("url") or "-")
+                logger.info("[BrowserUse] After the password page was submitted it entered the following state:state=%s url=%s", state_name, state_after.get("url") or "-")
                 return password
             if not retried_submit and state_name == "password" and time.time() > wait_end - (5 if _fast_mode() else 8):
                 retried_submit = True
-                logger.info("[BrowserUse] 密码页提交后仍未跳转，等待后重试一次 Continue/Enter：url=%s", state_after.get("url") or "-")
+                logger.info("[BrowserUse] The password page did not move on after submit, retrying Continue/Enter once after a wait:url=%s", state_after.get("url") or "-")
                 _human_pause(1.2, 2.2)
                 if not _click_first(
                     page,
@@ -1379,9 +1379,9 @@ def _fill_password_if_present(page, email: str, timeout: int = 25, context=None)
 def _type_otp(page, code: str) -> None:
     code = str(code or "").strip()
     if not code:
-        raise RuntimeError("OTP 为空")
+        raise RuntimeError("OTP is empty")
 
-    # 单框
+    # single box
     if _fill_first(
         page,
         [
@@ -1399,7 +1399,7 @@ def _type_otp(page, code: str) -> None:
     ):
         return
 
-    # 多分框 6 位
+    # 6 split boxes
     boxes = page.locator("input[maxlength='1'], input[data-index], input[aria-label*='digit' i]")
     try:
         count = boxes.count()
@@ -1416,7 +1416,7 @@ def _type_otp(page, code: str) -> None:
                 raise
             _human_pause(0.04, 0.16)
         return
-    raise RuntimeError("找不到 OTP 输入框")
+    raise RuntimeError("OTP input box not found")
 
 
 def _clear_otp_inputs(page) -> None:
@@ -1464,10 +1464,10 @@ def _click_continue(page) -> None:
 
 
 def _click_resend_otp(page) -> bool:
-    """点击邮箱验证码页的“重发验证码”。
+    """Click "resend verification code" on the email verification code page.
 
-    不使用 Playwright has-text/可见文案匹配，避免不同语言、翻译、OCR/文字识别不稳定。
-    策略：在页面 DOM 中找 OTP 输入框附近的非 submit 按钮/链接，结合位置、type、属性名打分后点击。
+    Do not use Playwright has-text / visible wording matching, to avoid instability across languages, translations and OCR/text recognition.
+    Strategy: find non-submit buttons/links near the OTP input box in the page DOM, score them by position, type and attribute names, and click.
     """
     try:
         result = page.evaluate(
@@ -1535,7 +1535,7 @@ def _click_resend_otp(page) -> bool:
                 const value = String(el.getAttribute('value') || '').toLowerCase();
                 let score = 0;
 
-                // 属性启发，不读 visible innerText，不依赖页面语言文案。
+                // Attribute heuristics, without reading the visible innerText and without depending on the page language wording.
                 if (name === 'intent' && value === 'resend') score += 80;
                 if (/resend|send.?again|again|retry|otp|verification|verify|email.?code|code/.test(b)) score += 20;
                 if (/continue|submit|next|primary|login|signup|create|authorize|consent/.test(b)) score -= 8;
@@ -1543,14 +1543,14 @@ def _click_resend_otp(page) -> bool:
                 if (tag === 'button' && type && type !== 'submit') score += 6;
                 if (tag === 'button' && type === 'submit' && !(name === 'intent' && value === 'resend')) score -= 10;
 
-                // 位置启发：重发入口通常在 OTP 输入框下方或附近；主提交按钮通常更靠下/更大。
+                // Position heuristics: the resend entry is usually below or near the OTP input box; the main submit button is usually lower / bigger.
                 if (inputRects.length) {
                   if (r.top >= inputTop - 20 && r.top <= inputBottom + 220) score += 8;
                   if (r.top > inputBottom - 10) score += 5;
                   if (r.left >= inputLeft - 160 && r.right <= inputRight + 260) score += 3;
                   const area = r.width * r.height;
-                  if (area < 18000) score += 2;       // 文本式链接/小按钮优先
-                  if (area > 26000) score -= 4;       // 大的 Continue/Submit 按钮降权
+                  if (area < 18000) score += 2;       // prefer text-like links / small buttons
+                  if (area > 26000) score -= 4;       // down-weight big Continue/Submit buttons
                 } else {
                   if (r.top > window.innerHeight * 0.25 && r.top < window.innerHeight * 0.85) score += 2;
                 }
@@ -1571,15 +1571,15 @@ def _click_resend_otp(page) -> bool:
             }
             """
         )
-        logger.info("[BrowserUse][OTP] 非文本重发按钮探测结果：%s", result)
+        logger.info("[BrowserUse][OTP] Non-text resend button probe result:%s", result)
         return bool(isinstance(result, dict) and result.get("ok"))
     except Exception as exc:
-        logger.info("[BrowserUse][OTP] 非文本重发按钮探测失败：%s: %s", type(exc).__name__, str(exc)[:160])
+        logger.info("[BrowserUse][OTP] Non-text resend button probe failed:%s: %s", type(exc).__name__, str(exc)[:160])
         return False
 
 
 def _wait_after_otp(page, timeout: int = 12) -> str:
-    """返回 accepted / invalid / unknown。"""
+    """Returns accepted / invalid / unknown."""
     end = time.time() + timeout
     while time.time() < end:
         url = _page_url(page).lower()
@@ -1603,9 +1603,9 @@ def _fill_birthday_fields(page, birthday: str) -> None:
     try:
         year, month, day = [int(x) for x in birthday.split("-")]
     except Exception as exc:
-        raise RuntimeError(f"生日格式应为 YYYY-MM-DD: {birthday}") from exc
+        raise RuntimeError(f"Birthday format should be YYYY-MM-DD: {birthday}") from exc
 
-    # 年龄数字页
+    # age number page
     age = max(18, min(60, 2026 - year))
     if _fill_first(
         page,
@@ -1621,7 +1621,7 @@ def _fill_birthday_fields(page, birthday: str) -> None:
     ):
         return
 
-    # 年月日 select / spinbutton 尽量覆盖
+    # year/month/day select / spinbutton, cover as much as possible
     y, m, d = str(year), str(month), str(day)
     # year/month/day inputs
     for selectors, value in (
@@ -1716,7 +1716,7 @@ def _has_chatgpt_access_token(page) -> bool:
 
 
 def _fill_spinbutton_birthday(page, birthday: str) -> bool:
-    """Playwright 兜底填写 React Aria spinbutton 年/月/日。"""
+    """Playwright Fallback fill of the React Aria spinbutton year/month/day."""
     try:
         y, m, d = birthday.split("-")
     except Exception:
@@ -1768,7 +1768,7 @@ def _fill_spinbutton_birthday(page, birthday: str) -> bool:
 
 
 def _human_complete_profile(page, name: str, birthday: str) -> dict:
-    """资料页人工化填写：滚动、点击、逐字输入、选择/输入生日、点击 checkbox 和提交。"""
+    """Humanized filling of the profile page: scroll, click, type character by character, select/enter the birthday, click the checkbox and submit."""
     info: dict[str, Any] = {"ok": False, "submitted": False, "method": "human_playwright", "filled": {}}
 
     name_ok = _fill_first(
@@ -1808,7 +1808,7 @@ def _human_complete_profile(page, name: str, birthday: str) -> dict:
     if spin_ok:
         info["filled"]["spinbutton"] = True
 
-    # 勾选可见 checkbox，使用真实 locator click，不用 JS 改 checked。
+    # Tick the visible checkbox with a real locator click, not by changing checked through JS.
     checkbox_count = 0
     try:
         boxes = page.locator("input[type='checkbox'], [role='checkbox']")
@@ -1871,7 +1871,7 @@ def _human_complete_profile(page, name: str, birthday: str) -> dict:
 
 
 def _js_complete_profile(page, name: str, birthday: str) -> dict:
-    """JS 兜底处理 about-you/profile：填 name/age/生日/checkbox 并提交。"""
+    """JS Fallback handling of about-you/profile: fill name/age/birthday/checkbox and submit."""
     try:
         year, month, day = [int(x) for x in birthday.split("-")]
     except Exception:
@@ -1945,7 +1945,7 @@ def _js_complete_profile(page, name: str, birthday: str) -> dict:
         filled.ymd = true;
       }
 
-      // React Aria hidden native select：按 option 范围推断年/月/日，不依赖文字。
+      // React Aria hidden native select: infer year/month/day from the option range, not depending on text.
       const selects = [...document.querySelectorAll('[data-testid="hidden-select-container"] select, .react-aria-Select select, select')]
         .filter(el => !el.disabled);
       const nums = sel => [...sel.options].map(o => Number(o.value)).filter(Number.isFinite);
@@ -2035,7 +2035,7 @@ def _js_complete_profile(page, name: str, birthday: str) -> dict:
 
 
 def _force_exit_profile_page(page, deadline: float) -> bool:
-    """资料页提交后如果仍卡在 about-you/profile，强制跳出，避免 Skyvern 远端页面无限等待。"""
+    """If still stuck on about-you/profile after the profile page is submitted, force a jump out, so the Skyvern remote page does not wait forever."""
     targets = [
         "https://chatgpt.com/",
         "https://chatgpt.com/auth/login",
@@ -2056,7 +2056,7 @@ def _force_exit_profile_page(page, deadline: float) -> bool:
             if time.time() >= deadline:
                 break
             try:
-                logger.info("[BrowserUse] 资料页提交后仍未离开，强制跳转兜底：attempt=%s target=%s current=%s", attempt, target, _page_url(page) or "-")
+                logger.info("[BrowserUse] Still not left after the profile page was submitted, forced jump fallback:attempt=%s target=%s current=%s", attempt, target, _page_url(page) or "-")
                 page.goto(target, wait_until="domcontentloaded", timeout=10000)
                 _bu_delay("navigate")
                 _maybe_dismiss_chatgpt_onboarding(page)
@@ -2066,13 +2066,13 @@ def _force_exit_profile_page(page, deadline: float) -> bool:
                 if "chatgpt.com" in url and "about-you" not in url and "signup/profile" not in url and "auth.openai.com" not in url:
                     return True
             except Exception as exc:
-                logger.warning("[BrowserUse] 强制跳出资料页失败：%s: %s", type(exc).__name__, str(exc)[:180])
+                logger.warning("[BrowserUse] Failed to force-jump out of the profile page:%s: %s", type(exc).__name__, str(exc)[:180])
         time.sleep(0.8 if _fast_mode() else 1.2)
     return False
 
 
 def _complete_profile_page(page, name: str, birthday: str, timeout: int = 60) -> bool:
-    """资料页填写/提交：提交后不无限等待；Skyvern 卡住时强制跳出 about-you。"""
+    """Profile page fill/submit: do not wait forever after submitting; force a jump out of about-you when Skyvern hangs."""
 
     timeout = min(timeout, 45) if _fast_mode() else timeout
     end = time.time() + timeout
@@ -2087,10 +2087,10 @@ def _complete_profile_page(page, name: str, birthday: str, timeout: int = 60) ->
         _check_manual_stop()
         url = _page_url(page).lower()
         if "chatgpt.com" in url and "auth.openai.com" not in url and "about-you" not in url and "signup/profile" not in url:
-            logger.info("[BrowserUse] 已离开资料页并进入 ChatGPT：%s", _page_url(page))
+            logger.info("[BrowserUse] Left the profile page and entered ChatGPT:%s", _page_url(page))
             return True
         if _has_chatgpt_access_token(page):
-            logger.info("[BrowserUse] 资料页提交后已检测到 accessToken")
+            logger.info("[BrowserUse] Detected after the profile page was submitted accessToken")
             return True
 
         body = ""
@@ -2102,29 +2102,29 @@ def _complete_profile_page(page, name: str, birthday: str, timeout: int = 60) ->
 
         if looks_profile:
             if not submitted:
-                logger.info("[BrowserUse] 资料页：填写/提交昵称生日 url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] Profile page: fill/submit nickname and birthday url=%s", _page_url(page) or "-")
                 info = _human_complete_profile(page, name, birthday)
                 last_info = info
-                logger.info("[BrowserUse] 资料页人工化提交结果：%s", str(info)[:900])
+                logger.info("[BrowserUse] Humanized profile page submit result:%s", str(info)[:900])
                 if not info.get("submitted"):
                     js_info = _js_complete_profile(page, name, birthday)
                     last_info = {"human": info, "js": js_info}
-                    logger.info("[BrowserUse] 资料页 JS 兜底提交结果：%s", str(js_info)[:900])
+                    logger.info("[BrowserUse] Profile page JS fallback submit result:%s", str(js_info)[:900])
                     submitted = bool(js_info.get("submitted") or submitted)
                 else:
                     submitted = True
                 if submitted and post_submit_hard_exit_at is None:
-                    # 已提交后不再重复填写/点击；最多给它 10~16 秒同步登录态，然后强制跳出。
+                    # After submitting, do not fill/click again; give it at most 10~16 seconds to sync the login state, then force a jump out.
                     post_submit_hard_exit_at = time.time() + (10 if _fast_mode() else 16)
                 last_submit = time.time()
                 _bu_delay("form")
             elif time.time() - last_log > 2:
-                logger.info("[BrowserUse] 资料页已提交，等待短暂跳转/准备取 AT：url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] Profile page submitted, waiting for a short jump / preparing to get the AT:url=%s", _page_url(page) or "-")
                 last_log = time.time()
 
             if submitted and post_submit_hard_exit_at and time.time() >= post_submit_hard_exit_at:
                 if _force_exit_profile_page(page, min(end, time.time() + (8 if _fast_mode() else 12))):
-                    logger.info("[BrowserUse] 资料页提交后已通过强制跳转退出：%s", _page_url(page) or "-")
+                    logger.info("[BrowserUse] Exited via forced jump after the profile page was submitted:%s", _page_url(page) or "-")
                     return True
                 break
             time.sleep(0.35 if _fast_mode() else 0.8)
@@ -2132,23 +2132,23 @@ def _complete_profile_page(page, name: str, birthday: str, timeout: int = 60) ->
 
         if submitted:
             if _has_chatgpt_access_token(page):
-                logger.info("[BrowserUse] 资料页提交后已检测到 accessToken")
+                logger.info("[BrowserUse] Detected after the profile page was submitted accessToken")
                 return True
             if post_submit_hard_exit_at is None:
                 post_submit_hard_exit_at = time.time() + (10 if _fast_mode() else 16)
             if time.time() - last_log > 2:
-                logger.info("[BrowserUse] 资料页已提交，等待登录态同步：url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] Profile page submitted, waiting for the login state to sync:url=%s", _page_url(page) or "-")
                 last_log = time.time()
             if time.time() >= post_submit_hard_exit_at:
                 if _force_exit_profile_page(page, min(end, time.time() + (8 if _fast_mode() else 12))):
-                    logger.info("[BrowserUse] 资料页提交后已通过强制跳转退出：%s", _page_url(page) or "-")
+                    logger.info("[BrowserUse] Exited via forced jump after the profile page was submitted:%s", _page_url(page) or "-")
                     return True
                 break
             time.sleep(0.35 if _fast_mode() else 0.8)
             continue
 
         if time.time() - last_log > 2:
-            logger.info("[BrowserUse] 等待资料页/登录态：url=%s", _page_url(page) or "-")
+            logger.info("[BrowserUse] Waiting for the profile page / login state:url=%s", _page_url(page) or "-")
             last_log = time.time()
         time.sleep(0.25 if _fast_mode() else 0.6)
 
@@ -2156,8 +2156,8 @@ def _complete_profile_page(page, name: str, birthday: str, timeout: int = 60) ->
     if any(x in url for x in ("about-you", "profile", "create-account/about", "signup/profile")):
         last_diag = _profile_diagnostics(page)
         if submitted:
-            raise RuntimeError(f"资料页提交后超时仍未跳转，转入取 AT；last_info={str(last_info)[:900]} diag={str(last_diag)[:1200]}")
-        raise RuntimeError(f"资料页处理超时且未确认提交，转入取 AT；last_info={str(last_info)[:900]} diag={str(last_diag)[:1200]}")
+            raise RuntimeError(f"Still no jump after the profile page was submitted and timed out, moving on to get the AT;last_info={str(last_info)[:900]} diag={str(last_diag)[:1200]}")
+        raise RuntimeError(f"Profile page handling timed out and the submit was not confirmed, moving on to get the AT;last_info={str(last_info)[:900]} diag={str(last_diag)[:1200]}")
     return submitted
 
 
@@ -2177,7 +2177,7 @@ def _is_transient_navigation_error(exc: Exception | str) -> bool:
 
 
 def _pick_live_page(context, preferred=None):
-    """Browser Use 远端有时会打开/切换 target；优先选择处在验证码/密码/资料页的活页。"""
+    """Browser Use The remote sometimes opens/switches targets; prefer the live page that is on the verification code / password / profile page."""
     pages = []
     try:
         for p in list(context.pages):
@@ -2227,7 +2227,7 @@ def _pick_live_page(context, preferred=None):
             best_rank = score
     if best is not preferred:
         logger.info(
-            "[BrowserUse] 切换到更匹配的页面：state=%s url=%s pages=%s",
+            "[BrowserUse] Switched to a better matching page:state=%s url=%s pages=%s",
             best_info.get("state") or "-",
             best_info.get("url") or "-",
             inventory,
@@ -2236,10 +2236,10 @@ def _pick_live_page(context, preferred=None):
 
 
 def _browser_use_heartbeat(page, context=None, label: str = ""):
-    """给 Browser Use 云端页面做轻量心跳，并顺便探测 target 是否已被平台关闭。
+    """Do a lightweight heartbeat on the Browser Use cloud page and probe along the way whether the target has been closed by the platform.
 
-    OpenAI 跳转时常会关掉旧 target 再开新页；这里在 closed 时短暂重试切换到存活页，
-    避免把正常导航误判成“会话已死”。
+    OpenAI navigation often closes the old target and opens a new page; here when closed we retry briefly and switch to the live page,
+    to avoid misjudging normal navigation as "session is dead".
     """
     tag = f"({label})" if label else ""
 
@@ -2261,7 +2261,7 @@ def _browser_use_heartbeat(page, context=None, label: str = ""):
     def _recover_live(preferred=None):
         if context is None:
             return None
-        # 跳转瞬间 pages 可能短暂为空，稍等再取
+        # pages may be briefly empty at the moment of navigation, wait a moment and fetch again
         for delay in (0.0, 0.35, 0.8):
             if delay:
                 time.sleep(delay)
@@ -2283,56 +2283,56 @@ def _browser_use_heartbeat(page, context=None, label: str = ""):
     if page is None:
         page = _recover_live(None)
     if page is None:
-        raise RuntimeError(f"BrowserUse 页面已关闭，无法继续心跳{tag}；pages={_inventory()}")
+        raise RuntimeError(f"BrowserUse Page closed, cannot continue the heartbeat{tag};pages={_inventory()}")
 
     try:
         if page.is_closed():
             recovered = _recover_live(page)
             if recovered is None:
-                raise RuntimeError(f"BrowserUse page.is_closed()=True{tag}；pages={_inventory()}")
+                raise RuntimeError(f"BrowserUse page.is_closed()=True{tag};pages={_inventory()}")
             page = recovered
-            logger.info("[BrowserUse] 心跳恢复到存活页%s：url=%s", tag, _page_url(page) or "-")
+            logger.info("[BrowserUse] Heartbeat recovered to a live page%s:url=%s", tag, _page_url(page) or "-")
     except Exception as exc:
         if _is_target_closed_error(exc):
             recovered = _recover_live(None)
             if recovered is None:
-                raise RuntimeError(f"BrowserUse 页面已关闭，无法继续心跳{tag}：{exc}；pages={_inventory()}") from exc
+                raise RuntimeError(f"BrowserUse Page closed, cannot continue the heartbeat{tag}: {exc};pages={_inventory()}") from exc
             page = recovered
-            logger.info("[BrowserUse] target 关闭后切换存活页%s：url=%s", tag, _page_url(page) or "-")
+            logger.info("[BrowserUse] target Switched to a live page after closing%s:url=%s", tag, _page_url(page) or "-")
         else:
             raise
 
     try:
-        # 读 location/visibilityState 足够轻量，不会改变页面状态；比 context.request 更能保持远端 page target 活跃。
+        # Reading location/visibilityState is light enough and does not change the page state; it keeps the remote page target alive better than context.request.
         page.evaluate("() => ({href: location.href, visibility: document.visibilityState, t: Date.now()})", timeout=2500)
     except TypeError:
-        # 兼容旧 Playwright：evaluate 不支持 timeout 参数。
+        # Compatible with old Playwright: evaluate does not support the timeout parameter.
         try:
             page.evaluate("() => ({href: location.href, visibility: document.visibilityState, t: Date.now()})")
         except Exception as exc:
             if _is_target_closed_error(exc):
                 recovered = _recover_live(None)
                 if recovered is None:
-                    raise RuntimeError(f"BrowserUse 页面已关闭，无法继续心跳{tag}：{exc}；pages={_inventory()}") from exc
+                    raise RuntimeError(f"BrowserUse Page closed, cannot continue the heartbeat{tag}: {exc};pages={_inventory()}") from exc
                 page = recovered
-                logger.info("[BrowserUse] evaluate 关闭后切换存活页%s：url=%s", tag, _page_url(page) or "-")
+                logger.info("[BrowserUse] evaluate Switched to a live page after closing%s:url=%s", tag, _page_url(page) or "-")
             else:
-                logger.debug("[BrowserUse] 心跳失败%s：%s", tag, str(exc)[:180])
+                logger.debug("[BrowserUse] Heartbeat failed%s:%s", tag, str(exc)[:180])
     except Exception as exc:
         if _is_target_closed_error(exc):
             recovered = _recover_live(None)
             if recovered is None:
-                raise RuntimeError(f"BrowserUse 页面已关闭，无法继续心跳{tag}：{exc}；pages={_inventory()}") from exc
+                raise RuntimeError(f"BrowserUse Page closed, cannot continue the heartbeat{tag}: {exc};pages={_inventory()}") from exc
             page = recovered
-            logger.info("[BrowserUse] evaluate 关闭后切换存活页%s：url=%s", tag, _page_url(page) or "-")
+            logger.info("[BrowserUse] evaluate Switched to a live page after closing%s:url=%s", tag, _page_url(page) or "-")
         else:
-            logger.debug("[BrowserUse] 心跳失败%s：%s", tag, str(exc)[:180])
+            logger.debug("[BrowserUse] Heartbeat failed%s:%s", tag, str(exc)[:180])
     return page
 
 
 
 def _wait_for_otp_with_browser_heartbeat(page, context, email: str, after_ts: float) -> str:
-    """短轮询邮箱 OTP；每轮之间触碰页面，避免 Browser Use Cloud 长时间无页面活动被回收。"""
+    """Short polling of the email OTP; touch the page between rounds, so Browser Use Cloud does not reclaim the session after a long time without page activity."""
     try:
         from config import email as _email_cfg
         total_wait = int(getattr(_email_cfg, "OTP_MAX_WAIT", 90) or 90)
@@ -2341,9 +2341,9 @@ def _wait_for_otp_with_browser_heartbeat(page, context, email: str, after_ts: fl
     except Exception:
         total_wait, poll_interval, settle = 90, 3, 5
 
-    # 单次邮箱轮询不要阻塞太久，否则云端浏览器这段时间没有任何 page activity。
-    # 但 Outlook direct/Graph 偶发 TLS/网络抖动时，12s 切片太短会导致每轮还没来得及完成
-    # Graph/REST/IMAP 兜底就被上层判超时；这里放宽到最多 30s，仍在每轮之间做页面心跳。
+    # A single email poll must not block for too long, otherwise the cloud browser has no page activity at all during that time.
+    # But with occasional TLS/network jitter in Outlook direct/Graph, a 12s slice is too short and the round is judged timed out by the upper layer before
+    # Graph/REST/IMAP the fallback can complete; here it is relaxed to at most 30s, and a page heartbeat is still done between rounds.
     slice_wait = max(15, min(30, total_wait))
     slice_settle = max(0, min(settle, 5))
     deadline = time.time() + total_wait
@@ -2357,7 +2357,7 @@ def _wait_for_otp_with_browser_heartbeat(page, context, email: str, after_ts: fl
         remaining = max(1, int(deadline - time.time()))
         wait_this_round = min(slice_wait, remaining)
         logger.info(
-            "[BrowserUse][OTP] 邮箱短轮询：%s，第 %s 轮，最长 %ss（总剩余 %ss）",
+            "[BrowserUse][OTP] Email short poll: %s, round %s, up to %ss (total remaining %ss)",
             email,
             attempt,
             wait_this_round,
@@ -2377,17 +2377,17 @@ def _wait_for_otp_with_browser_heartbeat(page, context, email: str, after_ts: fl
                 raise
             if time.time() >= deadline:
                 break
-            logger.info("[BrowserUse][OTP] 本轮未取到验证码，保持云端页面活跃后继续：%s: %s", type(exc).__name__, str(exc)[:220])
+            logger.info("[BrowserUse][OTP] No verification code obtained this round, keeping the cloud page active and continuing:%s: %s", type(exc).__name__, str(exc)[:220])
             page = _browser_use_heartbeat(page, context=context, label=f"otp-after-{attempt}")
             time.sleep(0.5 if _fast_mode() else 1.0)
 
     if last_exc is not None:
         raise last_exc
-    raise RuntimeError(f"等待 {email} 的 OTP 超时（>{total_wait}s）")
+    raise RuntimeError(f"Timed out waiting for the OTP of {email} (>{total_wait}s)")
 
 
 def _read_chatgpt_session_via_context(context, timeout_ms: int = 5000) -> dict | None:
-    """用 BrowserContext.request 读取 session；共享 context cookie，不依赖页面 evaluate。"""
+    """Read the session with BrowserContext.request; the context cookies are shared, no dependence on page evaluate."""
     try:
         resp = context.request.get(
             "https://chatgpt.com/api/auth/session",
@@ -2410,7 +2410,7 @@ def _read_chatgpt_session_via_context(context, timeout_ms: int = 5000) -> dict |
 
 
 def _read_chatgpt_session_via_page(page, timeout_ms: int = 5000) -> dict | None:
-    """页面内读取 session，加 JS AbortController，避免 page.evaluate 无限挂住。"""
+    """Read the session inside the page with a JS AbortController added, so page.evaluate does not hang forever."""
     try:
         page.set_default_timeout(max(2000, timeout_ms + 1000))
     except Exception:
@@ -2440,7 +2440,7 @@ def _read_chatgpt_session_via_page(page, timeout_ms: int = 5000) -> dict | None:
         return {"_error": f"{type(exc).__name__}: {exc}"}
 
 def _fetch_chatgpt_session(page, context=None, timeout: int = 120) -> dict:
-    # 优先用 BrowserContext.request 读取 cookies/session，避免 page.evaluate 在 Browser Use 远端 target 上挂死。
+    # Prefer BrowserContext.request to read cookies/session, so page.evaluate does not hang on a Browser Use remote target.
     timeout = min(timeout, 28) if _fast_mode() else timeout
     end = time.time() + timeout
     last = None
@@ -2461,51 +2461,51 @@ def _fetch_chatgpt_session(page, context=None, timeout: int = 120) -> dict:
         if context is not None:
             live = _pick_live_page(context, page)
             if live is not None and live is not page:
-                logger.info("[BrowserUse] 当前 page 已关闭/不可用，切换到同 context 可用页面：url=%s", _page_url(live) or "-")
+                logger.info("[BrowserUse] The current page is closed/unavailable, switching to an available page of the same context:url=%s", _page_url(live) or "-")
                 page = live
 
         url = _page_url(page).lower() if page is not None else ""
         on_chatgpt = "chatgpt.com" in url
 
-        # 1) context.request 先读：快、不依赖页面 JS；即使页面 target 被关闭，只要 context 活着还能读。
+        # 1) context.request Read first: fast and independent of page JS; even if the page target is closed, as long as the context is alive it can still be read.
         if context is not None:
             data = _read_chatgpt_session_via_context(context, timeout_ms=1800 if _fast_mode() else 5000)
             last = data
             if isinstance(data, dict) and data.get("accessToken"):
-                logger.info("[BrowserUse] /api/auth/session 已返回 accessToken via=context url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] /api/auth/session returned accessToken via=context url=%s", _page_url(page) or "-")
                 return data
             err = str((data or {}).get("_error") or "") if isinstance(data, dict) else ""
             if err and _is_target_closed_error(err):
                 target_closed_count += 1
                 if target_closed_count >= 2:
-                    raise RuntimeError(f"BrowserUse context/page 已关闭，无法读取 session：{err}")
+                    raise RuntimeError(f"BrowserUse context/page is closed, cannot read the session:{err}")
             if time.time() - last_log > 2:
                 keys = list((data or {}).keys()) if isinstance(data, dict) else type(data)
-                logger.info("[BrowserUse] 等待 accessToken via=context，url=%s keys=%s", _page_url(page) or "-", keys)
+                logger.info("[BrowserUse] Waiting for accessToken via=context,url=%s keys=%s", _page_url(page) or "-", keys)
                 last_log = time.time()
 
-        # 2) 如果已经在 chatgpt.com，再用页面内 fetch 兜底；但设置短超时。
+        # 2) If already on chatgpt.com, fall back to an in-page fetch, but with a short timeout.
         if on_chatgpt and page is not None:
             _maybe_dismiss_chatgpt_onboarding(page)
             data = _read_chatgpt_session_via_page(page, timeout_ms=2200 if _fast_mode() else 5000)
             last = data
             if isinstance(data, dict) and data.get("accessToken"):
-                logger.info("[BrowserUse] /api/auth/session 已返回 accessToken via=page url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] /api/auth/session returned accessToken via=page url=%s", _page_url(page) or "-")
                 return data
             err = str((data or {}).get("_error") or "") if isinstance(data, dict) else ""
             if err and _is_target_closed_error(err):
                 target_closed_count += 1
-                logger.warning("[BrowserUse] 页面 target 已关闭，尝试继续用 context 读取 session：%s", err[:180])
+                logger.warning("[BrowserUse] The page target is closed, trying to keep reading the session through the context:%s", err[:180])
                 if context is None or _pick_live_page(context) is None:
-                    # 不再等到总超时；BrowserUse 远端目标没了，继续等没有意义。
-                    raise RuntimeError(f"BrowserUse 页面已关闭，无法读取 session：{err}")
+                    # Do not wait until the total timeout any more; the BrowserUse remote target is gone and waiting longer is meaningless.
+                    raise RuntimeError(f"BrowserUse Page closed, cannot read the session:{err}")
             elif time.time() - last_log > 2:
                 keys = list((data or {}).keys()) if isinstance(data, dict) else type(data)
-                logger.info("[BrowserUse] 等待 accessToken via=page，url=%s keys=%s", _page_url(page) or "-", keys)
+                logger.info("[BrowserUse] Waiting for accessToken via=page,url=%s keys=%s", _page_url(page) or "-", keys)
                 last_log = time.time()
         else:
-            # 资料页提交后 Skyvern 偶发不会自动跳转；到 session 阶段说明 profile 处理已经结束，
-            # 继续停留在 about-you/profile 没有意义，短暂观察后强制跳到 ChatGPT 读取登录态。
+            # After the profile page is submitted Skyvern occasionally does not jump automatically; reaching the session stage means the profile handling is already over,
+            # staying on about-you/profile is meaningless, so after a brief look force a jump to ChatGPT to read the login state.
             if any(x in url for x in ("about-you", "profile", "create-account/about", "signup/profile")):
                 if first_profile_still_at is None:
                     first_profile_still_at = time.time()
@@ -2514,7 +2514,7 @@ def _fetch_chatgpt_session(page, context=None, timeout: int = 120) -> dict:
                         proactive_opened = True
                         continue
                 if time.time() - last_log > 2:
-                    logger.info("[BrowserUse] session 阶段仍在资料页，短暂等待后将强制跳出：url=%s", _page_url(page) or "-")
+                    logger.info("[BrowserUse] session stage is still on the profile page, will force a jump out after a short wait:url=%s", _page_url(page) or "-")
                     last_log = time.time()
                 time.sleep(0.4 if _fast_mode() else 1.0)
                 continue
@@ -2522,7 +2522,7 @@ def _fetch_chatgpt_session(page, context=None, timeout: int = 120) -> dict:
                 first_not_chatgpt_at = time.time()
             wait_before_open = 2.0 if _fast_mode() else 8.0
             if page is not None and _fast_mode() and not proactive_opened and time.time() - first_not_chatgpt_at >= wait_before_open:
-                logger.info("[BrowserUse] 未快速自动跳转 chatgpt.com，主动打开首页读取 session：current=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] Did not quickly jump to chatgpt.com automatically, actively opening the home page to read the session:current=%s", _page_url(page) or "-")
                 try:
                     page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
                     proactive_opened = True
@@ -2534,14 +2534,14 @@ def _fetch_chatgpt_session(page, context=None, timeout: int = 120) -> dict:
                     if _is_target_closed_error(exc):
                         target_closed_count += 1
                         if context is None or _pick_live_page(context) is None:
-                            raise RuntimeError(f"BrowserUse 页面已关闭，无法主动打开 ChatGPT：{last}")
+                            raise RuntimeError(f"BrowserUse Page closed, cannot actively open ChatGPT:{last}")
             if time.time() - last_log > 2:
-                logger.info("[BrowserUse] 等待进入 chatgpt.com 或登录态同步：url=%s", _page_url(page) or "-")
+                logger.info("[BrowserUse] Waiting to enter chatgpt.com or for the login state to sync:url=%s", _page_url(page) or "-")
                 last_log = time.time()
 
         time.sleep(0.45 if _fast_mode() else 2)
 
-    raise RuntimeError(f"等待 /api/auth/session accessToken 超时，最后响应: {str(last)[:800]}")
+    raise RuntimeError(f"Timed out waiting for the /api/auth/session accessToken, last response: {str(last)[:800]}")
 
 
 def run_browser_use_registration(
@@ -2554,12 +2554,12 @@ def run_browser_use_registration(
     cloud_provider: str = "browser_use",
     on_email_acquired: Callable[[str], None] | None = None,
 ) -> dict:
-    """Browser Use / Skyvern 云端浏览器注册入口。proxy 参数保留兼容。"""
+    """Browser Use / Skyvern Cloud browser registration entry point. The proxy parameter is kept for compatibility."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise RuntimeError(
-            "缺少 playwright。请先执行: uv pip install playwright --python .venv/bin/python"
+            "playwright is missing. Please run first: uv pip install playwright --python .venv/bin/python"
         ) from exc
 
     provider = str(cloud_provider or "browser_use").strip().lower()
@@ -2575,7 +2575,7 @@ def run_browser_use_registration(
 
     _set_log_provider_label(cloud_label)
     _set_cloud_provider(provider_prefix)
-    _t_all = _StepTimer(f"{cloud_label} 注册全流程")
+    _t_all = _StepTimer(f"{cloud_label} full registration flow")
     session_info_open = client.open_session()
     create_acknowledged = False
     openai_password: str | None = None
@@ -2585,7 +2585,7 @@ def run_browser_use_registration(
     network_traffic: dict[str, Any] | None = None
 
     logger.info(
-        "[%s] 开始注册：%s proxyCountry=%s profileId=%s local_proxy_arg=%s",
+        "[%s] Starting registration:%s proxyCountry=%s profileId=%s local_proxy_arg=%s",
         cloud_label,
         email,
         session_info_open.proxy_country_code or "-",
@@ -2595,14 +2595,14 @@ def run_browser_use_registration(
 
     try:
         with sync_playwright() as p:
-            logger.info("[%s] 连接 CDP ...", cloud_label)
-            _t_cdp = _StepTimer(f"连接 {cloud_label} CDP")
+            logger.info("[%s] Connect CDP ...", cloud_label)
+            _t_cdp = _StepTimer(f"Connect {cloud_label} CDP")
             connect_kwargs = {}
             if provider_prefix == "skyvern" and hasattr(client, "cdp_headers"):
                 connect_kwargs["headers"] = client.cdp_headers()
             browser = p.chromium.connect_over_cdp(session_info_open.connect_url, **connect_kwargs)
             _t_cdp.done()
-            # Browser Use 通常已有默认 context/page
+            # Browser Use usually already has a default context/page
             if browser.contexts:
                 context = browser.contexts[0]
             else:
@@ -2610,9 +2610,9 @@ def run_browser_use_registration(
             page = context.pages[0] if context.pages else context.new_page()
             page.set_default_timeout(_timeout_ms())
             page.set_default_navigation_timeout(_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
-            # Browser Use/Skyvern 是云端浏览器，不安装本地省流量路由、网络流量
-            # 监听器或 JS 覆盖率采集，确保云端页面按原始流程运行且不增加 CDP 开销。
-            logger.info("[%s] 云端浏览器跳过省流量、网络监听和 JS 覆盖率采集", cloud_label)
+            # Browser Use/Skyvern is a cloud browser; it does not install the local traffic-saving routes, network traffic
+            # listeners or JS coverage collection, ensuring the cloud page runs in the original flow without extra CDP overhead.
+            logger.info("[%s] Cloud browser skips traffic saving, network listening and JS coverage collection", cloud_label)
             if _should_apply_cloud_automation_mask(provider_prefix):
                 _apply_cloud_browser_automation_mask(
                     context,
@@ -2622,7 +2622,7 @@ def run_browser_use_registration(
                     proxy_country_code=session_info_open.proxy_country_code,
                 )
             else:
-                logger.info("[%s] 已跳过额外 JS 指纹补丁，使用云浏览器原生 stealth 环境", cloud_label)
+                logger.info("[%s] Extra JS fingerprint patches skipped, using the native stealth environment of the cloud browser", cloud_label)
 
             if provider_prefix == "skyvern":
                 try:
@@ -2632,8 +2632,8 @@ def run_browser_use_registration(
                     start_url = "https://chatgpt.com/auth/login"
             else:
                 start_url = str(getattr(_cfg, "BROWSER_USE_START_URL", "https://chatgpt.com/auth/login") or "https://chatgpt.com/auth/login")
-            logger.info("[%s] 打开登录页：%s", cloud_label, start_url)
-            _t_goto = _StepTimer("打开登录页")
+            logger.info("[%s] Opening the login page:%s", cloud_label, start_url)
+            _t_goto = _StepTimer("Open login page")
             page.goto(start_url, wait_until="domcontentloaded")
             _t_goto.done(f"url={_page_url(page) or '-'}")
             _bu_delay("navigate")
@@ -2648,9 +2648,9 @@ def run_browser_use_registration(
                     on_email_acquired(email)
                 return email
 
-            _t_email = _StepTimer("填写并提交邮箱")
-            # OpenAI 可能在点击提交后立刻发 OTP，甚至邮件 ReceivedDateTime 早于 Playwright
-            # 点击函数返回的本地时间；先记录时间戳，配合 _is_after 的时钟容忍，避免过滤掉首次验证码。
+            _t_email = _StepTimer("Fill in and submit the email")
+            # OpenAI may send the OTP right after the submit click, even with the email ReceivedDateTime earlier than Playwright
+            # the local time at which the click function returned; record the timestamp first, together with the clock tolerance of _is_after, to avoid filtering out the first verification code.
             otp_after_ts = time.time()
             next_state = _submit_email_until_transition(
                 page,
@@ -2661,14 +2661,14 @@ def run_browser_use_registration(
                 email_supplier=_email_supplier_after_input,
             )
             _t_email.done(f"state={next_state}")
-            logger.info("[BrowserUse] 已提交邮箱：%s", email)
-            _assert_not_external_idp(page, "提交邮箱后")
+            logger.info("[BrowserUse] Submitted the email:%s", email)
+            _assert_not_external_idp(page, "after submitting the email")
             _check_manual_stop()
 
-            _t_pwd = _StepTimer("检测/处理密码页")
+            _t_pwd = _StepTimer("Detect/handle the password page")
             try:
                 if next_state == "email_verification":
-                    logger.info("[BrowserUse] 邮箱提交已进入验证码页，尝试点击“使用密码继续”并设置密码")
+                    logger.info("[BrowserUse] The email submit entered the verification code page, trying to click 'continue with password' and set a password")
                 openai_password = _fill_password_if_present(page, email, timeout=8 if _fast_mode() else 18, context=context)
                 _t_pwd.done("password_set=yes" if openai_password else "password_set=no")
             except Exception as exc:
@@ -2678,11 +2678,11 @@ def run_browser_use_registration(
 
             def _restart_email_otp_flow(reason: str) -> None:
                 """
-                OpenAI 验证码页直接点 resend 偶发跳 chrome-error/500。
-                这里改为重新打开注册入口、重新提交同一个邮箱来触发新 OTP，保持页面回到可输入验证码的状态。
+                OpenAI Clicking resend directly on the verification code page occasionally jumps to chrome-error/500.
+                Here we instead re-open the registration entry and resubmit the same email to trigger a new OTP, keeping the page in a state where the verification code can be entered.
                 """
                 nonlocal page, otp_after_ts, openai_password
-                logger.info("[BrowserUse][OTP] 重新触发邮箱 OTP：%s", reason)
+                logger.info("[BrowserUse][OTP] Re-triggering the email OTP:%s", reason)
                 try:
                     _check_manual_stop()
                     page = _pick_live_page(context, page) or page
@@ -2700,8 +2700,8 @@ def run_browser_use_registration(
                         timeout_ms=12000 if _fast_mode() else 18000,
                     )
                     _check_manual_stop()
-                    logger.info("[BrowserUse][OTP] 已重新提交邮箱：%s", email)
-                    _assert_not_external_idp(page, "重新提交邮箱后")
+                    logger.info("[BrowserUse][OTP] Resubmitted the email:%s", email)
+                    _assert_not_external_idp(page, "after resubmitting the email")
                     try:
                         pwd = _fill_password_if_present(page, email, timeout=6 if _fast_mode() else 10, context=context)
                         _check_manual_stop()
@@ -2710,17 +2710,17 @@ def run_browser_use_registration(
                     except Exception as pwd_exc:
                         if _is_manual_stop_exception(pwd_exc):
                             raise
-                        logger.info("[BrowserUse][OTP] 重启 OTP 流后密码页处理跳过/失败，继续等待验证码页：%s", str(pwd_exc)[:140])
+                        logger.info("[BrowserUse][OTP] Password page handling skipped/failed after restarting the OTP flow, continuing to wait for the verification code page:%s", str(pwd_exc)[:140])
                     _bu_delay("api")
                 except Exception as restart_exc:
                     if _is_manual_stop_exception(restart_exc):
                         raise
-                    logger.warning("[BrowserUse][OTP] 重新触发邮箱 OTP 失败，继续按当前页面处理：%s: %s", type(restart_exc).__name__, str(restart_exc)[:180])
+                    logger.warning("[BrowserUse][OTP] Re-triggering the email OTP failed, continuing with the current page:%s: %s", type(restart_exc).__name__, str(restart_exc)[:180])
 
             current_otp = otp_code
             max_otp_attempts = 3
             for otp_attempt in range(1, max_otp_attempts + 1):
-                # 等验证码页出现
+                # Wait for the verification code page to appear
                 wait_end = time.time() + (20 if _fast_mode() else 45)
                 last_verify_log = 0.0
                 while time.time() < wait_end:
@@ -2728,20 +2728,20 @@ def run_browser_use_registration(
                     state_info = _quick_auth_state(page)
                     state = str(state_info.get("state") or "other")
                     if "/log-in/password" in str(state_info.get("url") or _page_url(page) or "").lower() or state == "login_password":
-                        raise RuntimeError(f"邮箱提交后进入登录密码页，按已注册/不可用邮箱处理并停用: url={state_info.get('url') or _page_url(page) or 'https://auth.openai.com/log-in/password'}")
+                        raise RuntimeError(f"After submitting the email it entered the login password page; treated as a registered/unusable email and deactivated: url={state_info.get('url') or _page_url(page) or 'https://auth.openai.com/log-in/password'}")
                     if state == "email_verification":
-                        logger.info("[BrowserUse][OTP] 已检测到验证码页：url=%s", state_info.get("url") or "-")
+                        logger.info("[BrowserUse][OTP] Verification code page detected:url=%s", state_info.get("url") or "-")
                         break
                     if any(x in _page_url(page).lower() for x in ("about-you", "profile", "chatgpt.com/")):
                         break
                     if time.time() - last_verify_log > 5:
-                        logger.info("[BrowserUse][OTP] 等待验证码输入页出现：state=%s url=%s", state, state_info.get("url") or "-")
+                        logger.info("[BrowserUse][OTP] Waiting for the verification code input page to appear:state=%s url=%s", state, state_info.get("url") or "-")
                         last_verify_log = time.time()
                     time.sleep(0.2 if _fast_mode() else 0.4)
 
                 if current_otp is None:
-                    logger.info("[BrowserUse][OTP] 等待验证码：%s（%s/%s）", email, otp_attempt, max_otp_attempts)
-                    _t_otp_wait = _StepTimer("等待邮箱 OTP")
+                    logger.info("[BrowserUse][OTP] Waiting for the verification code: %s (%s/%s)", email, otp_attempt, max_otp_attempts)
+                    _t_otp_wait = _StepTimer("Waiting for the email OTP")
                     try:
                         current_otp = _wait_for_otp_with_browser_heartbeat(page, context, email, after_ts=otp_after_ts)
                         page = _pick_live_page(context, page) or page
@@ -2753,39 +2753,39 @@ def run_browser_use_registration(
                         if otp_attempt >= max_otp_attempts:
                             raise
                         logger.warning(
-                            "[BrowserUse][OTP] 本次未收到邮箱验证码，重新触发 OTP 后继续等待（%s/%s）：%s: %s",
+                            "[BrowserUse][OTP] No email verification code received this time, continuing to wait after re-triggering the OTP (%s/%s):%s: %s",
                             otp_attempt + 1,
                             max_otp_attempts,
                             type(exc).__name__,
                             str(exc)[:180],
                         )
-                        _restart_email_otp_flow("等待验证码超时，避免点击 resend 导致 500/chrome-error")
+                        _restart_email_otp_flow("Timed out waiting for the verification code, avoiding clicking resend which causes 500/chrome-error")
                         current_otp = None
                         continue
-                logger.info("[BrowserUse][OTP] 收到验证码：%s", current_otp)
-                _t_otp_submit = _StepTimer("提交邮箱 OTP")
+                logger.info("[BrowserUse][OTP] Verification code received:%s", current_otp)
+                _t_otp_submit = _StepTimer("Submitting the email OTP")
                 _clear_otp_inputs(page)
                 _type_otp(page, current_otp)
                 _bu_delay("otp_input")
                 try:
                     _click_continue(page)
                 except Exception as exc:
-                    logger.info("[BrowserUse][OTP] 提交按钮未找到，继续观察页面：%s", str(exc)[:120])
+                    logger.info("[BrowserUse][OTP] Submit button not found, continuing to observe the page:%s", str(exc)[:120])
                 _check_manual_stop()
 
                 outcome = _wait_after_otp(page, timeout=6 if _fast_mode() else 12)
                 _t_otp_submit.done(f"state={outcome}")
                 if outcome in ("accepted", "unknown"):
-                    # unknown 也继续尝试资料页/session
+                    # unknown also keep trying the profile page/session
                     break
                 if otp_attempt >= max_otp_attempts:
-                    raise RuntimeError("邮箱验证码连续错误/过期")
-                logger.warning("[BrowserUse][OTP] 验证码可能无效，重新触发 OTP（%s/%s）", otp_attempt + 1, max_otp_attempts)
-                _restart_email_otp_flow("验证码错误/过期或页面未跳转，避免点击 resend 导致 500/chrome-error")
+                    raise RuntimeError("Email verification code wrong/expired repeatedly")
+                logger.warning("[BrowserUse][OTP] The verification code may be invalid, re-triggering the OTP (%s/%s)", otp_attempt + 1, max_otp_attempts)
+                _restart_email_otp_flow("Verification code wrong/expired or the page did not move on, avoiding clicking resend which causes 500/chrome-error")
                 current_otp = None
 
-            logger.info("[BrowserUse] 处理资料页/登录态")
-            _t_profile = _StepTimer("资料页/登录态")
+            logger.info("[BrowserUse] Handling the profile page / login state")
+            _t_profile = _StepTimer("Profile page / login state")
             if provider_prefix == "skyvern":
                 profile_timeout = int(getattr(_cfg, "SKYVERN_PROFILE_TIMEOUT", 45) or 45)
                 session_timeout = int(getattr(_cfg, "SKYVERN_SESSION_ACCESS_TOKEN_TIMEOUT", 35) or 35)
@@ -2799,8 +2799,8 @@ def run_browser_use_registration(
                     create_acknowledged = True
                     _bu_delay("post_auth")
             except Exception as exc:
-                # 资料页是高频卡点：超时/强制跳出失败后不继续卡，直接进入取 AT；取不到则由下一步抛错失败。
-                logger.warning("[BrowserUse] 资料页处理超时/失败，直接尝试取 AT：%s: %s", type(exc).__name__, str(exc)[:260])
+                # The profile page is a frequent sticking point: after a timeout / forced-exit failure do not keep sticking, go straight to getting the AT; if it cannot be obtained, the next step throws and fails.
+                logger.warning("[BrowserUse] Profile page handling timed out/failed, trying to get the AT directly:%s: %s", type(exc).__name__, str(exc)[:260])
 
             try:
                 session_info = _fetch_chatgpt_session(page, context=context, timeout=session_timeout)
@@ -2810,18 +2810,18 @@ def run_browser_use_registration(
                 raise
             access_token = session_info.get("accessToken")
             if not access_token:
-                raise RuntimeError("注册流程结束但未拿到 accessToken")
+                raise RuntimeError("Registration flow ended but no accessToken")
             create_acknowledged = True
-            logger.info("[BrowserUse] 已拿到 accessToken：%s", email)
+            logger.info("[BrowserUse] Got the accessToken:%s", email)
 
             if _twofa_cfg.ENABLE_2FA:
-                logger.warning("[BrowserUse] 当前路径暂不自动设置 2FA，已跳过")
+                logger.warning("[BrowserUse] 2FA is not set up automatically on the current path, skipped")
             totp_secret = None
 
             codex_result = {
                 "status": "skipped",
                 "ok": True,
-                "message": "ENABLE_CODEX_AUTO=False，跳过 Codex",
+                "message": "ENABLE_CODEX_AUTO=False, skipping Codex",
             }
             try:
                 from config import codex as _codex_cfg
@@ -2829,34 +2829,34 @@ def run_browser_use_registration(
                 oauth_driver = str(getattr(_codex_cfg, "CODEX_OAUTH_DRIVER", "") or "").strip() or "same_as_registration"
                 if codex_auto_enabled:
                     logger.info(
-                        "[BrowserUse][Codex] ENABLE_CODEX_AUTO=True，注册成功后自动执行 Codex OAuth：driver=%s",
+                        "[BrowserUse][Codex] ENABLE_CODEX_AUTO=True, automatically running Codex OAuth after a successful registration:driver=%s",
                         oauth_driver,
                     )
-                    # Codex OAuth 会创建自己的授权 session。先关闭注册阶段的 Browser Use
-                    # CDP 连接，避免注册浏览器继续占用远端会话/代理资源并干扰后续 OAuth。
-                    _close_browser_use_session(browser, reason="即将执行 Codex OAuth")
+                    # Codex OAuth will create its own authorization session. First close the registration phase Browser Use
+                    # CDP connection, so the registration browser does not keep holding remote session / proxy resources and disturb the following OAuth.
+                    _close_browser_use_session(browser, reason="About to run Codex OAuth")
                     if provider_prefix == "skyvern" and hasattr(client, "close_browser_session") and getattr(session_info_open, "session_id", ""):
                         try:
                             client.close_browser_session(session_info_open.session_id)
-                            logger.info("[Skyvern] 已关闭注册 browser session：%s", session_info_open.session_id)
+                            logger.info("[Skyvern] Closed the registration browser session:%s", session_info_open.session_id)
                         except Exception as exc:
-                            logger.warning("[Skyvern] 关闭注册 browser session 失败：%s: %s", type(exc).__name__, str(exc)[:180])
+                            logger.warning("[Skyvern] Failed to close the registration browser session:%s: %s", type(exc).__name__, str(exc)[:180])
                     browser = None
                     context = None
                     page = None
                     from core.codex_oauth import run_codex_oauth
                     codex_result = run_codex_oauth(email, otp_provider=wait_for_otp, proxy=proxy, force=True)
                 else:
-                    logger.info("[BrowserUse][Codex] ENABLE_CODEX_AUTO=False，注册后跳过 Codex OAuth")
+                    logger.info("[BrowserUse][Codex] ENABLE_CODEX_AUTO=False, skipping after registration Codex OAuth")
             except Exception as exc:
-                logger.warning("[BrowserUse][Codex] 自动授权失败：%s: %s", type(exc).__name__, str(exc)[:220])
+                logger.warning("[BrowserUse][Codex] Automatic authorization failed:%s: %s", type(exc).__name__, str(exc)[:220])
                 codex_result = {
                     "status": "failed",
                     "ok": False,
                     "message": f"{type(exc).__name__}: {str(exc)[:220]}",
                 }
 
-            # 云端浏览器不采集本地流量明细；注册后停留仅用于完成页面流程。
+            # Cloud browsers do not collect local traffic details; the dwell after registration is only used to complete the page flow.
             _post_register_dwell(page, context, provider_prefix=provider_prefix, email=email)
             account_id = save_account_data(
                 email=email,
@@ -2892,15 +2892,15 @@ def run_browser_use_registration(
                 "error": None,
             }
     except Exception as exc:
-        logger.error("[BrowserUse] 注册失败：%s: %s", type(exc).__name__, exc)
-        logger.debug("[BrowserUse] 失败详情", exc_info=True)
+        logger.error("[BrowserUse] Registration failed:%s: %s", type(exc).__name__, exc)
+        logger.debug("[BrowserUse] failure details", exc_info=True)
         try:
             if email:
                 from core.email_provider import release_email
                 release_email(
                     email,
                     status="failed" if create_acknowledged else "available",
-                    note=f"BrowserUse注册失败: {str(exc)[:180]}",
+                    note=f"BrowserUse registration failed: {str(exc)[:180]}",
                 )
         except Exception:
             pass
@@ -2911,7 +2911,7 @@ def run_browser_use_registration(
             "error": f"{type(exc).__name__}: {str(exc)[:300]}",
         }
     finally:
-        # 任务结束统一关闭连接，避免云浏览器/CDP 残留占用。
+        # Close the connection uniformly when the task ends, to avoid leftover cloud browser / CDP occupying resources.
         try:
             if browser is not None:
                 browser.close()

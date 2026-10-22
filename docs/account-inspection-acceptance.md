@@ -1,29 +1,29 @@
 
 
-## 最近一次复核（2026-10-18）
+## Latest review (2026-10-18)
 
-本次沿任务领取/防重、账号快照与旧结果保护、异常回收、历史恢复、数据库锁和 UI 请求状态重新审阅；**未确认新的功能缺陷或阻塞性性能问题，本次未修改业务代码**。这是固定范围内的复核结论，不是全系统无缺陷保证。
+This round re-reviewed task claiming/de-duplication, account snapshots and stale-result protection, exception reclamation, history recovery, database locks, and UI request state; **no new functional defects or blocking performance issues were confirmed, and no business code was modified this round**. This is a conclusion for a fixed review scope, not a guarantee that the whole system is defect-free.
 
-- 全量 unittest：384 项通过（20.003 秒）。
-- 巡检专项：67 项连续 3 轮通过（6.834 / 6.989 / 6.642 秒），包含 1/4/16/32 线程混合并发、防重和精确统计验证。
-- Node UI 回归、系统 Chrome 新旧模板桌面/手机渲染、compileall、`git diff --check`：通过。
-- 本机临时库基准：1000 次主键读取 2.181 秒、100 个账号各 6 次状态操作 1.791 秒、8 线程巡检 1000 个有效 AT 3.016 秒。本轮与回归并行运行，单次耗时仅作观察，不作严格性能差异归因。
-- 日志：`/tmp/inspection-reaudit-full.log`、`/tmp/inspection-reaudit-{1,2,3}.log`；基准：`/tmp/inspection-reaudit-perf.json`。
-- 仍有的设计边界：ID 一次性加载为 O(N) 内存；Unicode 邮箱匹配可能扫描邮箱列；SQLite 单写者和同步统计仍有吞吐上限；网络请求使用 mock，真实登录/取码/套餐延迟未在本轮测量。现有跨进程账号编辑边界不变。
+- Full unittest run: 384 tests passed (20.003 s).
+- Inspection-specific: 67 tests passed in 3 consecutive rounds (6.834 / 6.989 / 6.642 s), including mixed concurrency with 1/4/16/32 threads, de-duplication, and exact statistics verification.
+- Node UI Regression, system Chrome desktop/mobile rendering of the old and new templates, compileall, `git diff --check`: passed.
+- Local temporary DB benchmark: 1000 primary-key reads took 2.181 s, 100 accounts with 6 status operations each took 1.791 s, and an 8-thread inspection of 1000 valid ATs took 3.016 s. This round ran in parallel with the regression suite, so single timings are for observation only and not for strict performance attribution.
+- Logs: `/tmp/inspection-reaudit-full.log`, `/tmp/inspection-reaudit-{1,2,3}.log`; benchmark: `/tmp/inspection-reaudit-perf.json`.
+- Remaining design boundaries: loading all IDs at once costs O(N) memory; Unicode email matching may scan the email column; SQLite single-writer and synchronous stats still cap throughput; network requests use mocks, so real login / code retrieval / plan latency was not measured this round. The existing cross-process account-editing boundary is unchanged.
 
-以下保留既有验收矩阵及各次修复证据。
-## 后续存储优化回归
+The existing acceptance matrix and the evidence from each fix are kept below.
+## Follow-up storage optimization regression
 
-按账号主键读取及查活/套餐单行事务更新已接入；原有验收不变量不变，统计仍逐阶段落库。优化后的全量测试为 **373 项通过**，巡检专项 **56 项**；性能样本、改动范围及新增回归见 `docs/account-inspection-performance.md`。其他业务仍有集合全量读改写，原多实例部署边界继续适用。
+Reads by account primary key and single-row transactional updates for liveness check/plan are now in place; the original acceptance invariants are unchanged, and statistics are still persisted stage by stage. After the optimization the full test run has **373 tests passing**, with **56** inspection-specific tests; performance samples, change scope, and new regressions are in `docs/account-inspection-performance.md`. Other features still do full-collection read-modify-write, and the original multi-instance deployment boundary still applies.
 
-## ID 清单与异常停止复核结果
+## ID list and abnormal-stop review results
 
-最新回归为 **378 项全量通过、61 项巡检专项连续 3 轮通过**。新增清单与统计分离、旧记录迁移及失败回滚、线程故障停止后续领取验证；详细证据和仍存性能边界见 `docs/account-inspection-performance.md` 的追加章节。ID 仍一次性加载，网络 mock 和多实例账号编辑的验证边界不变。
+The latest regression: **378 tests pass in the full run, and the 61 inspection-specific tests pass in 3 consecutive rounds**. Added verification for separating the list from statistics, legacy record migration and failure rollback, and stopping further claims after a thread fault; detailed evidence and the remaining performance boundaries are in the appended section of `docs/account-inspection-performance.md`. IDs are still loaded all at once, and the validation boundaries for network mocks and multi-instance account editing are unchanged.
 
-## 邮箱入口兼容与性能复核
+## Email entry compatibility and performance review
 
-最新验证：**381 项全量通过，64 项巡检专项连续 3 轮通过**。修复按邮箱读取仍加载全部账号详情，以及单行 SQL 查询与 Python Unicode 小写语义不一致的问题。复现与性能样本见性能报告追加章节。其余验收范围和已声明边界保持不变。
+Latest verification: **381 tests pass in the full run, and the 64 inspection-specific tests pass in 3 consecutive rounds**. Fixed lookups by email still loading all account details, and the mismatch between single-row SQL queries and Python Unicode lowercase semantics. Reproductions and performance samples are in the appended section of the performance report. The rest of the acceptance scope and the declared boundaries are unchanged.
 
-## 2026-10-18 锁竞争与资源回收复查
+## 2026-10-18 lock contention and resource reclamation review
 
-最新全量 **384 项通过**，巡检专项 **67 项**。修复空闲历史恢复检查无条件获取写锁、连接配置失败未关闭、数据库初始化早期失败未关闭三条路径。真实 SQLite 写锁和资源故障注入证据见性能报告的当日章节；其他验证边界不变。
+The latest full run has **384 passing tests**, with **67** inspection-specific tests. Fixed three paths: idle history recovery checks unconditionally taking the write lock, a connection not closed when connection configuration fails, and a connection not closed when database initialization fails early. Evidence from a real SQLite write lock and resource fault injection is in that day section of the performance report; other validation boundaries are unchanged.

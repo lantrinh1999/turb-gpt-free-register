@@ -60,8 +60,8 @@ class ProxyChainTrafficTests(unittest.TestCase):
         self.assertEqual(relay.last_error, "")
         with self.assertLogs("core.browser_traffic", level="INFO") as captured:
             result = merge_proxy_transport_traffic({}, snapshot, label="Roxy")
-        self.assertTrue(any("[代理拦截] target=dl.google.com:443 blocked=2" in line for line in captured.output))
-        self.assertFalse(any("[代理目标]" in line for line in captured.output))
+        self.assertTrue(any("[proxy block] target=dl.google.com:443 blocked=2" in line for line in captured.output))
+        self.assertFalse(any("[proxy target]" in line for line in captured.output))
         self.assertEqual(result["proxy_transport"]["blocked_connection_count"], 5)
 
     def test_host_block_also_applies_to_plain_http(self):
@@ -179,7 +179,7 @@ class ProxyChainTrafficTests(unittest.TestCase):
                 self.assertEqual(_read_exact(server, len(early)), early)
                 server.sendall(b"tls-response")
                 self.assertEqual(_read_exact(browser, 12), b"tls-response")
-                # 用锁确保转发后的计数写入已经完成，不要求关闭长连接才拿到明细。
+                # Use a lock to ensure the count writes after forwarding have completed, without requiring the long-lived connection to be closed to get the details.
                 import time
                 deadline = time.monotonic() + 2
                 while relay.traffic_snapshot()["download_bytes"] != 12 and time.monotonic() < deadline:
@@ -237,7 +237,7 @@ class ProxyChainTrafficTests(unittest.TestCase):
         relay._record_transfer(("2001:db8::1", 443), download=10)
         with self.assertLogs("core.browser_traffic", level="INFO") as captured:
             result = merge_proxy_transport_traffic({"total_bytes": 50}, relay.traffic_snapshot(), label="Roxy")
-        lines = [line for line in captured.output if "[代理目标]" in line]
+        lines = [line for line in captured.output if "[proxy target]" in line]
         self.assertEqual(len(lines), 3)
         self.assertIn("target=cdn.example.test:443", lines[0])
         self.assertIn("total=800B", lines[0])

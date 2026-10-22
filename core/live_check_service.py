@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""账号查活后台队列：协议 BrowserSession 指纹环境 + 独立日志。"""
+"""Account liveness check background queue: protocol BrowserSession fingerprint environment + separate logs."""
 from __future__ import annotations
 
 import logging
@@ -29,7 +29,7 @@ _NETWORK_RETRY_HINTS = (
 
 
 def _configured_live_check_proxies(proxy_cfg) -> list[str]:
-    """查活优先使用套餐专用代理池，未配置时使用注册代理池。"""
+    """Liveness check prefers the dedicated plan proxy pool, and falls back to the registration proxy pool when it is not configured."""
     values = list(getattr(proxy_cfg, "PLAN_CHECK_PROXY", []) or [])
     if not values:
         values = list(getattr(proxy_cfg, "PROXY_POOL", []) or [])
@@ -74,11 +74,11 @@ def _append_log(email: str, line: str, *, clear: bool = False) -> None:
 
 
 def _safe_append_log(email: str, line: str, *, clear: bool = False) -> None:
-    """辅助日志失败不能覆盖查活结果或阻止保存已经刷新的 AT。"""
+    """Failure of auxiliary logging must not override the liveness check result or prevent saving the refreshed AT."""
     try:
         _append_log(email, line, clear=clear)
     except Exception:
-        logger.warning("[查活] 日志写入失败: %s", email, exc_info=True)
+        logger.warning("[Liveness check] failed to write log: %s", email, exc_info=True)
 
 
 def _close_relay(relay) -> None:
@@ -86,13 +86,13 @@ def _close_relay(relay) -> None:
         try:
             relay.close()
         except Exception:
-            logger.warning("[查活] 代理中继关闭失败", exc_info=True)
+            logger.warning("[Liveness check] failed to close proxy relay", exc_info=True)
 
 
 def complete_authenticated_live_check(*, account_id: int, expected_account: dict, result: dict, session, run_id: str | None = None) -> dict:
-    """先持久化新 AT，再同步复用登录会话查套餐；套餐失败不改变查活成功。"""
+    """Persist the new AT first, then reuse the login session to query the plan; a plan failure does not change a successful liveness check."""
     if not db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id):
-        return {"ok": False, "status": "failed", "error": "账号已删除或邮箱/AT 已变更，丢弃旧查活结果"}
+        return {"ok": False, "status": "failed", "error": "Account deleted or email/AT changed, discarding the stale liveness check result"}
     try:
         from core.plan_check_service import check_account_plan_in_session
         result["plan_result"] = check_account_plan_in_session(
@@ -100,10 +100,10 @@ def complete_authenticated_live_check(*, account_id: int, expected_account: dict
             access_token=result["access_token"], session=session,
         )
     except Exception as exc:
-        logger.exception("[查活] 自动查套餐异常: account_id=%s", account_id)
+        logger.exception("[Liveness check] auto plan query error: account_id=%s", account_id)
         result["plan_result"] = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
-    _safe_append_log(expected_account["email"], "[查活] 自动查套餐：" +
-                     ("成功" if result["plan_result"].get("ok") else "失败 " + str(result["plan_result"].get("error") or "")))
+    _safe_append_log(expected_account["email"], "[Liveness check] auto plan query:" +
+                     ("Success" if result["plan_result"].get("ok") else "failed " + str(result["plan_result"].get("error") or "")))
     return result
 
 
@@ -115,48 +115,48 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
         nonlocal completed_in_session
         completed = complete_authenticated_live_check(account_id=account_id, expected_account=expected_account,
                                                        result=result, session=session, run_id=run_id)
-        # 只有回调正常返回才算处理完成；保存 AT 抛错时仍需落库最终失败状态。
+        # The callback is considered handled only if it returns normally; if saving the AT raises an error, the final failed state still has to be persisted.
         completed_in_session = True
         return completed
     try:
         with _LOCK:
             _RUNNING.add(int(account_id))
         if not db.mark_account_live_check_running(account_id, run_id=run_id):
-            _safe_append_log(email, "[查活] 账号已删除或查活状态已被重置，取消执行")
-            return {"ok": False, "status": "failed", "error": "账号已删除或查活状态已被重置"}
+            _safe_append_log(email, "[Liveness check] account deleted or liveness check state was reset, cancelling execution")
+            return {"ok": False, "status": "failed", "error": "Account deleted or liveness check state was reset"}
         from config import proxy as proxy_cfg
         candidates = _configured_live_check_proxies(proxy_cfg)
         route = resolve_plan_check_route(explicit_proxy=proxy)
-        # 查活规则独立于套餐查询的 direct/auto 选择：只要任一代理池有数据，
-        # 就禁止直连，并从池中随机选择一个出口。
+        # The liveness check rule is independent of the direct/auto choice of the plan query: as long as any proxy pool has entries,
+        # direct connection is forbidden and one egress is picked at random from the pool.
         if candidates and not str(route.get("proxy") or "").strip():
             route = _live_proxy_route(random.choice(candidates), proxy_cfg)
         selected_proxy = str(route.get("proxy") or "").strip()
         timeout = float(getattr(proxy_cfg, "PLAN_CHECK_TIMEOUT", 15.0) or 15.0)
-        # 查活必须沿用账号注册时记录的邮箱来源。不能只调用
-        # resolve_email_source(email)：Remail 等临时邮箱的上下文只在领取进程
-        # 内存中存在，服务重启后按当前 EMAIL_SOURCE 推断会把来源判错。
+        # The liveness check must reuse the email source recorded when the account was registered. It cannot just call
+        # resolve_email_source(email): the context of temporary mailboxes such as Remail only exists in the memory of the process that claimed it,
+        # and after a service restart, inferring from the current EMAIL_SOURCE would get the source wrong.
         account = db.get_account(account_id) or {}
         if not account or str(account.get("email") or "").strip().lower() != email.strip().lower():
-            result = {"ok": False, "status": "failed", "error": "账号已删除或邮箱已变更，丢弃旧查活任务"}
+            result = {"ok": False, "status": "failed", "error": "Account deleted or email changed, discarding the stale liveness check task"}
             db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id)
             return result
         expected_account = {"email": email, "access_token": account.get("access_token", "")}
         email_source = str(account.get("email_source") or "").strip() or None
         if email_source:
-            _safe_append_log(email, f"[查活] 使用注册时保存的邮箱来源：{email_source}")
+            _safe_append_log(email, f"[Liveness check] using the email source saved at registration:{email_source}")
         _safe_append_log(
             email,
-            "[查活] 开始后台执行 "
+            "[Liveness check] starting background execution "
             f"trigger={trigger} network_route={route.get('network_route')} "
             f"proxy_mode={route.get('proxy_mode')} proxy_used={route.get('proxy_used') or '-'} "
             f"fallback_reason={route.get('proxy_fallback_reason') or '-'}"
         )
-        # 每个代理出口使用独立 BrowserSession/指纹/Cookie。网络类失败后换池中
-        # 尚未使用的代理；池非空时绝不直连。
+        # Each proxy egress uses its own BrowserSession/fingerprint/Cookie. After a network-type failure, switch to an
+        # unused proxy from the pool; never connect directly when the pool is non-empty.
         max_routes = max(1, int(getattr(proxy_cfg, "PLAN_CHECK_MAX_ATTEMPTS", 3) or 3))
         used_proxies: set[str] = set()
-        result: dict = {"ok": False, "status": "failed", "error": "查活未执行"}
+        result: dict = {"ok": False, "status": "failed", "error": "Liveness check not executed"}
         for route_attempt in range(1, max_routes + 1):
             selected_proxy = str(route.get("proxy") or "").strip()
             if selected_proxy:
@@ -166,10 +166,10 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             )
             _safe_append_log(
                 email,
-                f"[查活] 网络出口尝试 {route_attempt}/{max_routes}："
+                f"[Liveness check] network egress attempt {route_attempt}/{max_routes}:"
                 f"{_mask_proxy(selected_proxy) or 'direct'}",
             )
-            # 占用属于本次出口尝试，不得沿用上一次失败回调的完成标志。
+            # The slot belongs to this egress attempt and must not reuse the completion flag of the previous failed callback.
             completed_in_session = False
             result = check_account_liveness(
                 email,
@@ -190,7 +190,7 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
                 next_proxy = random.choice(remaining)
                 _safe_append_log(
                     email,
-                    "[查活] 当前代理发生网络/403错误，放弃该会话并随机切换下一代理："
+                    "[Liveness check] network/403 error on the current proxy, abandoning this session and randomly switching to the next proxy:"
                     f"{_mask_proxy(next_proxy)}",
                 )
                 route = _live_proxy_route(next_proxy, proxy_cfg)
@@ -199,23 +199,23 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
             if candidates:
                 break
 
-            # 没有任何代理池数据时，保留原先的一次直连兜底行为。
+            # When there is no proxy pool data at all, keep the original one-time direct connection fallback behavior.
             if selected_proxy and route_attempt < max_routes:
                 _safe_append_log(
                     email,
-                    "[查活] 未配置可替换代理，启动独立直连会话兜底一次",
+                    "[Liveness check] no replaceable proxy configured, starting an independent direct session as a one-time fallback",
                 )
                 route = resolve_plan_check_route(explicit_proxy="")
                 continue
             break
         if not completed_in_session and not db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id):
-            return {"ok": False, "status": "failed", "error": "账号已删除或邮箱/AT 已变更，丢弃旧查活结果"}
+            return {"ok": False, "status": "failed", "error": "Account deleted or email/AT changed, discarding the stale liveness check result"}
         if result.get("ok"):
-            _safe_append_log(email, "[查活] 完成：账号正常，已刷新最新 AT/accessToken")
+            _safe_append_log(email, "[Liveness check] done: account is healthy, latest refreshed AT/accessToken")
         elif result.get("status") == "deactivated":
-            _safe_append_log(email, f"[查活] 完成：账号已废 {result.get('error') or ''}")
+            _safe_append_log(email, f"[Liveness check] done: account is dead {result.get('error') or ''}")
         else:
-            _safe_append_log(email, f"[查活] 完成：失败 {result.get('error') or ''}")
+            _safe_append_log(email, f"[Liveness check] done: failed {result.get('error') or ''}")
         result.update({
             "network_route": route.get("network_route"),
             "proxy_used": _mask_proxy(selected_proxy) or None,
@@ -234,10 +234,10 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
         try:
             db.update_account_liveness(account_id, result, expected_account=expected_account, expected_run_id=run_id)
         except Exception:
-            logger.exception("[查活] 写入异常状态失败: account_id=%s", account_id)
-        logger.exception("[查活] 后台异常: %s", email)
+            logger.exception("[Liveness check] failed to write error state: account_id=%s", account_id)
+        logger.exception("[Liveness check] background error: %s", email)
         try:
-            _safe_append_log(email, f"[查活] 后台异常：{result['error']}")
+            _safe_append_log(email, f"[Liveness check] background error:{result['error']}")
         except Exception:
             pass
         return result
@@ -252,15 +252,15 @@ def _run_live_check(*, account_id: int, email: str, proxy: str | None, trigger: 
 
 
 def _release_cancelled_check(future, account_id: int, run_id: str | None = None) -> None:
-    # 被取消且尚未执行的 Future 不会进入 worker 的 finally，必须单独归还占用。
+    # A canceled Future that has not run never enters the worker finally, so the claim must be returned separately.
     if not future.cancelled():
         return
-    result = {"ok": False, "status": "failed", "error": "任务在开始执行前被取消",
+    result = {"ok": False, "status": "failed", "error": "Task was canceled before it started running",
               "checked_at": datetime.now().isoformat(timespec="seconds")}
     try:
         db.update_account_liveness(account_id, result, expected_run_id=run_id)
     except Exception:
-        logger.exception("写入取消状态失败: account_id=%s", account_id)
+        logger.exception("Failed to write cancel status: account_id=%s", account_id)
     finally:
         with _LOCK:
             _RUNNING.discard(account_id)
@@ -271,15 +271,15 @@ def enqueue_account_live_check(*, account_id: int, email: str, trigger: str = "m
     account_id = int(account_id)
     email = str(email or "").strip()
     if not email:
-        return {"accepted": False, "busy": False, "error": "email 为空"}
+        return {"accepted": False, "busy": False, "error": "email is empty"}
     with _LOCK:
         if account_id in _RUNNING:
-            return {"accepted": False, "busy": True, "error": "该账号正在查活"}
+            return {"accepted": False, "busy": True, "error": "This account is being liveness-checked"}
         _RUNNING.add(account_id)
     if not _QUEUE_SLOTS.acquire(blocking=False):
         with _LOCK:
             _RUNNING.discard(account_id)
-        return {"accepted": False, "busy": False, "queue_full": True, "error": "查活队列已满，请稍后重试"}
+        return {"accepted": False, "busy": False, "queue_full": True, "error": "Liveness check queue is full, please try again later"}
     run_id = uuid.uuid4().hex
     try:
         claimed = db.claim_account_live_check(acc_id=account_id, trigger=trigger, run_id=run_id, expected_email=email)
@@ -292,10 +292,10 @@ def enqueue_account_live_check(*, account_id: int, email: str, trigger: str = "m
         with _LOCK:
             _RUNNING.discard(account_id)
         _QUEUE_SLOTS.release()
-        return {"accepted": False, "busy": True, "error": "该账号正在查活"}
+        return {"accepted": False, "busy": True, "error": "This account is being liveness-checked"}
 
     try:
-        _append_log(email, f"[查活] 已入队 account_id={account_id} trigger={trigger}", clear=True)
+        _append_log(email, f"[Liveness check] queued account_id={account_id} trigger={trigger}", clear=True)
         future = (executor or _EXECUTOR).submit(
             _run_live_check,
             account_id=account_id,
@@ -313,13 +313,13 @@ def enqueue_account_live_check(*, account_id: int, email: str, trigger: str = "m
             "ok": False,
             "status": "failed",
             "checked_at": datetime.now().isoformat(timespec="seconds"),
-            "error": f"查活入队失败: {type(exc).__name__}: {str(exc)[:160]}",
+            "error": f"Failed to queue liveness check: {type(exc).__name__}: {str(exc)[:160]}",
         }
         db.update_account_liveness(account_id, result, expected_run_id=run_id)
         try:
             _append_log(email, result["error"])
         except Exception:
-            logger.exception("[查活] 入队失败日志写入异常")
+            logger.exception("[Liveness check] error while writing the enqueue failure log")
         return {"accepted": False, "busy": False, "error": result["error"]}
 
     return {

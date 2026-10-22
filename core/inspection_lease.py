@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""按 SQLite 文件隔离的巡检进程锁；进程退出后由操作系统自动释放。"""
+"""Inspection process lock isolated per SQLite file; released automatically by the OS when the process exits."""
 from __future__ import annotations
 
 import errno

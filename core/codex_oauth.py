@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-注册成功后的 Codex OAuth 授权模块（2026-06-15 改造：全新 session + 接码）。
+Codex OAuth authorization module after a successful registration (reworked 2026-06-15: brand new session + SMS code receiving).
 
-旧方案"复用注册的已登录 session"会撞 /choose-an-account 卡死（React SPA 解析不出
-可提交字段）。新方案改为用**全新干净 session**从头登录，走 OpenAI 标准风控路径，
-手机号验证靠接码平台自动收码，当前通过 core.sms_provider 支持 GrizzlySMS 和 L_API.md
-定义的本地 L 取号服务。
+The old approach of reusing the logged-in session from registration ran into /choose-an-account and hung (the React SPA could not parse out
+the submittable fields). The new approach logs in from scratch with a **brand new clean session**, following the standard OpenAI risk-control path,
+phone verification receives its codes automatically from a code-receiving platform; core.sms_provider currently supports GrizzlySMS and the L_API.md
+locally defined L number service.
 
-完整接口链由 Auth 返回的 page/type/continue_url 动态决定：
-    - 提交邮箱后可能进入密码、邮箱 OTP 或其他验证页
-    - 密码后可能进入 MFA/TOTP、邮箱 OTP、手机号验证或直接授权
-    - 邮箱 OTP/MFA 后同样只在服务端明确要求时执行手机号验证
-    - 最后选 workspace / 跟随重定向到 localhost:1455/auth/callback
+The complete API chain is decided dynamically by the page/type/continue_url returned by Auth:
+    - After submitting the email it may go to a password, email OTP or another verification page
+    - After the password it may go to MFA/TOTP, email OTP, phone verification or straight to authorization
+    - After email OTP/MFA, phone verification is likewise only performed when the server explicitly requires it
+    - Finally pick the workspace / follow the redirect to localhost:1455/auth/callback
 
-拿到 code 后换 token / 保存到 SQLite 的逻辑（exchange_codex_token /
-build_codex_storage / save_codex_credential）沿用原流程。
+The logic of exchanging the code for a token / saving to SQLite (exchange_codex_token /
+build_codex_storage / save_codex_credential) follows the original flow.
 """
 import base64
 import hashlib
@@ -29,9 +29,9 @@ from urllib.parse import urlencode, urlparse, parse_qs, quote
 
 import pyotp
 
-# 用模块属性方式访问 config，支持 WebUI 热加载（config.reload_all()）。
-# 协议级常量（CLIENT_ID/URL/SCOPE/OUTPUT_DIRNAME）虽然不会改，统一从 _cfg 读，
-# 这样 reload 后立即生效，不用再分两套导入。
+# Access config through module attributes, which supports WebUI hot reload (config.reload_all()).
+# Protocol-level constants (CLIENT_ID/URL/SCOPE/OUTPUT_DIRNAME) never change, but are still read uniformly from _cfg,
+# so they take effect immediately after a reload and no second set of imports is needed.
 from config import codex as _cfg
 from core.session import BrowserSession
 from core.humanize import delay as human_delay
@@ -52,22 +52,22 @@ from curl_cffi import requests as curl_requests
 
 logger = logging.getLogger(__name__)
 
-# 跟重定向链时的最大跳数，防死循环
+# Maximum number of hops when following a redirect chain, to prevent infinite loops
 _MAX_REDIRECTS = 15
 
-# 网络层临时性错误（代理抖动 / TLS 握手失败 / 重置）重试参数，对齐 openai_auth.follow_authorize
+# Retry parameters for temporary network-layer errors (proxy jitter / TLS handshake failure / reset), aligned with openai_auth.follow_authorize
 _NET_MAX_ATTEMPTS = 3
 _NET_BACKOFF_BASE = 2.0
 
-# Auth 响应设置 cookie 与后续 workspace/select 之间偶尔存在短暂竞态。
+# Auth There is occasionally a short race between the response setting the cookie and the following workspace/select.
 _WORKSPACE_COOKIE_WAIT_SECONDS = 4.0
 _WORKSPACE_POLL_INTERVAL_SECONDS = 0.2
 
 
 def _with_net_retry(label: str, fn):
     """
-    对临时性网络错误（TLS/代理/超时/重置）做重试包装。
-    非临时错误（业务 4xx 等）直接抛。最多 _NET_MAX_ATTEMPTS 次。
+    Retry wrapper for temporary network errors (TLS/proxy/timeout/reset).
+    Non-temporary errors (business 4xx etc.) are raised directly. At most _NET_MAX_ATTEMPTS attempts.
     """
     last_exc = None
     for attempt in range(1, _NET_MAX_ATTEMPTS + 1):
@@ -81,15 +81,15 @@ def _with_net_retry(label: str, fn):
                 break
             backoff = _NET_BACKOFF_BASE ** (attempt - 1)
             logger.warning(
-                f"[Codex] {label} 临时性网络错误 ({type(exc).__name__}: {str(exc)[:120]})，"
-                f"{backoff:.1f}s 后重试 (尝试 {attempt}/{_NET_MAX_ATTEMPTS})..."
+                f"[Codex] {label} Temporary network error ({type(exc).__name__}: {str(exc)[:120]}),"
+                f"{backoff:.1f}s retrying afterwards (attempt {attempt}/{_NET_MAX_ATTEMPTS})..."
             )
             time.sleep(backoff)
-    raise last_exc if last_exc else RuntimeError(f"[Codex] {label} 重试耗尽但无异常记录")
+    raise last_exc if last_exc else RuntimeError(f"[Codex] {label} Retries exhausted without an exception record")
 
 
 def _with_auth_navigation_retry(session: BrowserSession, label: str, fn):
-    """对 Auth document 的 403/429/5xx 重试，并保留当前 Cookie/设备上下文。"""
+    """Retry 403/429/5xx of the Auth document, keeping the current Cookie/device context."""
     last_exc = None
     for attempt in range(1, _NET_MAX_ATTEMPTS + 1):
         try:
@@ -106,29 +106,29 @@ def _with_auth_navigation_retry(session: BrowserSession, label: str, fn):
             last_exc = exc
             if not _is_retryable_authorize_error(exc) or attempt >= _NET_MAX_ATTEMPTS:
                 raise
-            # Cloudflare 的 403 经常同时更新 __cf_bm。只清理本地熔断，绝不能
-            # 新建 Session，否则刚得到的 Cookie 和统一 device/session ID 会丢失。
+            # Cloudflare 403 often updates __cf_bm at the same time. Only clear the local circuit breaker, and never
+            # create a new Session, otherwise the Cookie just obtained and the unified device/session ID would be lost.
             _reset_retryable_circuit(session)
             backoff = _NET_BACKOFF_BASE ** (attempt - 1)
             logger.warning(
-                "[Codex] %s 临时失败（%s/%s）：%s: %s；"
-                "保留当前 session/deviceId/CF Cookie，%.1fs 后重试",
+                "[Codex] %s temporary failure (%s/%s): %s: %s; "
+                "keeping the current session/deviceId/CF Cookie, retrying in %.1fs",
                 label, attempt, _NET_MAX_ATTEMPTS, type(exc).__name__,
                 str(exc)[:160], backoff,
             )
             time.sleep(backoff)
-    raise last_exc if last_exc else RuntimeError(f"[Codex] {label} 重试耗尽")
+    raise last_exc if last_exc else RuntimeError(f"[Codex] {label} retries exhausted")
 
 
 def _codex_auth_preflight(session: BrowserSession) -> None:
-    """仅预热 Codex 真正依赖的 Auth 域名，不再用 ChatGPT 首页作为硬门槛。"""
+    """Only warm up the Auth domain Codex really depends on; the ChatGPT home page is no longer a hard gate."""
     headers = session.get_auth_navigate_headers(
         referer="", user_initiated=False, target_origin="https://auth.openai.com",
     )
-    logger.info("[Codex][预检] Auth document（统一 session/deviceId）")
+    logger.info("[Codex][pre-check] Auth document (unified session/deviceId)")
     _with_auth_navigation_retry(
         session,
-        "auth document 预检",
+        "auth document pre-check",
         lambda: session.get(
             "https://auth.openai.com/log-in",
             headers=headers,
@@ -138,12 +138,12 @@ def _codex_auth_preflight(session: BrowserSession) -> None:
 
 
 def _codex_protocol_fingerprint_warmup(session: BrowserSession) -> None:
-    """用同一协议会话预热 ChatGPT Web 指纹、版本信息和匿名 Cookie。"""
-    logger.info("[Codex][指纹预热] 开始：ChatGPT document + 匿名前端初始化")
+    """Warm up the ChatGPT Web fingerprint, version information and anonymous Cookies with the same protocol session."""
+    logger.info("[Codex][fingerprint warm-up] Start: ChatGPT document + anonymous front-end initialization")
     headers = session.get_chatgpt_navigate_headers(referer="", user_initiated=False)
     resp = _with_auth_navigation_retry(
         session,
-        "ChatGPT 指纹 document 预热",
+        "ChatGPT fingerprint document warm-up",
         lambda: session.get(
             "https://chatgpt.com/auth/login",
             headers=headers,
@@ -154,14 +154,14 @@ def _codex_protocol_fingerprint_warmup(session: BrowserSession) -> None:
     if callable(observe):
         observe(resp)
 
-    # 复用注册协议链已有的匿名初始化，使 oai-did、locale、真实前端 build、
-    # Cookie Jar 与随后 Auth OAuth 导航处于同一网络和浏览器身份上下文。
+    # Reuse the anonymous initialization already done by the registration protocol chain, so oai-did, locale and the real front-end build
+    # Cookie Jar share the same network and browser identity context as the following Auth OAuth navigation.
     from core.chatgpt_bootstrap import anonymous_bootstrap
     anonymous_bootstrap(session, strict=False)
     reset = getattr(session, "reset_circuit_breaker", None)
     if callable(reset):
         reset()
-    logger.info("[Codex][指纹预热] 完成，继续 Auth document 预检")
+    logger.info("[Codex][fingerprint warm-up] Done, continuing with the Auth document pre-check")
 
 
 def _codex_result(
@@ -174,7 +174,7 @@ def _codex_result(
     callback_url: str | None = None,
     message: str = "",
 ) -> dict:
-    """构造与 flow_trigger._flow_result 同形态的结构化结果。"""
+    """Build a structured result of the same shape as flow_trigger._flow_result."""
     return {
         "status": status,
         "ok": ok,
@@ -187,7 +187,7 @@ def _codex_result(
 
 
 def _account_registration_password(email: str) -> str:
-    """读取账号的注册密码；不存在则返回空字符串。"""
+    """Read the registration password of the account; return an empty string if there is none."""
     try:
         acc = db.get_account_by_email(email)
         if not acc:
@@ -207,7 +207,7 @@ def _account_registration_password(email: str) -> str:
 
 
 def _account_totp_secret(email: str) -> str:
-    """读取账号已开启的 2FA 密钥；不存在则返回空字符串。"""
+    """Read the 2FA secret enabled for the account; return an empty string if there is none."""
     try:
         acc = db.get_account_by_email(email)
         if not acc:
@@ -223,11 +223,11 @@ def _account_totp_code(email: str) -> str:
 
 
 # ============================================================
-# PKCE / state（对照 CLIProxyAPI pkce.go）
+# PKCE / state(compare CLIProxyAPI pkce.go)
 # ============================================================
 
 def _generate_pkce() -> tuple[str, str]:
-    """生成 PKCE 代码对：verifier=base64url(96字节)，challenge=base64url(sha256(verifier))。"""
+    """Generate a PKCE code pair: verifier=base64url(96 bytes), challenge=base64url(sha256(verifier))."""
     verifier_bytes = secrets.token_bytes(96)
     code_verifier = base64.urlsafe_b64encode(verifier_bytes).rstrip(b"=").decode("ascii")
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
@@ -236,12 +236,12 @@ def _generate_pkce() -> tuple[str, str]:
 
 
 def _generate_state() -> str:
-    """生成 OAuth state 随机串，防 CSRF。"""
+    """Generate a random OAuth state string against CSRF."""
     return secrets.token_urlsafe(32)
 
 
 def _build_authorize_url(state: str, code_challenge: str, prompt: str = "login") -> str:
-    """按 CLIProxyAPI openai_auth.go 的参数集拼 Codex 授权 URL。"""
+    """Assemble the Codex authorization URL with the parameter set of CLIProxyAPI openai_auth.go."""
     params = {
         "client_id": _cfg.CODEX_CLIENT_ID,
         "response_type": "code",
@@ -258,7 +258,7 @@ def _build_authorize_url(state: str, code_challenge: str, prompt: str = "login")
 
 
 def _ensure_oai_context_url(auth_url: str, session: BrowserSession) -> str:
-    """在 Codex OAuth 授权 URL 上补齐前端同源上下文参数，保持 oai-did 连续。"""
+    """Add the front-end same-origin context parameters to the Codex OAuth authorization URL, keeping oai-did continuous."""
     try:
         parsed = urlparse(auth_url)
         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -281,7 +281,7 @@ def _ensure_oai_context_url(auth_url: str, session: BrowserSession) -> str:
 
 
 # ============================================================
-# CPA 管理接口：授权地址由 CPA 生成，成功回调提交给 CPA
+# CPA management API: the authorization URL is generated by CPA and the successful callback is submitted to CPA CPA
 # ============================================================
 
 def _codex_auth_url_source() -> str:
@@ -291,25 +291,25 @@ def _codex_auth_url_source() -> str:
 def _cpa_management_origin() -> str:
     raw = str(getattr(_cfg, "CPA_MANAGEMENT_URL", "") or "").strip()
     if not raw:
-        raise RuntimeError("[Codex][CPA] 尚未配置 CPA_MANAGEMENT_URL")
+        raise RuntimeError("[Codex][CPA] not configured yet CPA_MANAGEMENT_URL")
     try:
         parsed = urlparse(raw)
     except Exception as exc:
-        raise RuntimeError(f"[Codex][CPA] CPA_MANAGEMENT_URL 格式无效: {raw}") from exc
+        raise RuntimeError(f"[Codex][CPA] CPA_MANAGEMENT_URL invalid format: {raw}") from exc
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise RuntimeError(f"[Codex][CPA] CPA_MANAGEMENT_URL 格式无效: {raw}")
+        raise RuntimeError(f"[Codex][CPA] CPA_MANAGEMENT_URL invalid format: {raw}")
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def _cpa_management_key() -> str:
     key = str(getattr(_cfg, "CPA_MANAGEMENT_KEY", "") or "").strip()
     if not key:
-        raise RuntimeError("[Codex][CPA] 尚未配置 CPA_MANAGEMENT_KEY")
+        raise RuntimeError("[Codex][CPA] not configured yet CPA_MANAGEMENT_KEY")
     return key
 
 
 def _cpa_request_json(method: str, path: str, body: dict | None = None) -> dict:
-    """调用 CPA 管理接口，兼容 FlowPilot 的 /v0/management/* 协议。"""
+    """Call the CPA management API, compatible with the /v0/management/* protocol of FlowPilot."""
     origin = _cpa_management_origin()
     key = _cpa_management_key()
     timeout = int(getattr(_cfg, "CPA_REQUEST_TIMEOUT", 30) or 30)
@@ -338,7 +338,7 @@ def _cpa_request_json(method: str, path: str, body: dict | None = None) -> dict:
             if isinstance(payload, dict):
                 msg = payload.get("error") or payload.get("message") or payload.get("detail") or payload.get("reason") or ""
             raise RuntimeError(
-                f"[Codex][CPA] 管理接口失败 {method.upper()} {path} status={resp.status_code}: "
+                f"[Codex][CPA] management API failed {method.upper()} {path} status={resp.status_code}: "
                 f"{msg or (resp.text or '')[:300]}"
             )
         return payload if isinstance(payload, dict) else {}
@@ -357,10 +357,10 @@ def _sub2_codex_base() -> str:
         or ""
     ).strip().rstrip("/")
     if not raw:
-        raise RuntimeError("[Codex][sub2] 尚未配置 SUB2API_API_BASE")
+        raise RuntimeError("[Codex][sub2] not configured yet SUB2API_API_BASE")
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise RuntimeError(f"[Codex][sub2] SUB2API_API_BASE 格式无效: {raw}")
+        raise RuntimeError(f"[Codex][sub2] SUB2API_API_BASE invalid format: {raw}")
     return raw
 
 
@@ -403,7 +403,7 @@ def _sub2_codex_request_json(method: str, path: str, body: dict | None = None) -
             if isinstance(payload, dict):
                 msg = payload.get("error") or payload.get("message") or payload.get("detail") or payload.get("reason") or ""
             raise RuntimeError(
-                f"[Codex][sub2] 接口失败 {method.upper()} {normalized_path} status={resp.status_code}: "
+                f"[Codex][sub2] API failed {method.upper()} {normalized_path} status={resp.status_code}: "
                 f"{msg or (resp.text or '')[:300]}"
             )
         return payload if isinstance(payload, dict) else {}
@@ -415,10 +415,10 @@ def _sub2_codex_request_json(method: str, path: str, body: dict | None = None) -
 
 
 def _request_sub2_authorize_url() -> dict:
-    """从 sub2 生成 Codex OAuth 授权地址；本地不生成 PKCE。"""
+    """Generate the Codex OAuth authorization URL from sub2; PKCE is not generated locally."""
     from config import sub2api as _sub2_cfg
     path = str(getattr(_sub2_cfg, "SUB2_CODEX_AUTH_URL_PATH", "/api/v1/admin/openai/generate-auth-url") or "/api/v1/admin/openai/generate-auth-url")
-    logger.info("[Codex][sub2] 正在通过 sub2 接口生成授权地址...")
+    logger.info("[Codex][sub2] Generating the authorization URL through the sub2 API...")
     payload = _sub2_codex_request_json("POST", path, {})
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     auth_url = _first_non_empty(
@@ -435,18 +435,18 @@ def _request_sub2_authorize_url() -> dict:
         _extract_state_from_auth_url(auth_url),
     )
     if not auth_url.startswith("http"):
-        raise RuntimeError(f"[Codex][sub2] sub2 未返回有效 auth_url: {payload}")
+        raise RuntimeError(f"[Codex][sub2] sub2 did not return a valid auth_url: {payload}")
     if not state:
-        raise RuntimeError("[Codex][sub2] 授权地址缺少 state")
-    logger.info("[Codex][sub2] 已获取授权地址，state=%s...", state[:12])
-    logger.info("[Codex][sub2] 完整授权地址: %s", auth_url)
+        raise RuntimeError("[Codex][sub2] authorization URL is missing state")
+    logger.info("[Codex][sub2] Authorization URL obtained,state=%s...", state[:12])
+    logger.info("[Codex][sub2] Full authorization URL: %s", auth_url)
     if not session_id:
-        logger.warning("[Codex][sub2] 授权地址响应缺少 session_id，后续 exchange-code 可能失败")
+        logger.warning("[Codex][sub2] The authorization URL response lacks session_id, the later exchange-code may fail")
     return {"auth_url": auth_url, "state": state, "session_id": session_id, "origin": _sub2_codex_base(), "raw": payload}
 
 
 def _summarize_sub2_response(payload: dict) -> str:
-    """压缩 sub2api 响应日志，避免整包刷屏，同时保留账号创建关键信息。"""
+    """Compress the sub2api response log to avoid flooding the screen, while keeping the key account-creation information."""
     try:
         data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
         parts = []
@@ -466,7 +466,7 @@ def _summarize_sub2_response(payload: dict) -> str:
 
 
 def _submit_sub2_callback(callback_url: str, *, session_id: str = "", redirect_uri: str = "") -> dict:
-    """提交 OAuth callback 给 sub2。"""
+    """Submit the OAuth callback to sub2."""
     from config import sub2api as _sub2_cfg
     path = str(getattr(_sub2_cfg, "SUB2_CODEX_CALLBACK_PATH", "/api/v1/admin/openai/create-from-oauth") or "/api/v1/admin/openai/create-from-oauth")
     mode = str(getattr(_sub2_cfg, "SUB2_CODEX_CALLBACK_PAYLOAD_MODE", "create_from_oauth") or "create_from_oauth").strip().lower()
@@ -480,11 +480,11 @@ def _submit_sub2_callback(callback_url: str, *, session_id: str = "", redirect_u
         code = (qs.get("code") or [""])[0]
         state = (qs.get("state") or [""])[0]
         if not session_id:
-            raise RuntimeError("[Codex][sub2] exchange-code 缺少 session_id")
+            raise RuntimeError("[Codex][sub2] exchange-code missing session_id")
         if not code:
-            raise RuntimeError(f"[Codex][sub2] callback_url 缺少 code: {callback_url}")
+            raise RuntimeError(f"[Codex][sub2] callback_url missing code: {callback_url}")
         if not state:
-            raise RuntimeError(f"[Codex][sub2] callback_url 缺少 state: {callback_url}")
+            raise RuntimeError(f"[Codex][sub2] callback_url missing state: {callback_url}")
         body = {"session_id": session_id, "code": code, "state": state}
         if redirect_uri:
             body["redirect_uri"] = redirect_uri
@@ -497,25 +497,25 @@ def _submit_sub2_callback(callback_url: str, *, session_id: str = "", redirect_u
     last_exc = None
     for attempt in range(1, max_attempts + 1):
         try:
-            logger.info("[Codex][sub2] 正在上传 OAuth callback（第 %s/%s 次）... callback=%s", attempt, max_attempts, callback_url)
+            logger.info("[Codex][sub2] Uploading the OAuth callback (attempt %s/%s)... callback=%s", attempt, max_attempts, callback_url)
             payload = _sub2_codex_request_json("POST", path, body)
-            logger.info("[Codex][sub2] callback 已上传并处理完成（第 %s 次成功）响应=%s", attempt, _summarize_sub2_response(payload))
+            logger.info("[Codex][sub2] callback uploaded and processed (succeeded on attempt %s) response=%s", attempt, _summarize_sub2_response(payload))
             return payload
         except Exception as exc:
             last_exc = exc
             retryable = _is_cpa_callback_retryable(exc)
             if attempt >= max_attempts or not retryable:
-                logger.warning("[Codex][sub2] callback 上传失败且不再重试：attempt=%s/%s retryable=%s error=%s", attempt, max_attempts, retryable, exc)
+                logger.warning("[Codex][sub2] callback upload failed and will not be retried:attempt=%s/%s retryable=%s error=%s", attempt, max_attempts, retryable, exc)
                 raise
             delay = base_delay * attempt
-            logger.warning("[Codex][sub2] callback 上传失败，将在 %.1fs 后重试：attempt=%s/%s error=%s", delay, attempt, max_attempts, exc)
+            logger.warning("[Codex][sub2] callback upload failed, will retry in %.1fs:attempt=%s/%s error=%s", delay, attempt, max_attempts, exc)
             time.sleep(delay)
-    raise RuntimeError(f"[Codex][sub2] callback 上传失败：{last_exc}")
+    raise RuntimeError(f"[Codex][sub2] callback upload failed:{last_exc}")
 
 
 
 def _cpa_request_raw(method: str, path: str, body: dict | None = None, *, response_type: str = "text"):
-    """调用 CPA 管理接口并返回原始响应；用于下载 auth-files 这类非 JSON 响应。"""
+    """Call the CPA management API and return the raw response; used for non-JSON responses such as downloading auth-files."""
     origin = _cpa_management_origin()
     key = _cpa_management_key()
     timeout = int(getattr(_cfg, "CPA_REQUEST_TIMEOUT", 30) or 30)
@@ -544,7 +544,7 @@ def _cpa_request_raw(method: str, path: str, body: dict | None = None, *, respon
             except Exception:
                 pass
             raise RuntimeError(
-                f"[Codex][CPA] 管理接口失败 {method.upper()} {path} status={resp.status_code}: "
+                f"[Codex][CPA] management API failed {method.upper()} {path} status={resp.status_code}: "
                 f"{msg or (resp.text or '')[:300]}"
             )
         if response_type == "bytes":
@@ -558,7 +558,7 @@ def _cpa_request_raw(method: str, path: str, body: dict | None = None, *, respon
 
 
 def list_cpa_codex_auth_files() -> list[dict]:
-    """读取 CPA auth-files 列表，仅返回 type/name/email 可识别为 codex 的凭证。"""
+    """Read the CPA auth-files list and return only credentials whose type/name/email identify them as codex."""
     payload = _cpa_request_json("GET", "/v0/management/auth-files")
     files = payload.get("files") if isinstance(payload.get("files"), list) else []
     out = []
@@ -577,7 +577,7 @@ def list_cpa_codex_auth_files() -> list[dict]:
 
 
 def find_cpa_codex_auth_file(*, email: str = "", local_filename: str = "") -> dict | None:
-    """按本地回执/凭证文件名或邮箱匹配 CPA 侧 codex auth 文件。"""
+    """Match the CPA-side codex auth file by local receipt / credential file name or email."""
     email_l = str(email or "").strip().lower()
     local_name_l = str(local_filename or "").strip().lower()
     local_stem_l = local_name_l[:-5] if local_name_l.endswith(".json") else local_name_l
@@ -597,7 +597,7 @@ def find_cpa_codex_auth_file(*, email: str = "", local_filename: str = "") -> di
             s = max(s, 70)
         if email_l and email_l in name_l:
             s = max(s, 60)
-        # 本地 CPA 回执名一般是 codex-邮箱-cpa-callback.json，CPA 实际文件是 codex-邮箱-free.json。
+        # The local CPA receipt name is usually codex-email-cpa-callback.json, while the actual CPA file is codex-email-free.json.
         if local_stem_l.endswith("-cpa-callback"):
             base = local_stem_l[:-len("-cpa-callback")]
             if base and name_l.startswith(base + "-"):
@@ -610,29 +610,29 @@ def find_cpa_codex_auth_file(*, email: str = "", local_filename: str = "") -> di
 
 def download_cpa_codex_auth_text(*, cpa_name: str | None = None, email: str = "", local_filename: str = "") -> tuple[str, str, dict]:
     """
-    从 CPA auth-files 下载一个 Codex JSON 文本。
+    Download one Codex JSON text from the CPA auth-files.
     Returns: (content_text, download_filename, matched_file_meta)
     """
     meta = None
     name = str(cpa_name or "").strip()
     if name:
-        # 已经拿到 CPA 文件名时直接下载，不再额外拉取一次 auth-files 列表。
-        # 账号列表批量下载会先统一列一次列表；这里重复列会导致选中多账号时浏览器长时间等待下载确认。
+        # When the CPA file name is already known, download directly without fetching the auth-files list one more time.
+        # A batch download from the account list lists once up front; listing again here would make the browser wait a long time for the download confirmation when many accounts are selected.
         meta = {"name": name}
     else:
         meta = find_cpa_codex_auth_file(email=email, local_filename=local_filename)
         name = str((meta or {}).get("name") or "").strip()
     if not name:
-        target = email or local_filename or cpa_name or "未知"
-        raise RuntimeError(f"[Codex][CPA] 未在 CPA auth-files 中找到匹配的 Codex 凭证: {target}")
+        target = email or local_filename or cpa_name or "unknown"
+        raise RuntimeError(f"[Codex][CPA] No matching Codex credential found in the CPA auth-files: {target}")
     text = _cpa_request_raw("GET", f"/v0/management/auth-files/download?name={quote(name, safe='')}", response_type="text")
-    # 下载接口正常应返回 JSON 文本，这里做一次轻校验，避免把 HTML/错误文本当凭证导出。
+    # The download endpoint should normally return JSON text; a light validation is done here, to avoid exporting HTML/error text as a credential.
     try:
         parsed = json.loads(text)
     except Exception as exc:
-        raise RuntimeError(f"[Codex][CPA] CPA 下载内容不是有效 JSON: {name}") from exc
+        raise RuntimeError(f"[Codex][CPA] CPA downloaded content is not valid JSON: {name}") from exc
     if not isinstance(parsed, dict):
-        raise RuntimeError(f"[Codex][CPA] CPA 下载内容不是 JSON 对象: {name}")
+        raise RuntimeError(f"[Codex][CPA] CPA downloaded content is not a JSON object: {name}")
     return json.dumps(parsed, ensure_ascii=False, indent=2) + "\n", name, (meta or {"name": name})
 
 def _first_non_empty(*values) -> str:
@@ -651,8 +651,8 @@ def _extract_state_from_auth_url(auth_url: str) -> str:
 
 
 def _request_cpa_authorize_url() -> dict:
-    """从 CPA 生成 Codex OAuth 授权地址；本地不生成 PKCE。"""
-    logger.info("[Codex][CPA] 正在通过 CPA 管理接口生成授权地址...")
+    """Generate the Codex OAuth authorization URL from CPA; PKCE is not generated locally."""
+    logger.info("[Codex][CPA] Generating the authorization URL through the CPA management API...")
     payload = _cpa_request_json("GET", "/v0/management/codex-auth-url")
     data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
     auth_url = _first_non_empty(
@@ -673,11 +673,11 @@ def _request_cpa_authorize_url() -> dict:
         _extract_state_from_auth_url(auth_url),
     )
     if not auth_url.startswith("http"):
-        raise RuntimeError(f"[Codex][CPA] CPA 未返回有效 auth_url: {payload}")
+        raise RuntimeError(f"[Codex][CPA] CPA did not return a valid auth_url: {payload}")
     if not state:
-        raise RuntimeError("[Codex][CPA] CPA 授权地址缺少 state")
-    logger.info(f"[Codex][CPA] 已获取授权地址，state={state[:12]}...")
-    logger.info(f"[Codex][CPA] 完整授权地址: {auth_url}")
+        raise RuntimeError("[Codex][CPA] CPA authorization URL is missing state")
+    logger.info(f"[Codex][CPA] Authorization URL obtained,state={state[:12]}...")
+    logger.info(f"[Codex][CPA] Full authorization URL: {auth_url}")
     return {
         "auth_url": auth_url,
         "state": state,
@@ -703,7 +703,7 @@ def _is_cpa_callback_retryable(exc: Exception) -> bool:
 
 
 def _is_cpa_callback_reauth_error(exc_or_text) -> bool:
-    """CPA 收到 callback 后仍 409 timeout，通常需要重新生成授权地址重新跑一轮 OAuth。"""
+    """CPA If it still returns 409 timeout after the callback was received, the authorization URL usually has to be regenerated and a new round of OAuth run."""
     text = str(exc_or_text or "").lower()
     return (
         "oauth-callback" in text
@@ -715,11 +715,11 @@ def _is_cpa_callback_reauth_error(exc_or_text) -> bool:
 
 
 def _submit_cpa_callback(callback_url: str) -> dict:
-    """提交 OAuth callback 给 CPA。
+    """Submit the OAuth callback to CPA.
 
-    CPA 偶发会在浏览器已拿到 localhost callback 后仍返回
-    “409 Timeout waiting for OAuth callback”，通常是管理端等待/入库的竞态；
-    这里按同一个 callback URL 做多次重试，不重新生成授权地址。
+    CPA occasionally still returns after the browser already got the localhost callback
+    “409 Timeout waiting for OAuth callback”, usually a race of the management side waiting / storing;
+    Here the same callback URL is retried several times, and the authorization URL is not regenerated.
     """
     body = {
         "provider": "codex",
@@ -731,36 +731,36 @@ def _submit_cpa_callback(callback_url: str) -> dict:
     for attempt in range(1, max_attempts + 1):
         try:
             logger.info(
-                "[Codex][CPA] 正在提交 OAuth callback 给 CPA（第 %s/%s 次）... callback=%s",
+                "[Codex][CPA] Submitting the OAuth callback to CPA (attempt %s/%s)... callback=%s",
                 attempt, max_attempts, str(callback_url or "")
             )
             payload = _cpa_request_json("POST", "/v0/management/oauth-callback", body)
-            logger.info("[Codex][CPA] callback 已提交（第 %s 次成功）", attempt)
+            logger.info("[Codex][CPA] callback submitted (succeeded on attempt %s)", attempt)
             return payload
         except Exception as exc:
             last_exc = exc
             retryable = _is_cpa_callback_retryable(exc)
             if attempt >= max_attempts or not retryable:
                 logger.warning(
-                    "[Codex][CPA] callback 提交失败且不再重试：attempt=%s/%s retryable=%s error=%s",
+                    "[Codex][CPA] callback submit failed and will not be retried:attempt=%s/%s retryable=%s error=%s",
                     attempt, max_attempts, retryable, exc
                 )
                 raise
             delay = base_delay * attempt
             logger.warning(
-                "[Codex][CPA] callback 提交失败，将在 %.1fs 后重试：attempt=%s/%s error=%s",
+                "[Codex][CPA] callback submit failed, will retry in %.1fs:attempt=%s/%s error=%s",
                 delay, attempt, max_attempts, exc
             )
             time.sleep(delay)
-    raise RuntimeError(f"[Codex][CPA] callback 提交失败：{last_exc}")
+    raise RuntimeError(f"[Codex][CPA] callback submit failed:{last_exc}")
 
 
 # ============================================================
-# 小工具：判定/解析
+# Helpers: judge/parse
 # ============================================================
 
 def _is_redirect_uri(location: str) -> bool:
-    """判断 Location 是否指向注册的 redirect_uri（localhost:1455/auth/callback）。"""
+    """Judge whether the Location points to the registered redirect_uri (localhost:1455/auth/callback)."""
     try:
         parsed = urlparse(location)
     except Exception:
@@ -772,26 +772,26 @@ def _is_redirect_uri(location: str) -> bool:
 
 
 def _extract_code(location: str, state: str) -> str:
-    """从 redirect_uri 的 Location 里提取并校验 code。"""
+    """Extract and validate the code from the Location of the redirect_uri."""
     parsed = urlparse(location)
     qs = parse_qs(parsed.query)
     err = (qs.get("error") or [""])[0]
     if err:
         err_desc = (qs.get("error_description") or [""])[0]
-        raise RuntimeError(f"[Codex] 授权服务器返回错误: error={err}, desc={err_desc}")
+        raise RuntimeError(f"[Codex] authorization server returned an error: error={err}, desc={err_desc}")
     code = (qs.get("code") or [""])[0]
     if not code:
-        raise RuntimeError(f"[Codex] redirect_uri 缺少 code 参数: {location}")
+        raise RuntimeError(f"[Codex] redirect_uri missing code parameter: {location}")
     returned_state = (qs.get("state") or [""])[0]
     if returned_state and returned_state != state:
         raise RuntimeError(
-            f"[Codex] state 不匹配（疑似 CSRF）: expected={state[:8]}..., got={returned_state[:8]}..."
+            f"[Codex] state mismatch (suspected CSRF): expected={state[:8]}..., got={returned_state[:8]}..."
         )
     return code
 
 
 def _decode_jwt_segment(seg: str) -> dict:
-    """base64url 解码一个 JWT/cookie 段为 JSON dict（失败返回 {}）。"""
+    """base64url Decode a JWT/cookie segment into a JSON dict (returns {} on failure)."""
     try:
         padding = "=" * (-len(seg) % 4)
         return json.loads(base64.urlsafe_b64decode(seg + padding))
@@ -801,7 +801,7 @@ def _decode_jwt_segment(seg: str) -> dict:
 
 def _post_json(session: BrowserSession, url: str, payload: dict, referer: str,
                sentinel_header: str | None = None, so_header: str | None = None):
-    """统一发 /api/accounts/* 的 JSON POST。"""
+    """Uniformly send a JSON POST to /api/accounts/*."""
     headers = session.get_auth_headers(referer=referer)
     if sentinel_header:
         headers["openai-sentinel-token"] = sentinel_header
@@ -839,7 +839,7 @@ def _response_text(resp) -> str:
 
 
 def _decode_auth_session_metadata(value) -> dict:
-    """把响应中的 oai-client-auth-session 转成 workspace payload。"""
+    """Convert the oai-client-auth-session in the response into a workspace payload."""
     if isinstance(value, dict):
         return value
     if not isinstance(value, str) or not value.strip():
@@ -848,7 +848,7 @@ def _decode_auth_session_metadata(value) -> dict:
 
 
 def _cache_auth_session_metadata(session: BrowserSession, resp) -> None:
-    """缓存 Auth 响应携带的 session 元数据，供 cookie 缺失时恢复 workspace。"""
+    """Cache the session metadata carried by the Auth response, to restore the workspace when the cookie is missing."""
     try:
         payload = _resp_json(resp)
         if not isinstance(payload, dict):
@@ -860,7 +860,7 @@ def _cache_auth_session_metadata(session: BrowserSession, resp) -> None:
         if cached:
             session._codex_auth_session_payload = cached
     except Exception:
-        logger.debug("[Codex] 缓存 Auth session 元数据失败", exc_info=True)
+        logger.debug("[Codex] Failed to cache the Auth session metadata", exc_info=True)
 
 
 def _phone_failure_reason(text: str, status_code: int | None = None) -> str:
@@ -890,7 +890,7 @@ def _phone_failure_reason(text: str, status_code: int | None = None) -> str:
 
 
 # ============================================================
-# 步骤 0：用全新 session 跟随 Codex authorize URL，建立 auth.openai.com 会话
+# Step 0: follow the Codex authorize URL with a brand new session and establish the auth.openai.com session
 # ============================================================
 
 def _bootstrap_authorize(
@@ -900,34 +900,34 @@ def _bootstrap_authorize(
     auth_url: str | None = None,
 ) -> None:
     """
-    GET Codex authorize URL 并跟随重定向，落到登录页，建立 auth.openai.com cookies
-    （含 oai-client-auth-session：内含 Codex 目标 + 后续要用的 workspace 列表）。
+    GET Codex authorize URL and follow the redirects, landing on the login page, and establish auth.openai.com cookies
+    (including oai-client-auth-session: it contains the Codex target + the workspace list needed later).
     """
-    # 默认使用调用方传入的 CPA 授权地址；未传时才走保留的本地 PKCE 生成逻辑。
+    # By default the CPA authorization URL passed in by the caller is used; the retained local PKCE generation logic is only used when none is passed.
     if not auth_url:
         if not code_challenge:
-            raise RuntimeError("[Codex] 本地生成授权地址需要 code_challenge")
+            raise RuntimeError("[Codex] Generating the authorization URL locally requires code_challenge")
         auth_url = _build_authorize_url(state, code_challenge, prompt="login")
     auth_url = _ensure_oai_context_url(auth_url, session)
-    # Codex CLI/CPA 授权地址是用户从外部客户端直接打开的顶层导航，不是从
-    # chatgpt.com 页面点击而来。使用 sec-fetch-site:none 且不伪造 Referer。
+    # Codex CLI/CPA The authorization URL is a top-level navigation the user opens directly from an external client, not coming from
+    # chatgpt.com a page click. Use sec-fetch-site:none and do not forge a Referer.
     headers = session.get_auth_navigate_headers(referer="", user_initiated=True)
-    logger.info("[Codex] 跟随 Codex authorize URL 建立会话...")
-    logger.info(f"[Codex] 完整授权地址: {auth_url}")
+    logger.info("[Codex] Following the Codex authorize URL to establish the session...")
+    logger.info(f"[Codex] Full authorization URL: {auth_url}")
     resp = _with_auth_navigation_retry(
         session,
         "bootstrap authorize",
         lambda: session.get(auth_url, headers=headers, allow_redirects=True),
     )
-    logger.debug(f"[Codex] authorize 落点: {getattr(resp, 'url', '')}, status={getattr(resp, 'status_code', '')}")
+    logger.debug(f"[Codex] authorize landing point: {getattr(resp, 'url', '')}, status={getattr(resp, 'status_code', '')}")
 
 
 # ============================================================
-# 步骤 1：提交邮箱（触发邮箱 OTP 发送）
+# Step 1: submit the email (triggers the email OTP send)
 # ============================================================
 
 def _submit_email(session: BrowserSession, email: str) -> dict:
-    """POST authorize/continue 提交邮箱，让 Auth 服务返回下一步（密码页/OTP 页等）。带 sentinel。"""
+    """POST authorize/continue Submit the email so that the Auth service returns the next step (password page / OTP page etc.). Carries sentinel."""
     sentinel_resp = request_sentinel_token(session, "authorize_continue")
     sentinel_header, so_header = build_sentinel_header(session, sentinel_resp, "authorize_continue")
     payload = {"username": {"kind": "email", "value": email}}
@@ -941,11 +941,11 @@ def _submit_email(session: BrowserSession, email: str) -> dict:
     )
     if resp.status_code not in (200, 204):
         raise RuntimeError(
-            f"[Codex] 提交邮箱失败 status={resp.status_code}: {(resp.text or '')[:300]}"
+            f"[Codex] submitting the email failed status={resp.status_code}: {(resp.text or '')[:300]}"
         )
     result = _resp_json(resp)
     logger.info(
-        "[Codex] 已提交邮箱 %s，Auth 下一步：page=%s continue=%s",
+        "[Codex] Submitted email %s, Auth next step:page=%s continue=%s",
         email,
         _page_type(result) or "-",
         _extract_continue_url(result) or "-",
@@ -954,7 +954,7 @@ def _submit_email(session: BrowserSession, email: str) -> dict:
 
 
 def _extract_continue_url(result: dict | None) -> str:
-    """从 Auth JSON 响应中提取 continue/redirect URL。"""
+    """Extract the continue/redirect URL from the Auth JSON response."""
     if not isinstance(result, dict):
         return ""
     page = result.get("page") or {}
@@ -973,7 +973,7 @@ def _extract_continue_url(result: dict | None) -> str:
 
 
 def _extract_factor_id(result: dict | None, continue_url: str = "") -> str:
-    """从 MFA 响应或 /mfa-challenge/<factor_id> URL 中提取 factor_id。"""
+    """Extract factor_id from the MFA response or /mfa-challenge/<factor_id> URL URL."""
     if isinstance(result, dict):
         factor_id = str(result.get("factor_id") or result.get("id") or "").strip()
         if factor_id:
@@ -998,7 +998,7 @@ def _page_type(result: dict | None) -> str:
 
 
 def _result_text(result: dict | None) -> str:
-    """把 Auth 返回的嵌套结果压平成可匹配文本，不依赖单一字段名。"""
+    """Flatten the nested result returned by Auth into matchable text, without depending on a single field name."""
     try:
         return json.dumps(result or {}, ensure_ascii=False, separators=(",", ":")).lower()
     except Exception:
@@ -1054,7 +1054,7 @@ def _is_phone_step(result: dict | None) -> bool:
 
 
 def _password_verify(session: BrowserSession, password: str) -> dict:
-    """提交登录密码。"""
+    """Submit the login password."""
     sentinel_resp = request_sentinel_token(session, "password_verify")
     sentinel_header, so_header = build_sentinel_header(session, sentinel_resp, "password_verify")
     resp = _post_json(
@@ -1067,14 +1067,14 @@ def _password_verify(session: BrowserSession, password: str) -> dict:
     )
     if resp.status_code != 200:
         raise RuntimeError(
-            f"[Codex] 密码验证失败 status={resp.status_code}: {(resp.text or '')[:300]}"
+            f"[Codex] password verification failed status={resp.status_code}: {(resp.text or '')[:300]}"
         )
-    logger.info("[Codex] 密码验证通过")
+    logger.info("[Codex] password verification passed")
     return _resp_json(resp)
 
 
 def _mfa_issue_challenge(session: BrowserSession, factor_id: str) -> dict:
-    """发起 TOTP MFA challenge。"""
+    """Start a TOTP MFA challenge."""
     resp = _post_json(
         session,
         "https://auth.openai.com/api/accounts/mfa/issue_challenge",
@@ -1083,13 +1083,13 @@ def _mfa_issue_challenge(session: BrowserSession, factor_id: str) -> dict:
     )
     if resp.status_code != 200:
         raise RuntimeError(
-            f"[Codex] MFA challenge 发起失败 status={resp.status_code}: {(resp.text or '')[:300]}"
+            f"[Codex] MFA challenge start failed status={resp.status_code}: {(resp.text or '')[:300]}"
         )
     return _resp_json(resp)
 
 
 def _mfa_verify(session: BrowserSession, factor_id: str, code: str) -> dict:
-    """提交 TOTP MFA 验证码。"""
+    """Submit the TOTP MFA verification code."""
     resp = _post_json(
         session,
         "https://auth.openai.com/api/accounts/mfa/verify",
@@ -1097,9 +1097,9 @@ def _mfa_verify(session: BrowserSession, factor_id: str, code: str) -> dict:
         referer=f"https://auth.openai.com/mfa-challenge/{factor_id}",
     )
     if resp.status_code != 200:
-        # MFA 接口对已删除/停用账号有时只返回自然语言 message，
-        # 不带 account_deactivated 错误码；统一转换为不可恢复状态，
-        # 避免补跑服务继续重试这类账号。
+        # MFA For deleted/disabled accounts the API sometimes only returns a natural-language message,
+        # without the account_deactivated error code; it is uniformly converted into an unrecoverable state,
+        # so the rerun service does not keep retrying such accounts.
         error_code = _extract_error_code(resp)
         if not error_code:
             error_code = detect_account_unusable_response_body(resp.text or "")
@@ -1107,40 +1107,40 @@ def _mfa_verify(session: BrowserSession, factor_id: str, code: str) -> dict:
             error_code = detect_account_unusable_text(resp.text or "")
         if error_code:
             raise AccountUnusableError(
-                f"[Codex] 账号已废（{error_code}）MFA status={resp.status_code}: {(resp.text or '')[:240]}",
+                f"[Codex] Account is dead ({error_code})MFA status={resp.status_code}: {(resp.text or '')[:240]}",
                 error_code=error_code,
             )
         raise RuntimeError(
-            f"[Codex] MFA 验证失败 status={resp.status_code}: {(resp.text or '')[:300]}"
+            f"[Codex] MFA verification failed status={resp.status_code}: {(resp.text or '')[:300]}"
         )
-    logger.info("[Codex] MFA/TOTP 验证通过")
+    logger.info("[Codex] MFA/TOTP verification passed")
     return _resp_json(resp)
 
 
 def _complete_mfa_if_required(session: BrowserSession, email: str, result: dict | None) -> dict:
-    """仅当 Auth 当前结果明确要求 MFA 时，提交账号 TOTP 并返回下一状态。"""
+    """Only when the current Auth result explicitly requires MFA, submit the account TOTP and return the next state."""
     continue_url = _extract_continue_url(result)
     if not _is_mfa_step(result, continue_url):
         return result or {}
 
     factor_id = _extract_factor_id(result, continue_url)
     if not factor_id:
-        raise RuntimeError(f"[Codex] Auth 要求 MFA，但未拿到 factor_id：{result}")
+        raise RuntimeError(f"[Codex] Auth requires MFA, but no factor_id was obtained:{result}")
     code = _account_totp_code(email)
     if not code:
-        raise RuntimeError(f"[Codex] Auth 要求 MFA，但账号没有可用 totp_secret：{email}")
+        raise RuntimeError(f"[Codex] Auth requires MFA, but the account has no usable totp_secret:{email}")
 
-    logger.info("[Codex] Auth 要求 MFA，开始提交账号 TOTP：%s factor_id=%s", email, factor_id)
+    logger.info("[Codex] Auth requires MFA, starting to submit the account TOTP:%s factor_id=%s", email, factor_id)
     _mfa_issue_challenge(session, factor_id)
     return _mfa_verify(session, factor_id, code)
 
 
 def _follow_login_continue(session: BrowserSession, continue_url: str, state: str) -> str | None:
     """
-    密码/MFA 成功后的 continue URL 可能直接跳 callback，也可能只把会话推进到
-    Codex consent/workspace 页面。这里只负责跟随重定向并保留 Cookie：
-      - 命中 localhost callback：返回 callback URL
-      - 停在 200 HTML/无 Location：返回 None，后续继续 workspace/select
+    After a password/MFA success the continue URL may jump straight to the callback, or may only advance the session to
+    Codex consent/workspace page. Here we only follow the redirects and keep the Cookies:
+      - hit the localhost callback: return callback URL
+      - Stopped at a 200 HTML / no Location: return None, continue afterwards workspace/select
     """
     if not continue_url:
         return None
@@ -1152,13 +1152,13 @@ def _follow_login_continue(session: BrowserSession, continue_url: str, state: st
         resp = session.get(url, headers=headers, allow_redirects=False)
         loc = resp.headers.get("location") or resp.headers.get("Location")
         logger.debug(
-            "[Codex] 登录 continue 跟随 hop %s: status=%s, location=%s",
+            "[Codex] login continue following hop %s: status=%s, location=%s",
             hop, getattr(resp, "status_code", ""), loc,
         )
         if not loc:
             return None
         url = loc if loc.startswith("http") else ("https://auth.openai.com" + loc)
-    raise RuntimeError(f"[Codex] 登录 continue 跟随超过 {_MAX_REDIRECTS} 跳")
+    raise RuntimeError(f"[Codex] Login continue following exceeded {_MAX_REDIRECTS} hops")
 
 
 def _try_password_mfa_login(
@@ -1168,24 +1168,24 @@ def _try_password_mfa_login(
     initial_result: dict | None,
 ) -> tuple[str, str | None, dict]:
     """
-    有注册密码时优先走密码登录；如进入 MFA challenge，则使用账号 totp_secret 生成 TOTP。
+    With a registration password, password login is preferred; if it enters an MFA challenge, the TOTP is generated from the account totp_secret.
 
-    返回:
-      ("logged_in", callback_url_or_None, result)  已完成密码/MFA 登录
-      ("email_otp", None, result)                  服务端要求邮箱 OTP
-      ("not_applicable", None, result)            当前实际页面不是密码页
+    Return:
+      ("logged_in", callback_url_or_None, result)  password/MFA login completed
+      ("email_otp", None, result)                  the server requires email OTP
+      ("not_applicable", None, result)            The actual current page is not the password page
     """
     password = _account_registration_password(email)
     if not password or not _is_password_step(initial_result):
         logger.info(
-            "[Codex] 当前 Auth 未要求密码，按服务端返回继续：email=%s page=%s continue=%s",
+            "[Codex] The current Auth does not require a password, continuing as returned by the server:email=%s page=%s continue=%s",
             email,
             _page_type(initial_result) or "-",
             _extract_continue_url(initial_result) or "-",
         )
         return "not_applicable", None, initial_result or {}
 
-    logger.info("[Codex] 账号存在注册密码，优先走密码登录：%s", email)
+    logger.info("[Codex] The account has a registration password, preferring password login:%s", email)
     result = _password_verify(session, password)
     continue_url = _extract_continue_url(result)
     page_type = _page_type(result)
@@ -1196,20 +1196,20 @@ def _try_password_mfa_login(
         page_type = _page_type(result)
 
     if _is_email_otp_step(result) or page_type in {"email_verification", "email_otp_send"}:
-        logger.info("[Codex] 密码登录后服务端仍要求邮箱 OTP，切换到邮箱 OTP：%s", email)
+        logger.info("[Codex] After password login the server still requires the email OTP, switching to the email OTP:%s", email)
         return "email_otp", None, result
 
     callback_url = _follow_login_continue(session, continue_url, state) if continue_url else None
-    logger.info("[Codex] 密码/MFA 登录链已完成，继续 Codex workspace/callback：%s", email)
+    logger.info("[Codex] The password/MFA login chain has completed, continuing with the Codex workspace/callback:%s", email)
     return "logged_in", callback_url, result
 
 
 # ============================================================
-# 步骤 2：提交邮箱 OTP
+# Step 2: submit the email OTP
 # ============================================================
 
 def _submit_email_otp(session: BrowserSession, code: str) -> dict:
-    """POST email-otp/validate 提交邮箱验证码。带 sentinel(authorize_continue)。"""
+    """POST email-otp/validate Submit the email verification code. Carries sentinel(authorize_continue)."""
     sentinel_resp = request_sentinel_token(session, "authorize_continue")
     sentinel_header, so_header = build_sentinel_header(session, sentinel_resp, "authorize_continue")
     resp = _post_json(
@@ -1224,22 +1224,22 @@ def _submit_email_otp(session: BrowserSession, code: str) -> dict:
         error_code = _extract_error_code(resp)
         if error_code in ("account_deactivated", "account_deleted", "account_banned"):
             raise AccountUnusableError(
-                f"[Codex] 账号已废（{error_code}）status={resp.status_code}: {(resp.text or '')[:200]}",
+                f"[Codex] Account is dead ({error_code})status={resp.status_code}: {(resp.text or '')[:200]}",
                 error_code=error_code,
             )
         body_error_code = detect_account_unusable_response_body(resp.text or "")
         if body_error_code:
             raise AccountUnusableError(
-                f"[Codex] 账号已废（{body_error_code}）status={resp.status_code}: {(resp.text or '')[:200]}",
+                f"[Codex] Account is dead ({body_error_code})status={resp.status_code}: {(resp.text or '')[:200]}",
                 error_code=body_error_code,
             )
         raise RuntimeError(
-            f"[Codex] 邮箱 OTP 验证失败 status={resp.status_code}: {(resp.text or '')[:300]}"
+            f"[Codex] email OTP verification failed status={resp.status_code}: {(resp.text or '')[:300]}"
         )
-    logger.info("[Codex] 邮箱 OTP 验证通过")
+    logger.info("[Codex] email OTP verification passed")
     result = _resp_json(resp)
     logger.info(
-        "[Codex] 邮箱 OTP 后 Auth 下一步：page=%s continue=%s phone=%s mfa=%s",
+        "[Codex] Auth next step after the email OTP:page=%s continue=%s phone=%s mfa=%s",
         _page_type(result) or "-",
         _extract_continue_url(result) or "-",
         _is_phone_step(result),
@@ -1249,31 +1249,31 @@ def _submit_email_otp(session: BrowserSession, code: str) -> dict:
 
 
 # ============================================================
-# 步骤 3-4：手机号验证（接码，失败换号重试）
+# Steps 3-4: phone number verification (code receiving, switch numbers and retry on failure)
 # ============================================================
 
 def _sms_provider_name() -> str:
-    """当前接码通道名，仅用于 Codex 流程日志。"""
+    """Name of the current code-receiving channel, only used for the Codex flow logs."""
     return str(getattr(_cfg, "SMS_PROVIDER", "grizzly") or "grizzly").strip().lower()
 
 
 def _sleep_before_phone_retry(attempt: int, max_retries: int, *, prefix: str = "[Codex]") -> None:
-    """换号前随机等待，至少 3 秒，避免连续提交号码过快。"""
+    """Wait a random time before switching numbers, at least 3 seconds, to avoid submitting numbers too quickly in a row."""
     if attempt >= max_retries:
         return
     seconds = random.uniform(3.0, 8.0)
-    logger.info(f"{prefix} 换号前随机等待 {seconds:.1f} 秒")
+    logger.info(f"{prefix} Waiting a random {seconds:.1f} seconds before switching numbers")
     time.sleep(seconds)
 
 
 def _do_phone_verification(session: BrowserSession) -> dict:
     """
-    用接码平台拿号 → add-phone/send 发短信 → 收码 → phone-otp/validate。
-    一个号收不到码或被 OpenAI 拒就取消换号，最多 SMS_MAX_RETRIES 次（热加载）。
+    Take a number from the code-receiving platform -> add-phone/send sends the SMS -> receive the code -> phone-otp/validate.
+    If a number receives no code or is rejected by OpenAI, cancel it and switch numbers, at most SMS_MAX_RETRIES times (hot-reloaded).
 
-    实际平台适配在 core.sms_provider：
-        - SMS_PROVIDER="grizzly"：GrizzlySMS handler_api.php
-        - SMS_PROVIDER="l"：L_API.md 的 /take-phone 和 /fetch-code JSON 接口
+    The actual platform adapters live in core.sms_provider:
+        - SMS_PROVIDER="grizzly":GrizzlySMS handler_api.php
+        - SMS_PROVIDER="l": the /take-phone and /fetch-code JSON APIs of L_API.md
     """
     http = sms_provider._http()
     max_retries = _cfg.SMS_MAX_RETRIES
@@ -1285,11 +1285,11 @@ def _do_phone_verification(session: BrowserSession) -> dict:
             try:
                 activation_id, phone = sms_provider.acquire_number(http)
                 logger.info(
-                    f"[Codex] 手机验证尝试 {attempt}/{max_retries}，"
-                    f"provider={provider}, activation_id={activation_id}, 号码=+{phone}"
+                    f"[Codex] Phone verification attempt {attempt}/{max_retries},"
+                    f"provider={provider}, activation_id={activation_id}, number=+{phone}"
                 )
 
-                # 发短信
+                # Send the SMS
                 send_resp = _post_json(
                     session,
                     "https://auth.openai.com/api/accounts/add-phone/send",
@@ -1299,33 +1299,33 @@ def _do_phone_verification(session: BrowserSession) -> dict:
                 send_text = _response_text(send_resp)
                 send_reason = _phone_failure_reason(send_text, send_resp.status_code)
                 if send_resp.status_code not in (200, 204) or send_reason:
-                    # 号码无效 / 无法发送 / WhatsApp 通道 / 限流等 → 释放当前号并换号。
+                    # Invalid number / cannot send / WhatsApp channel / rate limited etc. -> release the current number and switch numbers.
                     logger.warning(
-                        f"[Codex] add-phone/send 未成功 reason={send_reason or 'unknown'}, "
-                        f"status={send_resp.status_code}: {send_text[:240]}，换号重试"
+                        f"[Codex] add-phone/send unsuccessful reason={send_reason or 'unknown'}, "
+                        f"status={send_resp.status_code}: {send_text[:240]}, switching number to retry"
                     )
                     sms_provider.cancel(activation_id, http)
                     _sleep_before_phone_retry(attempt, max_retries)
                     continue
 
-                # 通知平台短信已发出（status=1）
+                # Tell the platform the SMS has been sent (status=1)
                 sms_provider.set_status(activation_id, 1, http=http)
 
-                # 定时轮询接码平台获取短信。wait_for_sms_code 内部按 SMS_POLL_INTERVAL 轮询，
-                # 最长等待 SMS_CODE_WAIT；超时立即取消当前号并换号。
+                # Poll the code-receiving platform for the SMS on a schedule. wait_for_sms_code polls internally every SMS_POLL_INTERVAL,
+                # waiting at most SMS_CODE_WAIT; on timeout the current number is cancelled immediately and another number is used.
                 try:
                     logger.info(
-                        f"[Codex] 短信已发送，开始轮询验证码 activation_id={activation_id}, "
+                        f"[Codex] SMS sent, starting to poll for the verification code activation_id={activation_id}, "
                         f"wait={_cfg.SMS_CODE_WAIT}s, interval={_cfg.SMS_POLL_INTERVAL}s"
                     )
                     sms_code = sms_provider.wait_for_sms_code(activation_id, http)
                 except sms_provider.SmsCodeTimeout:
-                    logger.warning(f"[Codex] 号码 +{phone} 在 {_cfg.SMS_CODE_WAIT}s 内未收到短信，取消换号")
+                    logger.warning(f"[Codex] Number +{phone} received no SMS within {_cfg.SMS_CODE_WAIT}s, cancelling and switching numbers")
                     sms_provider.cancel(activation_id, http)
                     _sleep_before_phone_retry(attempt, max_retries)
                     continue
 
-                # 验手机码
+                # Verify the phone code
                 val_resp = _post_json(
                     session,
                     "https://auth.openai.com/api/accounts/phone-otp/validate",
@@ -1336,45 +1336,45 @@ def _do_phone_verification(session: BrowserSession) -> dict:
                     val_text = _response_text(val_resp)
                     val_reason = _phone_failure_reason(val_text, val_resp.status_code) or 'code_rejected'
                     logger.warning(
-                        f"[Codex] phone-otp/validate 失败 reason={val_reason}, status={val_resp.status_code}: "
-                        f"{val_text[:240]}，换号重试"
+                        f"[Codex] phone-otp/validate failed reason={val_reason}, status={val_resp.status_code}: "
+                        f"{val_text[:240]}, switching number to retry"
                     )
                     sms_provider.cancel(activation_id, http)
                     _sleep_before_phone_retry(attempt, max_retries)
                     continue
 
-                # 成功
+                # Success
                 sms_provider.complete(activation_id, http)
-                logger.info("[Codex] 手机号验证通过")
+                logger.info("[Codex] Phone number verification passed")
                 return _resp_json(val_resp)
 
             except sms_provider.SmsNoBalanceError:
-                # 余额不足，重试无意义，直接抛
+                # Insufficient balance, retrying is pointless, raise directly
                 raise
             except sms_provider.SmsProviderError as exc:
                 last_err = exc
-                logger.warning(f"[Codex] 接码尝试 {attempt} 失败：{exc}")
+                logger.warning(f"[Codex] Code-receiving attempt {attempt} failed:{exc}")
                 if activation_id:
                     sms_provider.cancel(activation_id, http)
                 _sleep_before_phone_retry(attempt, max_retries)
                 continue
 
         raise RuntimeError(
-            f"[Codex] 手机号验证重试 {max_retries} 次仍失败（provider={provider}）"
-            + (f"，最后错误：{last_err}" if last_err else "")
+            f"[Codex] Phone verification still failed after {max_retries} retries (provider={provider})"
+            + (f", last error:{last_err}" if last_err else "")
         )
     finally:
         http.close()
 
 
 # ============================================================
-# 步骤 5：选 workspace → 拿 callback code
+# Step 5: pick the workspace -> get callback code
 # ============================================================
 
 def _get_workspace_id(session: BrowserSession) -> str:
     """
-    优先从 oai-client-auth-session cookie 解出 workspace；cookie 尚未落地时，
-    退回 Auth 响应元数据，并在有界时间内等待 cookie/响应状态完成。
+    Prefer decoding the workspace from the oai-client-auth-session cookie; when the cookie has not landed yet,
+    fall back to the Auth response metadata, and wait for the cookie/response state within a bounded time.
     """
     def find_workspace_id(payload: dict) -> str:
         for workspace in payload.get("workspaces") or []:
@@ -1406,21 +1406,21 @@ def _get_workspace_id(session: BrowserSession) -> str:
 
         wid = find_workspace_id(getattr(session, "_codex_auth_session_payload", {}) or {})
         if wid:
-            logger.info(f"[Codex] workspace_id={wid}（来自 Auth 响应元数据）")
+            logger.info(f"[Codex] workspace_id={wid}(from the Auth response metadata)")
             return wid
 
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             if not raw:
-                raise RuntimeError("[Codex] 找不到 oai-client-auth-session cookie，无法取 workspace_id")
-            raise RuntimeError("[Codex] oai-client-auth-session 中无可用 workspace_id")
+                raise RuntimeError("[Codex] Cannot find the oai-client-auth-session cookie, cannot get workspace_id")
+            raise RuntimeError("[Codex] oai-client-auth-session has no usable workspace_id")
         time.sleep(min(_WORKSPACE_POLL_INTERVAL_SECONDS, remaining))
 
 
 def _select_workspace_and_get_callback(session: BrowserSession, state: str) -> str:
     """
-    POST workspace/select，然后跟随后续重定向/响应里的 URL 直到命中 localhost:1455 callback。
-    返回完整 callback URL（含 code）。
+    POST workspace/select, then follow the following redirects / URLs in the responses until the localhost:1455 callback is hit.
+    Return the full callback URL (including the code).
     """
     wid = _get_workspace_id(session)
     resp = _post_json(
@@ -1430,12 +1430,12 @@ def _select_workspace_and_get_callback(session: BrowserSession, state: str) -> s
         referer="https://auth.openai.com/sign-in-with-chatgpt/codex/consent",
     )
 
-    # 1) 直接带 Location 头命中 callback
+    # 1) Hit the callback directly with the Location header callback
     loc = resp.headers.get("location") or resp.headers.get("Location")
     if loc and _is_redirect_uri(loc):
         return loc
 
-    # 2) 响应 JSON 里给了下一步 URL（continue_url / redirect_url / url / next）
+    # 2) The response JSON gives the next-step URL (continue_url / redirect_url / url / next)
     data = _resp_json(resp)
     next_url = None
     for key in ("redirect_url", "continue_url", "url", "next", "location"):
@@ -1444,22 +1444,22 @@ def _select_workspace_and_get_callback(session: BrowserSession, state: str) -> s
             next_url = v
             break
 
-    # 3) 没给 URL 但有 Location（非 callback）→ 从 Location 起跟
+    # 3) No URL given but there is a Location (not the callback) -> follow from the Location
     if not next_url and loc:
         next_url = loc
 
     if not next_url:
         raise RuntimeError(
-            f"[Codex] workspace/select 后找不到下一跳 URL: status={resp.status_code}, "
+            f"[Codex] workspace/select no next hop found afterwards, URL URL: status={resp.status_code}, "
             f"body={(resp.text or '')[:300]}"
         )
 
-    # 跟随重定向链直到命中 callback
+    # Follow the redirect chain until the callback
     return _follow_until_callback(session, next_url, state)
 
 
 def _follow_until_callback(session: BrowserSession, url: str, state: str) -> str:
-    """从给定 URL 起逐跳跟随，命中 localhost:1455 callback 时返回其 Location。"""
+    """Follow hop by hop from the given URL, and return its Location when the localhost:1455 callback is hit."""
     if url.startswith("/"):
         url = "https://auth.openai.com" + url
     for hop in range(_MAX_REDIRECTS):
@@ -1468,24 +1468,24 @@ def _follow_until_callback(session: BrowserSession, url: str, state: str) -> str
         headers = session.get_auth_navigate_headers(referer="https://auth.openai.com/")
         resp = session.get(url, headers=headers, allow_redirects=False)
         loc = resp.headers.get("location") or resp.headers.get("Location")
-        logger.debug(f"[Codex] callback 跟随 hop {hop}: status={getattr(resp,'status_code','')}, location={loc}")
+        logger.debug(f"[Codex] callback follow hop {hop}: status={getattr(resp,'status_code','')}, location={loc}")
         if loc is None:
             raise RuntimeError(
-                f"[Codex] 跟随中断，未命中 callback: url={url}, "
+                f"[Codex] following interrupted, did not hit callback: url={url}, "
                 f"status={getattr(resp,'status_code','')}, body={(resp.text or '')[:200]}"
             )
         if _is_redirect_uri(loc):
             return loc
         url = loc if loc.startswith("http") else ("https://auth.openai.com" + loc)
-    raise RuntimeError(f"[Codex] 跟随 callback 超过 {_MAX_REDIRECTS} 跳")
+    raise RuntimeError(f"[Codex] Following the callback exceeded {_MAX_REDIRECTS} hops")
 
 
 # ============================================================
-# 换 token（对照 CLIProxyAPI ExchangeCodeForTokensWithRedirect）—— 未改动
+# Exchange the token (compare CLIProxyAPI ExchangeCodeForTokensWithRedirect) - unchanged
 # ============================================================
 
 def exchange_codex_token(session: BrowserSession, code: str, code_verifier: str) -> dict:
-    """用 authorization code 换 token。"""
+    """Exchange the authorization code for a token."""
     data = {
         "grant_type": "authorization_code",
         "client_id": _cfg.CODEX_CLIENT_ID,
@@ -1501,29 +1501,29 @@ def exchange_codex_token(session: BrowserSession, code: str, code_verifier: str)
     base.update(headers)
     headers = base
 
-    logger.info("[Codex] 用 authorization code 换 token...")
+    logger.info("[Codex] Exchanging the authorization code for token...")
     resp = session.post(_cfg.CODEX_TOKEN_URL, headers=headers, data=urlencode(data))
     http_status = resp.status_code
     if http_status != 200:
         raise RuntimeError(
-            f"[Codex] 换 token 失败 status={http_status}: {(resp.text or '')[:300]}"
+            f"[Codex] token exchange failed status={http_status}: {(resp.text or '')[:300]}"
         )
     token_resp = resp.json()
     if not token_resp.get("access_token"):
-        raise RuntimeError(f"[Codex] token 响应缺少 access_token: {token_resp}")
+        raise RuntimeError(f"[Codex] token response is missing access_token: {token_resp}")
     logger.info(
-        f"[Codex] 换 token 成功，expires_in={token_resp.get('expires_in')}, "
+        f"[Codex] token exchange succeeded,expires_in={token_resp.get('expires_in')}, "
         f"access_token={token_resp['access_token'][:16]}..."
     )
     return token_resp
 
 
 # ============================================================
-# 解析 id_token / 落盘 —— 未改动
+# Parse the id_token / persist - unchanged
 # ============================================================
 
 def _parse_id_token(id_token: str) -> dict:
-    """base64 解码 JWT payload（不验签），抽 email / account_id / plan_type。"""
+    """base64 Decode the JWT payload (signature not verified) and extract email / account_id / plan_type."""
     if not id_token:
         return {}
     try:
@@ -1532,13 +1532,13 @@ def _parse_id_token(id_token: str) -> dict:
             return {}
         claims = _decode_jwt_segment(parts[1])
     except Exception as exc:
-        logger.warning(f"[Codex] id_token 解析失败: {exc}")
+        logger.warning(f"[Codex] id_token parse failed: {exc}")
         return {}
 
     auth_claim = claims.get("https://api.openai.com/auth", {}) or {}
     profile_claim = claims.get("https://api.openai.com/profile", {}) or {}
-    # OpenAI 新版 id_token 的 email 在顶层 claim；旧版/CLIProxyAPI 实现里在 profile_claim。
-    # 顶层优先，否则回退 profile_claim，避免落盘的 codex-邮箱.json 里 email 字段为空。
+    # OpenAI In the new id_token the email is a top-level claim; in the old version / CLIProxyAPI implementation it is inside profile_claim.
+    # Top level first, otherwise fall back to profile_claim, so the email field in the persisted codex-email.json is not empty.
     email_value = claims.get("email") or profile_claim.get("email", "")
     return {
         "email": email_value,
@@ -1548,7 +1548,7 @@ def _parse_id_token(id_token: str) -> dict:
 
 
 def build_codex_storage(token_resp: dict, id_claims: dict) -> dict:
-    """组装 CLIProxyAPI CodexTokenStorage JSON 结构。"""
+    """Assemble the CLIProxyAPI CodexTokenStorage JSON structure."""
     expires_in = token_resp.get("expires_in", 0) or 0
     expired_dt = datetime.now(timezone.utc) + _timedelta_seconds(expires_in)
     last_refresh_dt = datetime.now(timezone.utc)
@@ -1570,7 +1570,7 @@ def _timedelta_seconds(seconds: int):
 
 
 def _credential_file_name(email: str, plan_type: str) -> str:
-    """对照 CLIProxyAPI filename.go：无 plan→codex-{email}.json，否则带 plan 后缀。"""
+    """Following CLIProxyAPI filename.go: no plan -> codex-{email}.json, otherwise with a plan suffix."""
     email = (email or "").strip()
     plan = (plan_type or "").strip().lower()
     if plan == "":
@@ -1579,14 +1579,14 @@ def _credential_file_name(email: str, plan_type: str) -> str:
 
 
 def save_codex_credential(storage: dict, email: str, plan_type: str) -> str:
-    """保存 Codex 凭证到 SQLite，不创建本地文件。"""
+    """Save the Codex credential to SQLite, without creating local files."""
     fname = _credential_file_name(email, plan_type)
     db.upsert_codex_credential(storage, fname)
     return f"sqlite://codex_accounts/{fname}"
 
 
 def _save_codex_credential(email: str, storage: dict) -> str:
-    """BrowserUse 兼容入口：同样只保存到 SQLite。"""
+    """BrowserUse Compatibility entry point: likewise only saves to SQLite."""
     plan = ""
     if isinstance(storage, dict):
         plan = storage.get("plan_type") or storage.get("chatgpt_plan_type") or ""
@@ -1595,8 +1595,8 @@ def _save_codex_credential(email: str, storage: dict) -> str:
 
 def _extract_cpa_auth_json(payload: dict) -> dict | None:
     """
-    尝试从 CPA oauth-callback 响应里提取完整授权文件。
-    不同 CPA 版本字段名可能不同；只要看起来是 codex auth json 就落本地。
+    Try to extract the complete authorization file from the CPA oauth-callback response.
+    Different CPA versions may use different field names; as long as it looks like a codex auth json it is saved locally.
     """
     if not isinstance(payload, dict):
         return None
@@ -1638,9 +1638,9 @@ def _save_cpa_local_record(
     submit_payload: dict,
 ) -> str | None:
     """
-    在 SQLite 记录 CPA 授权结果：
-      1) 如果 CPA 返回完整 auth json，保存为可用 codex-邮箱[-plan].json；
-      2) 否则按配置保存 callback 提交回执，便于追踪 CPA 侧授权结果。
+    Record the CPA authorization result in SQLite:
+      1) If CPA returns the complete auth json, save it as a usable codex-email[-plan].json;
+      2) otherwise save the callback submission receipt according to the config, to help trace the CPA-side authorization result.
     """
     auth_json = _extract_cpa_auth_json(submit_payload)
     if auth_json:
@@ -1662,7 +1662,7 @@ def _save_cpa_local_record(
         "cpa_management_origin": _cpa_management_origin(),
         "cpa_submit_response": submit_payload,
         "submitted_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "note": "授权地址由 CPA 生成；callback 已提交给 CPA。若 CPA 响应未包含 token，本文件为本地回执记录。",
+        "note": "The authorization URL is generated by CPA; the callback has been submitted to CPA. If the CPA response contains no token, this file is a local receipt record.",
     }
     db.upsert_codex_credential(record, fname)
     return f"sqlite://codex_accounts/{fname}"
@@ -1676,7 +1676,7 @@ def _save_sub2_local_record(
     state: str,
     submit_payload: dict,
 ) -> str | None:
-    """在 SQLite 记录 sub2 授权结果；若返回完整 auth json，则保存为 Codex 凭证。"""
+    """Record the sub2 authorization result in SQLite; if the complete auth json is returned, save it as a Codex credential."""
     auth_json = _extract_cpa_auth_json(submit_payload)
     if auth_json:
         effective_email = auth_json.get("email") or email
@@ -1701,14 +1701,14 @@ def _save_sub2_local_record(
         "sub2_origin": sub2_origin,
         "sub2_submit_response": submit_payload,
         "submitted_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "note": "授权地址由 sub2 生成；callback 已上传给 sub2。若 sub2 响应未包含 token，本文件为本地回执记录。",
+        "note": "The authorization URL is generated by sub2; the callback has been uploaded to sub2. If the sub2 response contains no token, this file is a local receipt record.",
     }
     db.upsert_codex_credential(record, fname)
     return f"sqlite://codex_accounts/{fname}"
 
 
 # ============================================================
-# 入口
+# Entry point
 # ============================================================
 
 def run_codex_oauth(
@@ -1719,27 +1719,27 @@ def run_codex_oauth(
     _cpa_reauth_round: int = 1,
 ) -> dict:
     """
-    注册成功后的 Codex OAuth 授权入口（全新 session + 接码方案）。
+    Codex OAuth authorization entry point after a successful registration (brand new session + SMS code receiving approach).
 
-    不复用注册的 session：内部新建干净 BrowserSession，从头登录该邮箱，
-    走 邮箱 OTP → 手机短信验证 → 选 workspace → 拿 code → 换 token → 落盘。
+    The registration session is not reused: a clean BrowserSession is created internally and this email is logged in from scratch,
+    going through email OTP -> phone SMS verification -> pick workspace -> get code -> exchange token -> persist.
 
     Args:
-        email: 已注册成功的账号邮箱
-        otp_provider: 邮箱 OTP 获取回调 fn(email, after_ts)->code，默认用 wait_for_otp
-        proxy: 代理（不传从 PROXY_POOL 抽）
-        force: True 时跳过 ENABLE_CODEX_AUTO 开关限制，供手动补跑使用
+        email: Email of the successfully registered account
+        otp_provider: Email OTP retrieval callback fn(email, after_ts)->code, default uses wait_for_otp
+        proxy: Proxy (when not passed one is drawn from PROXY_POOL)
+        force: True skips the ENABLE_CODEX_AUTO switch limit, for manual reruns
 
     Returns:
-        结构化结果 dict。任何异常都被吞掉转 status=failed，不向上抛，不影响注册主流程。
+        Structured result dict. Any exception is swallowed and turned into status=failed, never raised upward, and does not affect the registration main flow.
     """
     if not force and not _cfg.ENABLE_CODEX_AUTO:
         return _codex_result(status="skipped", message="ENABLE_CODEX_AUTO=False")
     if not email:
-        return _codex_result(status="skipped", message="email 为空")
+        return _codex_result(status="skipped", message="email is empty")
 
-    # Codex OAuth 支持多种驱动：
-    # protocol：原纯协议；roxy/cloak/browser_use：用真实浏览器跑页面并捕获 localhost callback。
+    # Codex OAuth Supports several drivers:
+    # protocol: the original pure protocol; roxy/cloak/browser_use: run the pages in a real browser and capture the localhost callback.
     try:
         from config import codex as _codex_cfg
         from config import roxybrowser as _roxy_cfg
@@ -1778,29 +1778,29 @@ def run_codex_oauth(
                     except Exception:
                         pass
         if oauth_driver not in ("protocol", "api", "http"):
-            raise RuntimeError(f"[Codex] 不支持的 CODEX_OAUTH_DRIVER={oauth_driver!r}，可选 protocol / roxy / cloak / browser_use / skyvern")
+            raise RuntimeError(f"[Codex] Unsupported CODEX_OAUTH_DRIVER={oauth_driver!r}, options are protocol / roxy / cloak / browser_use / skyvern")
     except ImportError:
-        # 没装 selenium / 未提供 roxy 配置时继续走协议模式，保持旧行为。
+        # Without selenium installed / without a roxy config, the protocol mode is still used, keeping the old behavior.
         pass
 
     if otp_provider is None:
         from core.email_provider import wait_for_otp as otp_provider
 
-    # 单次 Codex 授权全程统一身份；下一任务即使是同一账号也生成全新的隔离身份。
+    # One Codex authorization uses a single identity throughout; the next task gets a brand new isolated identity even for the same account.
     task_seed = f"codex-oauth:{email.lower()}:{uuid.uuid4()}"
     session = BrowserSession(proxy=proxy, fingerprint_seed=task_seed)
     try:
-        logger.info(f"[Codex] 开始授权（全新 session）：{email}")
+        logger.info(f"[Codex] Starting authorization (brand new session):{email}")
         logger.info(
-            "[Codex] 统一指纹上下文：device_id=%s oai_session_id=%s auth_session_logging_id=%s %s",
+            "[Codex] Unified fingerprint context:device_id=%s oai_session_id=%s auth_session_logging_id=%s %s",
             session.device_id,
             session.oai_session_id,
             session.auth_session_logging_id,
             session.fingerprint_summary_text(),
         )
 
-        # 1. 授权地址
-        #    默认由 CPA 生成（本地不生成 PKCE/state）；local 模式保留旧代码用于兼容。
+        # 1. Authorization URL
+        #    Generated by CPA by default (PKCE/state are not generated locally); the local mode keeps the old code for compatibility.
         auth_source = _codex_auth_url_source()
         cpa_auth = None
         code_verifier = None
@@ -1810,21 +1810,21 @@ def run_codex_oauth(
             cpa_auth = _request_cpa_authorize_url()
             state = cpa_auth["state"]
             auth_url = cpa_auth["auth_url"]
-            logger.info(f"[Codex] 当前使用 CPA 授权地址: {auth_url}")
+            logger.info(f"[Codex] Currently using the CPA authorization URL: {auth_url}")
         elif auth_source == "sub2":
             sub2_auth = _request_sub2_authorize_url()
             state = sub2_auth["state"]
             auth_url = sub2_auth["auth_url"]
-            logger.info(f"[Codex] 当前使用 sub2 授权地址: {auth_url}")
+            logger.info(f"[Codex] Currently using the sub2 authorization URL: {auth_url}")
         elif auth_source == "local":
             code_verifier, code_challenge = _generate_pkce()
             state = _generate_state()
-            logger.info("[Codex] 当前使用本地 PKCE 生成授权地址，完整 URL 将在 bootstrap 阶段输出")
+            logger.info("[Codex] Currently using a locally generated PKCE authorization URL; the full URL will be output in the bootstrap stage")
         else:
-            raise RuntimeError(f"[Codex] 不支持的 CODEX_AUTH_URL_SOURCE={auth_source!r}")
+            raise RuntimeError(f"[Codex] unsupported CODEX_AUTH_URL_SOURCE={auth_source!r}")
 
-        # 2. 网络预检 + 建立会话。预检不携带邮箱，不触发 OTP；
-        #    真正烧邮箱的 authorize/continue 只在预检成功后执行。
+        # 2. Network pre-check + session establishment. The pre-check carries no email and does not trigger an OTP;
+        #    the authorize/continue that really burns an email only runs after the pre-check succeeds.
         _codex_protocol_fingerprint_warmup(session)
         human_delay("navigate")
         _codex_auth_preflight(session)
@@ -1833,8 +1833,8 @@ def run_codex_oauth(
         _bootstrap_authorize(session, state, code_challenge, auth_url=auth_url)
         human_delay("navigate")
 
-        # 3. 提交邮箱。后续不根据“账号有没有密码”猜流程，而是以 Auth 实际返回的
-        #    page/type/continue_url 为准；账号密码只是密码页出现时的可用凭证。
+        # 3. Submit the email. Afterwards the flow is not guessed from "whether the account has a password", but follows what Auth actually returns
+        #    page/type/continue_url ; the account password is only a credential to use when a password page appears.
         otp_after_ts = time.time()
         auth_result = _submit_email(session, email)
         human_delay("form")
@@ -1843,14 +1843,14 @@ def run_codex_oauth(
         )
         password_login_done = login_status == "logged_in"
 
-        # 4. 只有 Auth 明确把流程推进到邮箱验证页时，才轮询邮箱 OTP。
+        # 4. Only when Auth explicitly advances the flow to the email verification page is the email OTP polled.
         if not password_login_done and (
             login_status == "email_otp" or _is_email_otp_step(auth_result)
         ):
             email_otp = None
             max_email_otp_attempts = 3
             for email_otp_attempt in range(1, max_email_otp_attempts + 1):
-                logger.info(f"[Codex] 等待邮箱 OTP：{email}（第 {email_otp_attempt}/{max_email_otp_attempts} 次）")
+                logger.info(f"[Codex] Waiting for the email OTP: {email} (attempt {email_otp_attempt}/{max_email_otp_attempts})")
                 try:
                     email_otp = otp_provider(email, after_ts=otp_after_ts)
                     break
@@ -1858,7 +1858,7 @@ def run_codex_oauth(
                     if email_otp_attempt >= max_email_otp_attempts:
                         raise
                     logger.warning(
-                        "[Codex] 一直未收到邮箱 OTP，重新提交邮箱触发重发后继续等待（下一轮 %s/%s）：%s: %s",
+                        "[Codex] No email OTP received for a long time, resubmitting the email to trigger a resend and continuing to wait (next round %s/%s):%s: %s",
                         email_otp_attempt + 1,
                         max_email_otp_attempts,
                         type(exc).__name__,
@@ -1876,12 +1876,12 @@ def run_codex_oauth(
                         auth_result = retry_result
                         break
             if not password_login_done:
-                logger.info(f"[Codex] 邮箱 OTP 收到：{email_otp}")
+                logger.info(f"[Codex] Email OTP received:{email_otp}")
                 human_delay("otp_input")
                 auth_result = _submit_email_otp(session, email_otp)
                 human_delay("api")
 
-        # 邮箱验证后仍可能由 Auth 要求 MFA；只有返回 MFA 状态时才提交 TOTP。
+        # After email verification Auth may still require MFA; the TOTP is only submitted when an MFA state is returned.
         if not password_login_done and _is_mfa_step(
             auth_result, _extract_continue_url(auth_result)
         ):
@@ -1891,9 +1891,9 @@ def run_codex_oauth(
                 session, continue_url, state
             ) if continue_url else early_callback_url
 
-        # 5. 是否需要手机号也完全由 Auth 返回决定，不再因为走过 OTP/密码而固定执行。
+        # 5. Whether a phone number is needed is also decided entirely by what Auth returns, and is no longer executed as a fixed step just because OTP/password was passed.
         if _is_phone_step(auth_result):
-            logger.info("[Codex] Auth 明确要求手机号验证，开始接码：%s", email)
+            logger.info("[Codex] Auth Phone verification explicitly required, starting code receiving:%s", email)
             phone_result = _do_phone_verification(session)
             phone_continue = _extract_continue_url(phone_result)
             if phone_continue:
@@ -1904,19 +1904,19 @@ def run_codex_oauth(
             human_delay("post_auth")
         else:
             logger.info(
-                "[Codex] Auth 未要求手机号验证，跳过：email=%s page=%s continue=%s",
+                "[Codex] Auth Phone verification not required, skipping:email=%s page=%s continue=%s",
                 email,
                 _page_type(auth_result) or "-",
                 _extract_continue_url(auth_result) or "-",
             )
 
-        # 6. 选 workspace → 拿 callback code；若登录 continue 已经直接命中 callback，则复用。
+        # 6. Pick workspace -> get the callback code; if the login continue already hit the callback directly, reuse it.
         callback_url = early_callback_url or _select_workspace_and_get_callback(session, state)
         code = _extract_code(callback_url, state)
-        logger.info(f"[Codex] 已拿到 authorization code：{code[:24]}...")
+        logger.info(f"[Codex] Got the authorization code:{code[:24]}...")
 
-        # 7A. CPA 模式：把 callback URL 交给 CPA，由 CPA 持有 verifier 并完成换 token / 写 auth。
-        #     本地不再用 code 换 token；仅保存 CPA 返回的授权文件或回调回执。
+        # 7A. CPA mode: hand the callback URL to CPA, which holds the verifier and completes the token exchange / writes the auth.
+        #     The code is no longer exchanged locally; only the authorization file or callback receipt returned by CPA is saved.
         if auth_source == "cpa":
             submit_payload = _submit_cpa_callback(callback_url)
             path = _save_cpa_local_record(
@@ -1927,7 +1927,7 @@ def run_codex_oauth(
                 submit_payload=submit_payload,
             )
             msg = submit_payload.get("message") or submit_payload.get("status_message") or "CPA callback submitted"
-            logger.info(f"[Codex][CPA] 成功：{email}，{msg}，本地记录={path or 'disabled'}")
+            logger.info(f"[Codex][CPA] Success: {email}, {msg}, local record={path or 'disabled'}")
             return _codex_result(
                 status="success",
                 ok=True,
@@ -1937,7 +1937,7 @@ def run_codex_oauth(
                 message=str(msg),
             )
 
-        # 7A-sub2. sub2 模式：把 callback URL 上传给 sub2。
+        # 7A-sub2. sub2 mode: upload the callback URL to sub2.
         if auth_source == "sub2":
             submit_payload = _submit_sub2_callback(
                 callback_url,
@@ -1952,7 +1952,7 @@ def run_codex_oauth(
                 submit_payload=submit_payload,
             )
             msg = submit_payload.get("message") or submit_payload.get("status_message") or "sub2 callback uploaded"
-            logger.info(f"[Codex][sub2] 成功：{email}，{msg}，本地记录={path or 'disabled'}")
+            logger.info(f"[Codex][sub2] Success: {email}, {msg}, local record={path or 'disabled'}")
             return _codex_result(
                 status="success",
                 ok=True,
@@ -1962,20 +1962,20 @@ def run_codex_oauth(
                 message=str(msg),
             )
 
-        # 7B. local 模式：保留旧实现，用本地 verifier 换 token 并保存 CPA 兼容授权文件。
+        # 7B. local mode: keep the old implementation, exchange the token with the local verifier and save a CPA-compatible authorization file.
         if not code_verifier:
-            raise RuntimeError("[Codex] local 模式缺少 code_verifier")
+            raise RuntimeError("[Codex] local mode is missing code_verifier")
         token_resp = exchange_codex_token(session, code, code_verifier)
 
-        # 8. 解析 id_token + 落盘
+        # 8. Parse the id_token + persist
         id_claims = _parse_id_token(token_resp.get("id_token", ""))
         effective_email = id_claims.get("email") or email
         storage = build_codex_storage(token_resp, id_claims)
         path = save_codex_credential(storage, effective_email, id_claims.get("plan_type", ""))
 
         logger.info(
-            f"[Codex] 成功：{effective_email}，plan={id_claims.get('plan_type') or 'unknown'}, "
-            f"account_id={id_claims.get('account_id') or 'unknown'}, 已保存到 {path}"
+            f"[Codex] Success: {effective_email},plan={id_claims.get('plan_type') or 'unknown'}, "
+            f"account_id={id_claims.get('account_id') or 'unknown'}, saved to {path}"
         )
         return _codex_result(
             status="success",
@@ -1986,16 +1986,16 @@ def run_codex_oauth(
             message=f"plan={id_claims.get('plan_type') or 'unknown'}",
         )
     except AccountUnusableError as exc:
-        logger.warning(f"[Codex] 账号已废（{exc.error_code}）：{email}")
+        logger.warning(f"[Codex] Account is dead ({exc.error_code}):{email}")
         return _codex_result(
             status="deactivated",
             email=email,
-            message=f"账号已废（{exc.error_code}）",
+            message=f"Account is dead ({exc.error_code})",
         )
     except Exception as exc:
         if _is_cpa_callback_reauth_error(exc) and _cpa_reauth_round < 2:
             logger.warning(
-                "[Codex][CPA] callback 返回 Timeout waiting for OAuth callback，重新开启第 %s/2 轮 Codex 授权：%s",
+                "[Codex][CPA] callback returned Timeout waiting for OAuth callback, starting Codex authorization round %s/2 again:%s",
                 _cpa_reauth_round + 1, email,
             )
             return run_codex_oauth(
@@ -2005,8 +2005,8 @@ def run_codex_oauth(
                 force=force,
                 _cpa_reauth_round=_cpa_reauth_round + 1,
             )
-        logger.warning(f"[Codex] 失败：{email}，{type(exc).__name__}: {str(exc)[:200]}")
-        logger.debug("[Codex] 失败详情:", exc_info=True)
+        logger.warning(f"[Codex] Failed: {email},{type(exc).__name__}: {str(exc)[:200]}")
+        logger.debug("[Codex] failure details:", exc_info=True)
         return _codex_result(
             status="failed",
             email=email,

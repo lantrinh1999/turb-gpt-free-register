@@ -12,7 +12,7 @@ from webui import config_editor
 
 @contextmanager
 def _browser_source_defaults():
-    """测试源码默认值，不让开发机 .env 的显式 URL 覆盖影响断言。"""
+    """Test the source defaults, so that an explicit URL in the developer .env does not affect the assertions."""
     old_loaded = env_loader._LOADED
     try:
         with patch.dict(os.environ, {"BROWSER_DATA_SAVER_BLOCKED_URL_PATTERNS": ""}, clear=False):

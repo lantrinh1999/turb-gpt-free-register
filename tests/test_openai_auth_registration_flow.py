@@ -233,8 +233,8 @@ class OpenAIRegistrationFlowTests(unittest.TestCase):
             openai_auth.request_sentinel_token(session, "email_otp_validate")
             openai_auth.request_sentinel_token(session, "oauth_create_account")
 
-        # 同一个 SDK context 会缓存同一份 p；password iframe 与 top-level
-        # 各生成一次，top-level 的两个 flow 复用。
+        # The same SDK context caches the same p; the password iframe and top-level
+        # each generate one; the two top-level flows reuse it.
         self.assertEqual([item[0] for item in captured], [
             "iframe-sid", "top-level-sid",
         ])

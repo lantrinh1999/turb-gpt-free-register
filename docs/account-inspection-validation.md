@@ -1,46 +1,46 @@
-# 账号巡检验收记录
+# Account inspection acceptance record
 
-日期：2026-10-17
+Date:2026-10-17
 
-## 验收范围与约定
+## Acceptance scope and conventions
 
-- 启动时固定账号 ID 集合和归档范围：未归档 / 已归档 / 全部。其他列表筛选不参与巡检；弹窗有明确说明。
-- 每个任务内每个账号最多领取一次，支持 1–32 个并发 pipeline；阶段请求复用原有队列与限流。
-- 同一 SQLite 数据库只允许一个巡检，数据库唯一约束与进程文件锁共同防重。
-- AT 只在本地读取 JWT exp，不请求 API、不验证签名；缺失、格式错误、过期均作为失效。
-- 仅失效账号查活。查活先保存新 AT，再复用同一 BrowserSession 查询套餐；巡检只消费查活返回的 `plan_result`，不再提交独立套餐查询。占用被拒绝也计对应阶段失败。
-- 开始检查前已删除：计跳过。请求过程中删除/换绑/AT 改变：拒绝旧结果，计阶段失败，不计成功。
-- 重启后的任务标记为 interrupted，保留已持久化统计，不自动续跑，不重放登录请求。用户可启动新的任务。
-- 活跃实例仍持进程锁时，其他实例初始化不会误中断该巡检。最后状态写入失败时，后续历史查询可清理无执行者的残留占用。
-- completed 表示所有账号已处理，不代表所有查活/套餐均成功。中断或失败任务的阶段计数可能少于失效数，表示尚未完成的阶段。
+- The account ID set and the archive scope are fixed at start: unarchived / archived / all. Other list filters do not take part in inspection; the dialog says so explicitly.
+- Each account is claimed at most once within a task, with 1-32 concurrent pipelines supported; stage requests reuse the existing queues and rate limiting.
+- Only one inspection is allowed per SQLite database; the database unique constraint and the process file lock together prevent duplicates.
+- AT is checked locally only: the JWT exp is read without any API request and without signature verification; missing, malformed, or expired tokens are all treated as invalid.
+- Only invalid accounts get a liveness check. The liveness check first saves the new AT, then reuses the same BrowserSession to query the plan; inspection only consumes the `plan_result` returned by the liveness check and no longer submits a separate plan query. A rejected occupation also counts as a failure of the corresponding stage.
+- Deleted before the check starts: counted as skipped. Deleted / email changed / AT changed during the request: the old result is rejected and counted as a stage failure, not a success.
+- Tasks after a restart are marked interrupted, keeping the persisted stats; they do not resume automatically and login requests are not replayed. Users can start a new task.
+- While the active instance still holds the process lock, other instances initializing will not interrupt that inspection by mistake. If the final status write fails, a later history query can clean up the leftover occupation that has no executor.
+- completed means all accounts were processed, not that all liveness checks / plans succeeded. For interrupted or failed tasks, the stage counts may be lower than the number of invalid accounts, indicating stages not yet completed.
 
-## 自动回归矩阵
+## Automated regression matrix
 
-| 分类 | 验证内容 | 测试位置 |
+| Category | What is verified | Test location |
 |---|---|---|
-| JWT | 时间边界、非法 exp、非字符串、空段/多段、Bearer | `test_account_inspection.py` |
-| 流程与计数 | 正常 token 不调用服务，查活后读取新 AT，成功/失败/拒绝统计 | 同上 |
-| 并发与防重 | 多账号并发、线程数校验、ID 单次领取、全局互斥 | 同上 |
-| 归档 | 三种范围快照、历史标识、归档状态保留 | 同上及 UI 测试 |
-| 动态账号 | 删除跳过、ID 不复用、删除期间不误报成功、换绑和 AT 更新后拒绝旧结果 | 同上 |
-| 重启与恢复 | queued/running 中断、旧 worker 不复活终态、重复初始化不误杀 | 同上 |
-| 进程互斥 | 真实子进程抢锁、进程退出自动释放 | 同上 |
-| 资源释放 | claim/submit/日志失败、Future 取消、代理关闭失败 | 同上 |
-| 持久化 | 历史分页、终态保护、最终保存失败后的轮询恢复 | 同上 |
-| HTTP/UI | 鉴权、非法 JSON、参数边界、新旧模板、旧响应隔离、GET 超时恢复、完成后刷新 | 同上及 `test_account_inspection_ui.cjs` |
+| JWT | time boundary, invalid exp, non-string, empty or multiple segments,Bearer | `test_account_inspection.py` |
+| Flow and counts | A normal token does not call the service; after the liveness check the new AT is read; success / failure / rejection counts | Same as above |
+| Concurrency and de-duplication | Multi-account concurrency, thread count validation, single claim per ID, global mutual exclusion | Same as above |
+| Archive | Three-scope snapshots, history identifier, archive state retention | Same as above and UI tests |
+| Dynamic accounts | Skip on deletion, IDs not reused, no false success during deletion, old results rejected after email change and AT update | Same as above |
+| Restart and recovery | queued/running interrupted, old workers do not revive terminal states, repeated initialization does not kill by mistake | Same as above |
+| Process mutual exclusion | Real child processes contending for the lock, lock released automatically on process exit | Same as above |
+| Resource release | claim/submit/log failure, Future cancellation, proxy close failure | Same as above |
+| Persistence | History pagination, terminal-state protection, polling recovery after a failed final save | Same as above |
+| HTTP/UI | authentication, invalid JSON, parameter bounds, old and new templates, stale-response isolation, GET timeout recovery, refresh after completion | Same as above and `test_account_inspection_ui.cjs` |
 
-## 本轮新增修复
+## New fixes this round
 
-1. 查活/套餐写回增加账号邮箱与 AT 快照条件，在数据库锁内比较，避免网络请求期间的换绑/刷新被旧结果覆盖。
-2. 持久化未成功的查活/套餐结果不再作为巡检成功，不进入后续成功路径。
-3. 巡检历史 GET 增加 30 秒取消机制，网络挂起不会永久占用前端加载状态。
+1. Liveness check / plan write-back now carries conditions on the account email and AT snapshot, compared under the database lock, so an email change or refresh during a network request is not overwritten by an old result.
+2. Liveness check / plan results that failed to persist are no longer treated as inspection successes and do not enter the later success path.
+3. The inspection history GET gains a 30-second cancel mechanism, so a hung network cannot occupy the frontend loading state forever.
 
-## 两个原有失败测试的结论
+## Conclusions on the two originally failing tests
 
-- authorize 的实现明确允许 403 在同一会话内有限重试，保留 Cookie；原测试要求首次立即失败，与当前策略相反。未改业务策略，新增同会话成功重试、重试耗尽/退避、400 立即失败的行为验证。
-- 2FA 使用固定最大容量线程池和可动态配置的逻辑并发门控，原测试把二者当成同一个值。增加真实 worker 测试，验证并发限制、动态增减和任务退出后资源归还；未改变并发策略。
+- authorize implementation explicitly allows a limited number of 403 retries within the same session and keeps the cookies; the original test required an immediate first failure, which contradicts the current policy. The business policy was not changed; added behavior checks for same-session retry success, retry exhaustion/backoff, and immediate failure on 400.
+- 2FA uses a fixed-maximum-capacity thread pool plus a dynamically configurable logical concurrency gate, while the original test treated the two as one value. Added a real worker test that verifies the concurrency limit, dynamic increase/decrease, and resource return after a task exits; the concurrency policy was not changed.
 
-## 验证命令
+## Verification commands
 
 ```sh
 .venv/bin/python -m unittest discover -s tests
@@ -50,77 +50,77 @@ node tests/test_account_inspection_ui.cjs
 git diff --check
 ```
 
-## 验证边界
+## Verification boundaries
 
-- 外部登录、邮箱及套餐请求使用 mock，未对真实账号进行批量网络调用。
-- 前端异步测试运行于 Node VM；另使用 Chrome 对新旧模板做桌面/手机布局检查（mock 数据），不等同于真实服务端到端验收。
-- 文件锁子进程测试在当前 macOS 环境执行；未在 Windows 和网络文件系统上验收。
-- 不支持重启后自动续跑。进程崩溃时尚未落库的阶段结果无法恢复，不冒称外部请求具备跨崩溃 exactly-once 保证。
-- 本次范围是账号巡检及直接依赖链，不代表项目所有其他功能均已完成全面审计。
+- External login, email, and plan requests use mocks; no bulk network calls were made against real accounts.
+- Frontend async tests run in a Node VM; Chrome was also used for desktop/mobile layout checks of the old and new templates (mock data), which is not equivalent to real server end-to-end acceptance.
+- The file-lock child-process tests ran on the current macOS environment; they were not validated on Windows or network file systems.
+- Automatic resume after restart is not supported. Stage results not yet persisted when a process crashes cannot be recovered, and no cross-crash exactly-once guarantee is claimed for external requests.
+- The scope of this round is account inspection and its direct dependency chain; it does not mean all other project features have been fully audited.
 
-## 本次实际结果
+## Actual results this round
 
-- 全量 unittest：347 项全部通过，0 失败。
-- 巡检专项：39 项全部通过，连续重复 3 轮均通过。
-- Node 前端异步回归：通过。
-- Python compileall：通过。
-- git diff --check：通过。
+- Full unittest run: all 347 tests passed, 0 failures.
+- Inspection-specific: all 39 tests passed, and all 3 repeated consecutive rounds passed.
+- Node frontend async regression: passed.
+- Python compileall: passed.
+- git diff --check: passed.
 
-全量日志：`/tmp/inspection-final-validation.log`（本机临时文件，不随仓库保存）。
-
-
-## 巡检弹窗 UI 优化验收
-
-- 使用页面已有 `--surface` / `--line` 配色变量，修正深色底与深色文字冲突。
-- 启动及历史弹窗统一标题、按钮、边距；长规则折叠展示。
-- 统计使用分组成功/失败数字、状态标签和进度条，保留跳过数及完整任务时间。
-- 补充加载、空记录、首次读取失败的界面；刷新按钮显示请求中状态。
-- Chrome 使用 mock 数据验证新旧两套模板，覆盖 1328px 桌面、390px 手机、弹窗边界、Escape 关闭、空状态及 HTML 转义。
-- Node 异步 UI 测试通过；全量 unittest 347 项通过。
+Full log: `/tmp/inspection-final-validation.log` (a local temporary file, not saved with the repo).
 
 
-## 查活同会话自动查询套餐
+## Inspection dialog UI polish acceptance
 
-### 当前流程
+- Uses the existing `--surface` / `--line` color variables of the page, fixing the conflict of dark text on a dark background.
+- The start and history dialogs share the same title, buttons, and margins; long rules are shown collapsed.
+- Statistics use grouped success/failure numbers, status tags, and a progress bar, keeping the skipped count and the full task times.
+- Added loading, empty-record, and first-read-failure states; the refresh button shows an in-progress state.
+- Chrome Verified with mock data on both the old and new templates, covering 1328px desktop, 390px mobile, dialog bounds, Escape to close, empty state, and HTML escaping.
+- Node Async UI tests passed; the full unittest run of 347 tests passed.
 
-1. 手动 / 批量 / 巡检 / 换绑后查活完成登录并获得新 AT。
-2. 先按账号快照校验并保存 AT，避免套餐请求失败或等待时丢失登录结果。
-3. 使用尚未关闭的同一个 BrowserSession、Cookie、指纹及代理查询套餐；不额外创建会话或代理中继。
-4. 自动套餐查询与手动套餐队列共享账号占用、队列容量与请求限速；在当前查活线程内同步执行，不向同一个阶段线程池提交后再等待。
-5. 保存套餐结果后，由原查活流程统一关闭会话与代理中继。套餐错误不触发重登录，不将查活改为失败。
-6. 巡检只调用查活，分别累计查活与内嵌套餐结果。AT 未失效的账号仍只检查本地 JWT，不调用任何业务接口。
 
-### 防并发覆盖
+## Automatic plan query in the same session after a liveness check
 
-- 套餐写入校验邮箱、AT 和本次查询运行 ID，旧请求不得结束或覆盖后续查询。
-- 本次查询执行中账号邮箱 / AT 发生变化时，丢弃旧结果并结束自己的占用状态，不留下虚假的 running。
-- 查活结果已提前保存后，不在套餐结束时再次写入旧 AT。
-- 查活日志的运行标识覆盖自动套餐阶段，避免前端提前停止轮询。
+### Current flow
 
-### 本次验证
+1. Manual / batch / inspection / post-email-change liveness check completes the login and obtains a new AT.
+2. First validate against the account snapshot and save the AT, so the login result is not lost if the plan request fails or waits.
+3. Query the plan with the same BrowserSession, cookies, fingerprint, and proxy that are not yet closed; no extra session or proxy relay is created.
+4. The automatic plan query shares account occupation, queue capacity, and request rate limiting with the manual plan queue; it runs synchronously inside the current liveness check thread instead of submitting to the same stage thread pool and waiting.
+5. After the plan result is saved, the original liveness check flow closes the session and the proxy relay uniformly. A plan error does not trigger re-login and does not turn the liveness check into a failure.
+6. Inspection only calls the liveness check and accumulates the liveness check and embedded plan results separately. Accounts whose AT has not expired are still checked only via the local JWT, with no business API called.
 
-- 全量 unittest：356 项全部通过。
-- 巡检专项：44 项；验证原会话传递、新 AT 提前写入、套餐失败隔离、共享防重、旧运行结果丢弃、完整并发任务不死锁。
-- 套餐底层测试：借用会话在成功 / 401 / 503 / 403 重试后均不关闭调用方会话，不重建会话或代理、不重复预热。
-- 换绑后同会话查活自动套餐查询有回归覆盖。
-- Node UI 回归、compileall、git diff --check 通过。
-- 所有外部账号网络操作均使用 mock，未对真实账号执行登录或套餐请求。
+### Concurrent overwrite protection
 
-## 同会话改造后的异常路径审计
+- Plan writes validate the email, the AT, and the run ID of this query; an old request must not finish or overwrite a later query.
+- If the account email / AT changes while this query is executing, the old result is discarded and its own occupation state is ended, leaving no false running state.
+- After the liveness check result has been saved early, the old AT is not written again when the plan finishes.
+- The run identifier in the liveness check log covers the automatic plan stage, so the frontend does not stop polling early.
 
-本轮先通过故障注入复现失败，再修改实现，确认以下 3 项修复：
+### This verification
 
-| 问题 | 修复 | 回归用例 |
+- Full unittest run: all 356 tests passed.
+- Inspection-specific: 44 tests; verified original session propagation, early writing of the new AT, plan failure isolation, shared de-duplication, discarding results of old runs, and complete concurrent tasks without deadlock.
+- Plan low-level tests: a borrowed session is not closed by the callee after success / 401 / 503 / 403 retries, and the session or proxy is not rebuilt and warm-up is not repeated.
+- The liveness check after an email change that queries the plan in the same session has regression coverage.
+- Node UI Regression, compileall, and git diff --check passed.
+- All external account network operations use mocks; no real account login or plan request was executed.
+
+## Exception path audit after the same-session rework
+
+This round first reproduced the failures by fault injection, then changed the implementation, confirming the following 3 fixes:
+
+| Problem | Fix | Regression test |
 |---|---|---|
-| 保存 AT 的认证回调抛错后，完成标志提前置位，后续出口重试失败却跳过最终状态写入，账号残留 running | 回调正常返回后才置完成标志，每次出口尝试重置标志 | `test_auth_callback_save_failure_then_retry_does_not_leave_live_running` |
-| 套餐任务启动写库失败，运行 ID 尚未写入，异常处理的所有权校验不匹配，任务残留 queued | 在领取时就持久化运行 ID，贯穿启动、完成、提交失败和取消；失败写入允许结束自己的 queued，旧任务不得启动或结束新任务 | `test_plan_start_database_error_releases_persisted_queue_claim`、`test_old_plan_run_cannot_finish_newer_claim` |
-| 独立套餐查询成功后，代理中继 close 抛错会覆盖原成功结果 | 中继关闭 best-effort，记录清理异常但保留业务结果 | `test_relay_close_failure_does_not_discard_successful_standalone_plan` |
+| After the auth callback that saves the AT raised, the completion flag was set early, so a later exit retry failed and skipped the final status write, leaving the account stuck in running | The completion flag is set only after the callback returns normally, and the flag is reset on each exit attempt | `test_auth_callback_save_failure_then_retry_does_not_leave_live_running` |
+| The plan task failed to write the database at startup before the run ID was written, so the ownership check in the exception handler did not match and the task stayed queued | The run ID is persisted at claim time and carried through start, completion, submit failure, and cancellation; a failure write may end its own queued state, and an old task must not start or end a new task | `test_plan_start_database_error_releases_persisted_queue_claim`,`test_old_plan_run_cannot_finish_newer_claim` |
+| After a standalone plan query succeeded, a proxy relay close error overwrote the original success result | Relay closing is best-effort: the cleanup exception is logged but the business result is kept | `test_relay_close_failure_does_not_discard_successful_standalone_plan` |
 
-最终全量测试：359 项全部通过。巡检专项：46 项全部通过。Node UI 回归、compileall 和 git diff --check 通过。外部网络使用 mock，未调用真实账号。
+Final full test run: all 359 tests passed. Inspection-specific: all 46 tests passed. Node UI regression, compileall, and git diff --check passed. External network uses mocks and no real account was called.
 
-## 第二轮交错与资源生命周期复查
+## Second round of interleaving and resource lifecycle review
 
-- 完整 Web 登录的会话所有权在返回前属于登录函数。授权失败、废号识别或 OTP 异常时，原代码不会把新会话交给上层，也未自行关闭，存在资源泄漏。现统一在异常路径关闭，成功路径才移交给查活调用方；关闭失败不覆盖原登录异常。
-- 查活最终清理日志文件时，`FileHandler.close()` 异常原先会覆盖业务成功返回。现先移除日志处理器，再 best-effort 关闭，保留查活/套餐结果并释放运行标记。
-- 新增 4 个测试方法，覆盖授权/废号/OTP 三阶段失败关闭、成功时保持会话开放、清理异常保留原错误、日志关闭异常保留成功结果。
-- 全量 unittest：363 项全部通过。巡检专项：46 项通过。Node UI、compileall 与 diff 检查通过。外部网络仍使用 mock。
+- Ownership of the session in a full web login belongs to the login function until it returns. When authorization failed, a dead account was detected, or an OTP raised, the original code neither handed the new session to the caller nor closed it itself, leaking the resource. It is now closed uniformly on the exception path and handed to the liveness check caller only on the success path; a close failure does not override the original login exception.
+- When the liveness check finally cleaned up the log file, a `FileHandler.close()` exception used to override the business success return. The log handler is now removed first and then closed best-effort, keeping the liveness check / plan result and releasing the run marker.
+- Added 4 test methods covering close on failure in the authorization / dead-account / OTP stages, keeping the session open on success, a cleanup exception preserving the original error, and a log close exception preserving the success result.
+- Full unittest run: all 363 tests passed. Inspection-specific: 46 tests passed. Node UI, compileall, and diff checks passed. External network still uses mocks.

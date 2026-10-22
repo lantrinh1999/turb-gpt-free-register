@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-邮箱来源调度层。
+Email source dispatch layer.
 
-EMAIL_SOURCE 支持单个或多个来源：
+EMAIL_SOURCE Supports a single source or multiple sources:
     "outlook"
-    "cloudflare_domain"   # 自有域名 + QQ IMAP
-    "cloudflare"          # Cloudflare Worker 临时邮箱
+    "cloudflare_domain"   # own domain + QQ IMAP
+    "cloudflare"          # Cloudflare Worker temporary email
     "generic_api"
     "imap"
     "gptmail"
     "mailnest"
     "cloudmail"
     "remail"
-    "mailcode"           # 域名邮箱 MailCode
+    "mailcode"           # Domain Email MailCode
     "xigua"
-    "outlook,generic_api,mailnest,cloudmail,remail"   # 按顺序兜底
-    ["outlook", "generic_api", "mailnest", "cloudmail", "remail", "xigua"]  # 也兼容列表写法
+    "outlook,generic_api,mailnest,cloudmail,remail"   # fall back in order
+    ["outlook", "generic_api", "mailnest", "cloudmail", "remail", "xigua"]  # list syntax is also supported
 """
 import logging
 from typing import Iterable
@@ -26,7 +26,7 @@ _VALID_SOURCES = ("outlook", "generic_api", "imap", "cloudflare_domain", "cloudf
 
 
 def parse_email_sources(value=None) -> list[str]:
-    """把 EMAIL_SOURCE 解析为有序来源列表，去重并过滤空值。"""
+    """Parse EMAIL_SOURCE into an ordered source list, deduplicating and filtering empty values."""
     if value is None:
         from config import email as _email_cfg
         value = _email_cfg.EMAIL_SOURCE
@@ -43,7 +43,7 @@ def parse_email_sources(value=None) -> list[str]:
         if not s:
             continue
         if s not in _VALID_SOURCES:
-            logger.warning(f"[EmailProvider] 未知邮箱来源 {s!r}，已忽略")
+            logger.warning(f"[EmailProvider] Unknown email source {s!r}, ignored")
             continue
         if s not in out:
             out.append(s)
@@ -86,36 +86,36 @@ def _pick_from_source(source: str) -> str:
 
 
 def acquire_email() -> str:
-    """根据 EMAIL_SOURCE 领取一个用于注册的邮箱地址；多个来源时按顺序兜底。"""
+    """Claim an email address for registration according to EMAIL_SOURCE; with multiple sources, fall back in order."""
     sources = parse_email_sources()
     last_exc: Exception | None = None
     for source in sources:
         try:
             email = _pick_from_source(source)
-            logger.info(f"[EmailProvider] 使用邮箱来源: {source}, email={email}")
+            logger.info(f"[EmailProvider] Using email source: {source}, email={email}")
             return email
         except Exception as exc:
             last_exc = exc
-            logger.warning(f"[EmailProvider] 来源 {source} 领取邮箱失败: {type(exc).__name__}: {exc}")
+            logger.warning(f"[EmailProvider] Source {source} failed to claim an email: {type(exc).__name__}: {exc}")
             continue
-    raise RuntimeError(f"所有邮箱来源均领取失败: {sources}; last={last_exc}")
+    raise RuntimeError(f"All email sources failed to claim an email: {sources}; last={last_exc}")
 
 
 def acquire_email_from_source(source: str) -> str:
-    """从调用方指定的单一来源领取邮箱，不受 EMAIL_SOURCE 兜底顺序影响。"""
+    """Claim an email from the single source specified by the caller, unaffected by the EMAIL_SOURCE fallback order."""
     source = str(source or "").strip().lower()
     if source not in _VALID_SOURCES:
-        raise ValueError(f"不支持的邮箱来源: {source}")
+        raise ValueError(f"Unsupported email source: {source}")
     email = _pick_from_source(source)
-    logger.info("[EmailProvider] 指定来源领取邮箱: source=%s, email=%s", source, email)
+    logger.info("[EmailProvider] Claiming email from the specified source: source=%s, email=%s", source, email)
     return email
 
 
 def acquire_email_after_input(email: str | None = None) -> str:
-    """在浏览器已找到邮箱输入框后领取邮箱。
+    """Claim an email after the browser has found the email input box.
 
-    浏览器驱动把“找到输入框”和“领取邮箱”拆成两个阶段，避免页面加载、风控
-    或入口识别失败时提前消耗邮箱。传入已有邮箱时不重复领取，兼容固定邮箱模式。
+    The browser driver splits finding the input box and claiming the email into two phases, to avoid consuming an email prematurely when page loading, risk control
+    or entry detection fails. When an existing email is passed in it is not claimed again, staying compatible with the fixed-email mode.
     """
     current = str(email or "").strip()
     if current:
@@ -124,19 +124,19 @@ def acquire_email_after_input(email: str | None = None) -> str:
     from config import email as _email_cfg
 
     if not bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", False)):
-        raise RuntimeError("页面已找到邮箱输入框，但自动取邮箱未启用且未配置 REGISTER_EMAIL")
+        raise RuntimeError("The page found the email input box, but auto email claiming is disabled and no value is configured for REGISTER_EMAIL")
     allocated = str(acquire_email() or "").strip()
     if not allocated:
-        raise RuntimeError("邮箱服务返回了空邮箱地址")
-    logger.info("[EmailProvider] 已找到邮箱输入框，开始分配邮箱: %s", allocated)
+        raise RuntimeError("The email service returned an empty email address")
+    logger.info("[EmailProvider] Email input box found, starting to allocate an email: %s", allocated)
     return allocated
 
 
 def resolve_email_source(email: str) -> str:
-    """根据邮箱判断实际来源，已注册账号优先使用落库来源。"""
-    # 已注册账号的 email_source 是注册时的最终来源。必须先读它，不能因为
-    # 当前进程里恰好残留了其它邮箱池上下文，或邮箱池顺序发生变化，就把同一
-    # 地址误判到另一个服务商。
+    """Determine the actual source from the email; registered accounts prefer the persisted source."""
+    # The email_source of a registered account is the final source at registration time. It must be read first; do not
+    # let leftover context from another email pool in the current process, or a changed email pool order, cause the same
+    # address to be misjudged as belonging to another provider.
     registered_source = _registered_email_source(email)
     if registered_source:
         return registered_source
@@ -170,9 +170,9 @@ def resolve_email_source(email: str) -> str:
         return "generic_api"
     if db.get_outlook_by_email(email):
         return "outlook"
-    if db._find_domain_email(db._load_domain_pool(), email):  # 内部轻量查询，仅本项目使用
+    if db._find_domain_email(db._load_domain_pool(), email):  # Internal lightweight query, used only by this project
         return "cloudflare_domain"
-    # 兜底：如果域名匹配 EMAIL_DOMAIN，则按域名邮箱处理
+    # Fallback: if the domain matches EMAIL_DOMAIN, treat it as a domain email
     try:
         from config import email as _email_cfg
         domain = (_email_cfg.EMAIL_DOMAIN or "").lower().strip()
@@ -184,11 +184,11 @@ def resolve_email_source(email: str) -> str:
 
 
 def _normalize_explicit_email_source(value: str | None) -> str | None:
-    """规范化调用方明确指定的邮箱来源。
+    """Normalize the email source explicitly specified by the caller.
 
-    已注册账号的 ``email_source`` 是注册时落库的单一来源，查活时应优先使用
-    这个值，而不是重新根据当前进程的临时邮箱上下文或全局 EMAIL_SOURCE 猜测。
-    这里也兼容历史数据里偶尔保存的逗号/分号分隔值，取其中第一个有效来源。
+    The ``email_source`` of a registered account is the single source persisted at registration; liveness checks should prefer
+    this value instead of guessing again from the temporary email context of the current process or the global EMAIL_SOURCE.
+    Comma/semicolon-separated values occasionally saved in historical data are also supported here; the first valid source is used.
     """
     if value is None:
         return None
@@ -203,7 +203,7 @@ def _normalize_explicit_email_source(value: str | None) -> str | None:
 
 
 def _registered_email_source(email: str) -> str | None:
-    """读取已注册账号落库的邮箱来源。"""
+    """Read the persisted email source of a registered account."""
     try:
         from core import db
 
@@ -222,10 +222,10 @@ def wait_for_otp(
     email_source: str | None = None,
     force_service: bool = False,
 ) -> str:
-    """等待并返回该邮箱最新的 ChatGPT OTP（6 位数字字符串）。
+    """Wait for and return the latest ChatGPT OTP (6-digit string) for this email.
 
-    USE_EMAIL_SERVICE=False 时走手动验证码通道（WebUI 提交 / CLI 输入），
-    不再强制要求 Outlook clientId/refreshToken。
+    USE_EMAIL_SERVICE=False uses the manual verification code channel (WebUI submit / CLI input),
+    and no longer requires Outlook clientId/refreshToken.
     """
     try:
         from config import email as _email_cfg
@@ -253,8 +253,8 @@ def wait_for_otp(
     if settle_seconds is not None:
         extra_kwargs["settle_seconds"] = settle_seconds
 
-    # 查活等已注册账号会传入注册时保存的来源；即使调用方没有显式传入，
-    # 这里也先读取账号落库来源，再按当前进程上下文/邮箱池/全局配置兜底。
+    # Liveness checks and similar flows for registered accounts pass in the source saved at registration; even if the caller does not pass it explicitly,
+    # the persisted account source is read first here, then the current process context / email pool / global config act as fallbacks.
     source = (
         _normalize_explicit_email_source(email_source)
         or _registered_email_source(email)
@@ -295,7 +295,7 @@ def wait_for_otp(
 
 
 def email_material_line(email: str, source: str | None = None) -> str:
-    """返回账号换绑后应保存的邮箱素材行。"""
+    """Return the email material row to save after the account email is changed."""
     source = _normalize_explicit_email_source(source) or resolve_email_source(email)
     from core import db
     row = None
@@ -311,7 +311,7 @@ def email_material_line(email: str, source: str | None = None) -> str:
 
 
 def release_email(email: str, status: str = "available", note: str | None = None) -> str:
-    """按邮箱实际来源回收状态，返回来源名。"""
+    """Reclaim the state according to the actual email source and return the source name."""
     source = resolve_email_source(email)
     if source == "gptmail":
         from core.gptmail_client import release_account
@@ -350,7 +350,7 @@ def release_email(email: str, status: str = "available", note: str | None = None
 
 
 def release_email_if_unconsumed(email: str, note: str | None = None) -> bool:
-    """回收仍停留在 used 的任务领取，且绝不覆盖已注册/已判废状态。"""
+    """Reclaim task claims still stuck in used, and never overwrite the registered / judged-dead state."""
     if not (email or "").strip():
         return False
 
@@ -366,12 +366,12 @@ def release_email_if_unconsumed(email: str, note: str | None = None) -> bool:
     elif source == "cloudflare_domain":
         changed = db.release_unconsumed_domain_email(email, note=note)
     else:
-        # 临时邮箱不重新进入本地池，只清理进程上下文；已有本地账号时保留上下文。
+        # Temporary emails do not re-enter the local pool, only the process context is cleaned up; the context is kept when a local account already exists.
         if db.get_account_by_email(email) is not None:
             return False
         release_email(email, status="available", note=note)
         changed = True
 
     if changed:
-        logger.info("[EmailProvider] 已回收未消耗邮箱: source=%s, email=%s", source, email)
+        logger.info("[EmailProvider] Reclaimed unused email: source=%s, email=%s", source, email)
     return changed

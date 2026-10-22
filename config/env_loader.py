@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""从项目根目录 .env 加载密钥/敏感配置。
+"""Load secrets / sensitive settings from the .env in the project root.
 
-设计目标：
-  - 重要 API Key 不进 git 跟踪的 config/*.py 默认值
-  - config 模块启动 / reload 时读取环境变量
-  - WebUI 可读写 .env 中的密钥字段
+Design goals:
+  - Important API keys do not go into the default values of config/*.py tracked by git
+  - config read environment variables when the module starts / reloads
+  - WebUI can read and write the secret fields in .env
 """
 from __future__ import annotations
 
@@ -16,38 +16,38 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _LOADED = False
 
-# 这些多行列表字段允许用空值显式覆盖为 []。
-# 例如 WebUI 清空代理池后会写入 PROXY_POOL="" / PROXY_POOL="[]"，不能再回退到源码默认本地代理。
+# These multi-line list fields may be explicitly overridden with an empty value, meaning [].
+# For example, after the WebUI clears the proxy pool it writes PROXY_POOL="" / PROXY_POOL="[]", and it must not fall back to the default local proxy in the source.
 EXPLICIT_EMPTY_LIST_ENV_KEYS = {"PROXY_POOL", "PLAN_CHECK_PROXY"}
-# 这些字符串配置的空值具有明确语义，不能回退到源码默认值。
+# An empty value of these string settings has a defined meaning and must not fall back to the default in the source.
 EXPLICIT_EMPTY_STRING_ENV_KEYS = {"GENERIC_API_PROXY"}
 
-# 统一管理：env key -> 说明（.env.example 用）
+# Central registry: env key -> description (used by .env.example)
 SECRET_ENV_KEYS: dict[str, str] = {
-    "WEBUI_AUTH_CODE": "WebUI 登录授权码",
-    "WEBUI_SESSION_SECRET": "WebUI Session Cookie 签名密钥",
+    "WEBUI_AUTH_CODE": "WebUI login authorization code",
+    "WEBUI_SESSION_SECRET": "WebUI Session Cookie signing key",
     "BROWSER_USE_API_KEY": "Browser Use Cloud API Key",
     "SKYVERN_API_KEY": "Skyvern API Key",
-    "ROXY_API_TOKEN": "RoxyBrowser 本地 API Token",
-    "PLAN_CHECK_PROXY": "套餐查询专用代理（可能包含认证信息）",
-    "PLAN_CHECK_UPSTREAM_PROXY": "套餐查询本地上游代理地址（用于代理链）",
-    "PROXY_POOL_UPSTREAM_PROXY": "代理池本地上游代理地址（用于代理链）",
-    "QQ_IMAP_PASSWORD": "QQ 邮箱 IMAP 授权码（不是 QQ 密码）",
+    "ROXY_API_TOKEN": "RoxyBrowser local API Token",
+    "PLAN_CHECK_PROXY": "Dedicated proxy for plan checks (may contain credentials)",
+    "PLAN_CHECK_UPSTREAM_PROXY": "Local upstream proxy address for plan checks (used for the proxy chain)",
+    "PROXY_POOL_UPSTREAM_PROXY": "Local upstream proxy address of the proxy pool (used for the proxy chain)",
+    "QQ_IMAP_PASSWORD": "QQ mailbox IMAP authorization code (not the QQ password)",
     "GPTMAIL_API_KEY": "GPTMail API Key",
-    "CLOUDFLARE_API_KEY": "Cloudflare Worker 临时邮箱 API Key / ADMIN_PASSWORD",
-    "CLOUDFLARE_CUSTOM_AUTH": "Cloudflare Worker 全局密码 x-custom-auth",
+    "CLOUDFLARE_API_KEY": "Cloudflare Worker temporary email API Key / ADMIN_PASSWORD",
+    "CLOUDFLARE_CUSTOM_AUTH": "Cloudflare Worker global password x-custom-auth",
     "MAIL_NEST_API_KEY": "MailNest API Key",
     "CLOUDMAIL_AUTH_TOKEN": "CloudMail Authorization Token",
-    "CLOUDMAIL_PASSWORD": "CloudMail 登录密码",
-    "REMAIL_API_KEY": "Remail 开放 API Key",
-    "CPA_MANAGEMENT_KEY": "CPA 管理接口密钥",
-    "EXTRACT_LINK_CDK": "提链服务 CDK",
-    "SUB2API_API_KEY": "sub2api 管理接口 API Key",
-    "SUB2API_API_TOKEN": "sub2api 管理接口鉴权 Token（旧配置名，兼容）",
-    "SMS_API_KEY": "接码平台 API Key（如 GrizzlySMS）",
+    "CLOUDMAIL_PASSWORD": "CloudMail login password",
+    "REMAIL_API_KEY": "Remail open API Key",
+    "CPA_MANAGEMENT_KEY": "CPA management API key",
+    "EXTRACT_LINK_CDK": "link extraction service CDK",
+    "SUB2API_API_KEY": "sub2api management API API Key",
+    "SUB2API_API_TOKEN": "sub2api management API auth token (legacy setting name, kept for compatibility)",
+    "SMS_API_KEY": "Code-receiving platform API Key (e.g. GrizzlySMS)",
     "SMSBOWER_API_KEY": "SMSBower API Key",
-    "L_ADMIN_AUTH_CODE": "本地 L 接码服务 ADMIN_AUTH_CODE",
-    "H_ADMIN_AUTH_CODE": "本地 H 接码服务 ADMIN_AUTH_CODE",
+    "L_ADMIN_AUTH_CODE": "local L code-receiving service ADMIN_AUTH_CODE",
+    "H_ADMIN_AUTH_CODE": "local H code-receiving service ADMIN_AUTH_CODE",
 }
 
 
@@ -56,9 +56,9 @@ def env_path() -> Path:
 
 
 def load_env(*, override: bool = False) -> Path:
-    """加载项目根 .env 到进程环境。可重复调用（reload 时用 override=True）。
+    """Load the .env in the project root into the process environment. Can be called repeatedly (reload uses override=True).
 
-    优先使用 python-dotenv；未安装时使用本文件内置的轻量 parser，避免配置读取强依赖。
+    python-dotenv is preferred; when it is not installed the lightweight parser built into this file is used, so reading the config has no hard dependency.
     """
     global _LOADED
     try:
@@ -74,7 +74,7 @@ def load_env(*, override: bool = False) -> Path:
     if _ENV_PATH.exists():
         load_dotenv(dotenv_path=_ENV_PATH, override=override)
     else:
-        # 仍然允许系统环境变量生效
+        # System environment variables are still allowed to take effect
         load_dotenv(override=override)
     _LOADED = True
     return _ENV_PATH
@@ -94,7 +94,7 @@ def env_str(key: str, default: str = "") -> str:
 
 
 def _escape_env_value(value: str) -> str:
-    # 统一双引号，避免空格/特殊字符问题
+    # Always use double quotes to avoid problems with spaces/special characters
     escaped = (
         str(value)
         .replace("\\", "\\\\")
@@ -106,7 +106,7 @@ def _escape_env_value(value: str) -> str:
 
 
 def read_env_file() -> dict[str, str]:
-    """解析 .env 文件为 dict（不依赖 os.environ）。"""
+    """Parse the .env file into a dict (does not depend on os.environ)."""
     if not _ENV_PATH.exists():
         return {}
     out: dict[str, str] = {}
@@ -131,7 +131,7 @@ def read_env_file() -> dict[str, str]:
 
 
 def write_env_values(updates: dict[str, str]) -> list[str]:
-    """更新 .env 中的若干 key；不存在则追加。返回实际写入的 key 列表。"""
+    """Update some keys in .env, appending them when missing. Returns the list of keys actually written."""
     if not updates:
         return []
 
@@ -175,7 +175,7 @@ def write_env_values(updates: dict[str, str]) -> list[str]:
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(_ENV_PATH)
 
-    # 让当前进程立刻看到新值
+    # Make the current process see the new values immediately
     load_env(override=True)
     return written
 
@@ -200,7 +200,7 @@ def _coerce_env_value(raw: str, default, vtype: str | None = None):
         return float(str(raw).strip())
     if vtype == "list_str_multiline":
         text = str(raw)
-        # 兼容旧值：PROXY_POOL='["http://..."]'
+        # compatible with old values:PROXY_POOL='["http://..."]'
         try:
             import ast
             val = ast.literal_eval(text)
@@ -215,9 +215,9 @@ def _coerce_env_value(raw: str, default, vtype: str | None = None):
 def env_value(key: str, default=None, vtype: str | None = None):
     ensure_loaded()
     raw = os.getenv(key)
-    # `.env.example` 和 WebUI 里常见 `KEY=` / `KEY=""` 这种空配置。
-    # 空值表示“未配置，使用 config/*.py 里的默认值”，否则 bool 默认 True
-    # 会被空字符串误覆盖成 False，str/list 默认值也会被误清空。
+    # `.env.example` and the empty settings commonly produced by the WebUI such as `KEY=` / `KEY=""`.
+    # An empty value means "not configured, use the default in config/*.py"; otherwise the bool default True
+    # would be wrongly overwritten by the empty string as False, and str/list defaults would be wrongly cleared as well.
     if raw is None:
         return default
     if str(raw).strip() == "":
@@ -249,10 +249,10 @@ def env_list(key: str, default: list[str] | None = None) -> list[str]:
 
 
 def apply_env_overrides(namespace: dict, schema: dict[str, str] | None = None) -> None:
-    """用 .env/环境变量覆盖模块 globals() 中的配置常量。
+    """Override the configuration constants in the module globals() with .env/environment variables.
 
-    schema: {KEY: type}，type 支持 bool/int/float/str/list_str_multiline。
-    没传 schema 时，会对 namespace 里已有的大写常量按默认值类型推断。
+    schema: {KEY: type}, type supports bool/int/float/str/list_str_multiline.
+    When no schema is passed, the existing uppercase constants in the namespace are inferred from the type of their default value.
     """
     ensure_loaded()
     keys = schema.keys() if schema else [k for k in namespace if k.isupper()]

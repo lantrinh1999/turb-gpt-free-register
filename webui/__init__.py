@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""WebUI 包：Flask 本地控制台。"""
+"""WebUI package: Flask local console."""

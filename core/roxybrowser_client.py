@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""RoxyBrowser 本地 API 客户端。"""
+"""RoxyBrowser local API client."""
 from __future__ import annotations
 
 import json
@@ -16,11 +16,11 @@ from config import roxybrowser as _cfg
 
 logger = logging.getLogger(__name__)
 
-# Roxy 的 /browser/create 在多 worker 同时到达时可能返回“正在创建中”。
-# 为所有客户端实例共享创建时隙，确保进程内请求起始时间至少错开配置的间隔。
+# Roxy /browser/create may return a creating-in-progress error when multiple workers arrive at the same time.
+# Share the creation time slot across all client instances, ensuring in-process request start times are staggered by at least the configured interval.
 _CREATE_SLOT_LOCK = threading.Lock()
 _NEXT_CREATE_SLOT = 0.0
-# 创建 Profile 到拿到调试地址期间串行化，避免 Roxy 内核/端口竞争。
+# Serialize the period from creating a Profile to obtaining the debug address, to avoid Roxy kernel/port contention.
 _ROXY_WINDOW_CREATE_LOCK = threading.Lock()
 
 
@@ -37,7 +37,7 @@ def _wait_for_create_slot() -> None:
         _NEXT_CREATE_SLOT = max(now, _NEXT_CREATE_SLOT) + interval
 
     if wait_for > 0:
-        logger.info("[Roxy] /browser/create 请求错峰，等待 %.2fs", wait_for)
+        logger.info("[Roxy] /browser/create request staggering, waiting %.2fs", wait_for)
         time.sleep(wait_for)
 
 
@@ -70,23 +70,23 @@ def _mask_proxy(proxy_url: str) -> str:
 
 def _proxy_url_to_roxy_info(proxy_url: str) -> dict:
     """
-    将 config/proxy.py 里的代理 URL 转成 Roxy /browser/create 的 proxyInfo。
+    Convert the proxy URL in config/proxy.py to the proxyInfo of Roxy /browser/create.
 
-    支持：
+    Supports:
       http://user:pass@host:port
       https://user:pass@host:port
       socks5://user:pass@host:port
-      socks5h://user:pass@host:port  -> Roxy 侧按 SOCKS5 处理
+      socks5h://user:pass@host:port  -> Roxy side treats as SOCKS5
     """
     text = str(proxy_url or "").strip()
     if not text:
-        raise ValueError("代理为空")
+        raise ValueError("Proxy is empty")
     parsed = urlparse(text)
     scheme = (parsed.scheme or "").lower()
     if scheme not in ("http", "https", "socks5", "socks5h"):
-        raise ValueError(f"Roxy 暂不支持该代理协议: {scheme or '-'}")
+        raise ValueError(f"Roxy does not support this proxy protocol yet: {scheme or '-'}")
     if not parsed.hostname or not parsed.port:
-        raise ValueError(f"代理格式缺少 host/port: {_mask_proxy(text)}")
+        raise ValueError(f"Proxy format is missing host/port: {_mask_proxy(text)}")
 
     protocol = {
         "http": "HTTP",
@@ -94,9 +94,9 @@ def _proxy_url_to_roxy_info(proxy_url: str) -> dict:
         "socks5": "SOCKS5",
         "socks5h": "SOCKS5",
     }[scheme]
-    # Roxy /browser/create 官方字段是：
+    # Roxy /browser/create The official fields are:
     # proxyMethod / proxyCategory / ipType / protocol / host / port / proxyUserName / proxyPassword / checkChannel
-    # 之前误用了 proxyType/proxyHost/proxyPort/proxyAccount，Roxy 会忽略，导致创建窗口实际未设置代理。
+    # proxyType/proxyHost/proxyPort/proxyAccount were wrongly used before; Roxy ignores them, so the created window actually had no proxy set.
     info = {
         "moduleId": 0,
         "proxyMethod": "custom",
@@ -148,11 +148,11 @@ def _project_id_value() -> str | int:
 
 
 def _apply_data_saver_open_args(params: dict) -> dict:
-    """在 Roxy 启动参数中尽早关闭图片加载，覆盖无扩展名图片 URL。
+    """Disable image loading as early as possible in the Roxy launch arguments, covering image URLs without extensions.
 
-    Network.setBlockedURLs 只能按 URL 后缀拦截，而 Roxy 浏览器在 Selenium 连接
-    前就已经启动；使用 Chromium 开关可以让图片在首个页面请求前就被禁用。该开关
-    只在用户明确开启省流量模式且包含 image 类型时追加。
+    Network.setBlockedURLs can only block by URL suffix, while the Roxy browser has already started before Selenium
+    connects; using a Chromium switch lets images be disabled before the first page request. This switch
+    is appended only when the user explicitly enables traffic-saving mode and it includes the image type.
     """
     try:
         from config import browser as _browser_cfg
@@ -179,7 +179,7 @@ def _apply_data_saver_open_args(params: dict) -> dict:
             args.append(switch)
         params["args"] = args
     except Exception as exc:
-        logger.debug("[Roxy] 添加省流量图片启动参数失败，继续使用原参数：%s", exc)
+        logger.debug("[Roxy] Failed to add the traffic-saving image launch argument, continuing with the original arguments:%s", exc)
     return params
 
 
@@ -200,7 +200,7 @@ def _random_roxy_os() -> str:
 
 def _random_roxy_profile_name() -> str:
     prefix = str(getattr(_cfg, "ROXY_PROFILE_NAME_PREFIX", "rb") or "rb").strip() or "rb"
-    # Roxy 环境名每次创建都不同：前缀 + 毫秒时间戳 + 随机 4 位十六进制。
+    # Roxy The environment name differs on every creation: prefix + millisecond timestamp + random 4 hex digits.
     return f"{prefix}-{int(time.time() * 1000)}-{random.randrange(0x10000):04x}"
 
 
@@ -212,7 +212,7 @@ class RoxyBrowserClient:
         self._proxy_pool_target = ""
         self.http = requests.Session()
         if self.token:
-            # 官方文档要求所有接口请求头必须加 token。这里同时兼容 token / Authorization。
+            # The official docs require a token header on all API requests. Both token / Authorization are supported here.
             self.http.headers.update({
                 "token": self.token,
                 "Authorization": f"Bearer {self.token}",
@@ -265,16 +265,16 @@ class RoxyBrowserClient:
                 except Exception:
                     payload = {"raw": text}
                 if not (200 <= resp.status_code < 300):
-                    raise RuntimeError(f"Roxy API 请求失败 {method_u} {path} HTTP {resp.status_code}: {text[:500]}")
+                    raise RuntimeError(f"Roxy API Request failed {method_u} {path} HTTP {resp.status_code}: {text[:500]}")
                 if isinstance(payload, dict):
                     code = payload.get("code")
                     ok = payload.get("ok")
                     success = payload.get("success")
                     if code not in (None, 0, 200, "0", "200") and ok is not True and success is not True:
                         msg = payload.get("msg") or payload.get("message") or payload.get("error") or json.dumps(payload, ensure_ascii=False)[:500]
-                        raise RuntimeError(f"Roxy API 返回失败 {method_u} {path}: {msg}")
+                        raise RuntimeError(f"Roxy API returned failure {method_u} {path}: {msg}")
                 if attempt > 1:
-                    logger.info("[Roxy] API 重试成功：%s %s attempt=%s/%s", method_u, path, attempt, max_attempts)
+                    logger.info("[Roxy] API retry succeeded:%s %s attempt=%s/%s", method_u, path, attempt, max_attempts)
                 return payload if isinstance(payload, dict) else {"data": payload}
             except Exception as exc:
                 last_exc = exc
@@ -283,16 +283,16 @@ class RoxyBrowserClient:
                     raise
                 delay = base_delay * attempt
                 logger.warning(
-                    "[Roxy] API 请求失败，将在 %.1fs 后使用相同%s重试：%s %s attempt=%s/%s error=%s",
+                    "[Roxy] API Request failed, will retry in %.1fs with the same %s:%s %s attempt=%s/%s error=%s",
                     delay,
-                    " create payload/name " if is_create else "请求参数",
+                    " create payload/name " if is_create else "request parameters",
                     method_u, path, attempt, max_attempts, exc,
                 )
                 time.sleep(delay)
-        raise last_exc or RuntimeError(f"Roxy API 请求失败 {method_u} {path}")
+        raise last_exc or RuntimeError(f"Roxy API Request failed {method_u} {path}")
 
     def try_request(self, method: str, path: str, *, params: dict | None = None, json_body: dict | None = None) -> tuple[bool, dict | str]:
-        """宽松请求：用于探测不同 Roxy 版本接口，失败不抛出。"""
+        """Lenient request: used to probe the endpoints of different Roxy versions; failures are not raised."""
         try:
             return True, self.request(method, path, params=params, json_body=json_body)
         except Exception as exc:
@@ -300,10 +300,10 @@ class RoxyBrowserClient:
 
     @staticmethod
     def _extract_workspace_items(payload: dict) -> list[dict]:
-        """解析 /browser/workspace：团队 rows + project_details 项目列表；兼容递归兜底。"""
+        """Parse /browser/workspace: team rows + project_details project list; compatible with the recursive fallback."""
         out = []
 
-        # 官方结构：data.rows[].id/workspaceName/project_details[].projectId/projectName
+        # Official structure:data.rows[].id/workspaceName/project_details[].projectId/projectName
         rows = None
         if isinstance(payload, dict):
             data = payload.get("data")
@@ -344,7 +344,7 @@ class RoxyBrowserClient:
         if out:
             return out
 
-        # 兜底：递归抽 workspace/team/company 结构。
+        # Fallback: recursively extract workspace/team/company structures.
         def pick_id_name(item: dict) -> tuple[str, str]:
             wid = _first(item, [
                 ("workspaceId",), ("workspace_id",), ("workspaceID",),
@@ -389,8 +389,8 @@ class RoxyBrowserClient:
 
     def list_workspaces(self) -> dict:
         """
-        获取 Roxy 团队/工作区列表。
-        Roxy 不同版本路径可能有差异，因此先试配置路径，再试常见路径。
+        Get the Roxy team/workspace list.
+        Roxy paths may differ across versions, so try the configured path first, then common paths.
         """
         configured = str(getattr(_cfg, "ROXY_WORKSPACE_LIST_PATH", "") or "").strip()
         method = str(getattr(_cfg, "ROXY_WORKSPACE_LIST_METHOD", "GET") or "GET").upper()
@@ -438,7 +438,7 @@ class RoxyBrowserClient:
             items = self._extract_workspace_items(payload if isinstance(payload, dict) else {})
             if items:
                 return {"ok": True, "path": path, "method": m, "items": items, "raw": payload}
-            errors.append({"method": m, "path": path, "error": "响应中未解析到团队/工作区列表", "payload": payload})
+            errors.append({"method": m, "path": path, "error": "No team/workspace list was parsed from the response", "payload": payload})
 
         return {"ok": False, "items": [], "errors": errors}
 
@@ -448,25 +448,25 @@ class RoxyBrowserClient:
             body.update(payload)
         random_name_enabled = bool(getattr(_cfg, "ROXY_RANDOM_PROFILE_NAME_ON_CREATE", True))
         if random_name_enabled:
-            # 覆盖 ROXY_PROFILE_CREATE_PAYLOAD 里的固定 name，避免所有 Roxy 窗口同名。
+            # Override the fixed name in ROXY_PROFILE_CREATE_PAYLOAD, to avoid all Roxy windows having the same name.
             body["name"] = _random_roxy_profile_name()
         random_os_enabled = bool(getattr(_cfg, "ROXY_RANDOM_OS_ON_CREATE", True))
         if random_os_enabled:
-            # 每次创建环境随机 Windows / macOS；覆盖 ROXY_PROFILE_CREATE_PAYLOAD 里的固定 os。
+            # Randomize Windows / macOS on every environment creation; override the fixed os in ROXY_PROFILE_CREATE_PAYLOAD.
             body["os"] = _random_roxy_os()
-            # osVersion 跟 os 强绑定，随机 OS 时不沿用固定版本，避免 macOS 版本传给 Windows。
+            # osVersion Strongly tied to os; when the OS is randomized the fixed version is not reused, to avoid passing a macOS version to Windows.
             body.pop("osVersion", None)
         else:
             default_os = str(getattr(_cfg, "ROXY_DEFAULT_OS", "macOS") or "macOS").strip()
             if default_os:
-                # Roxy 官方枚举大小写敏感：Windows / macOS / Linux / IOS / Android。
+                # Roxy The official enum is case-sensitive: Windows / macOS / Linux / IOS / Android.
                 body.setdefault("os", default_os)
             default_os_version = str(getattr(_cfg, "ROXY_DEFAULT_OS_VERSION", "") or "").strip()
             if default_os_version:
                 body.setdefault("osVersion", default_os_version)
         workspace_id = _workspace_id_value()
         if workspace_id:
-            # Roxy 官方 /browser/create 要求 workspaceId。
+            # Roxy The official /browser/create requires workspaceId.
             body.setdefault("workspaceId", workspace_id)
         project_id = _project_id_value()
         if project_id:
@@ -483,21 +483,21 @@ class RoxyBrowserClient:
                 proxy_info = _proxy_url_to_roxy_info(proxy_url)
                 body["proxyInfo"] = proxy_info
                 logger.info(
-                    "[Roxy] 创建环境启用代理池：target=%s transport=%s type=%s host=%s port=%s",
+                    "[Roxy] Environment creation uses the proxy pool:target=%s transport=%s type=%s host=%s port=%s",
                     _mask_proxy(target_proxy), _mask_proxy(proxy_url),
                     proxy_info.get("protocol") or proxy_info.get("proxyCategory"),
                     proxy_info.get("host"),
                     proxy_info.get("port"),
                 )
             else:
-                logger.warning("[Roxy] 已启用 ROXY_CREATE_USE_PROXY_POOL，但 PROXY_POOL 为空，本次创建环境不设置代理")
+                logger.warning("[Roxy] ROXY_CREATE_USE_PROXY_POOL is enabled but PROXY_POOL is empty, so no proxy is set for this environment creation")
         if not body.get("workspaceId"):
             raise RuntimeError(
-                "Roxy 创建环境需要 workspaceId。请在 config/roxybrowser.py 或 WebUI 的 RoxyBrowser 配置中填写 ROXY_WORKSPACE_ID，"
-                "或直接在 ROXY_PROFILE_CREATE_PAYLOAD 里加入 {'workspaceId': '你的工作区ID'}。"
+                "Roxy Creating an environment requires workspaceId. Fill in ROXY_WORKSPACE_ID in config/roxybrowser.py or in the RoxyBrowser settings of the WebUI,"
+                "or add directly in ROXY_PROFILE_CREATE_PAYLOAD {'workspaceId': 'your workspace ID'}."
             )
         logger.info(
-            "[Roxy] 创建环境参数：workspaceId=%s projectId=%s name=%s random_name=%s os=%s osVersion=%s random_os=%s",
+            "[Roxy] Environment creation parameters:workspaceId=%s projectId=%s name=%s random_name=%s os=%s osVersion=%s random_os=%s",
             body.get("workspaceId"),
             body.get("projectId") or "-",
             body.get("name") or "-",
@@ -514,13 +514,13 @@ class RoxyBrowserClient:
             ("data", "profile_id"), ("data", "profileId"), ("data", "browser_id"),
         ])
         if not profile_id:
-            raise RuntimeError(f"Roxy 创建环境成功但未返回 dirId/profile_id: {result}")
+            raise RuntimeError(f"Roxy Environment created successfully but did not return dirId/profile_id: {result}")
         return profile_id
 
     @staticmethod
     def _normalize_profile_id(value: str | None) -> str:
         text = str(value or "").strip()
-        # WebUI/人工配置里常用 - 表示“未配置”，这里统一按空处理。
+        # WebUI/In manual config a - is often used to mean not configured; here it is uniformly treated as empty.
         if text in ("-", "—", "无", "空", "none", "None", "null", "NULL"):
             return ""
         return text
@@ -534,8 +534,8 @@ class RoxyBrowserClient:
         configured_pid = self._normalize_profile_id(profile_id if profile_id is not None else getattr(_cfg, "ROXY_PROFILE_ID", ""))
         if one_profile and configured_pid:
             raise RuntimeError(
-                "已启用 ROXY_ONE_PROFILE_PER_ACCOUNT=True（一号一环境），"
-                "不能配置/传入固定 ROXY_PROFILE_ID；请留空以便每个账号创建新环境。"
+                "ROXY_ONE_PROFILE_PER_ACCOUNT=True is enabled (one environment per account),"
+                "a fixed ROXY_PROFILE_ID cannot be configured/passed in; leave it empty so that each account creates a new environment."
             )
 
         pid = configured_pid
@@ -543,20 +543,20 @@ class RoxyBrowserClient:
         if not pid:
             pid = self.create_profile()
             created_by_run = True
-            logger.info("[Roxy] 已创建临时环境：%s", pid)
+            logger.info("[Roxy] Created temporary environment:%s", pid)
 
         path = str(_cfg.ROXY_OPEN_PATH).format(profile_id=pid)
         params = dict(getattr(_cfg, "ROXY_OPEN_EXTRA_PARAMS", {}) or {})
-        # Roxy 官方 /browser/open body: {workspaceId, dirId, args, forceOpen, headless}
+        # Roxy official /browser/open body: {workspaceId, dirId, args, forceOpen, headless}
         params.setdefault("workspaceId", _workspace_id_value())
         params.setdefault("dirId", int(pid) if str(pid).isdigit() else pid)
         params.setdefault("args", [])
         params.setdefault("forceOpen", True)
         _apply_data_saver_open_args(params)
-        # ROXY_OPEN_HEADLESS 是显式开关，优先级应高于 ROXY_OPEN_EXTRA_PARAMS，
-        # 否则 extra 里残留 headless=False 会导致 WebUI 保存无头后仍弹窗口。
+        # ROXY_OPEN_HEADLESS is an explicit switch and should take priority over ROXY_OPEN_EXTRA_PARAMS,
+        # otherwise a leftover headless=False in extra would make a window still pop up after the WebUI saved headless mode.
         params["headless"] = bool(getattr(_cfg, "ROXY_OPEN_HEADLESS", False))
-        logger.info("[Roxy] open 参数：profile=%s headless=%s keep_open=%s", pid, params.get("headless"), getattr(_cfg, "ROXY_KEEP_BROWSER_OPEN", False))
+        logger.info("[Roxy] open Parameters:profile=%s headless=%s keep_open=%s", pid, params.get("headless"), getattr(_cfg, "ROXY_KEEP_BROWSER_OPEN", False))
         result = self.request(
             _cfg.ROXY_OPEN_METHOD,
             path,
@@ -564,7 +564,7 @@ class RoxyBrowserClient:
             json_body=params if _cfg.ROXY_OPEN_METHOD.upper() != "GET" else None,
         )
         debugger_address = self._extract_debugger_address(result)
-        logger.info("[Roxy] open 返回摘要: debugger=%s raw=%s", debugger_address, json.dumps(result, ensure_ascii=False)[:800])
+        logger.info("[Roxy] open response summary: debugger=%s raw=%s", debugger_address, json.dumps(result, ensure_ascii=False)[:800])
         webdriver_url = _first(result, [
             ("webdriver",), ("webDriver",), ("webdriver_url",), ("webdriverUrl",),
             ("selenium",), ("selenium_url",), ("seleniumUrl",),
@@ -576,7 +576,7 @@ class RoxyBrowserClient:
             ("data", "ws"), ("data", "wsEndpoint"), ("data", "ws_endpoint"), ("data", "debuggerWsUrl"),
         ]) or None
         if not debugger_address and not webdriver_url:
-            raise RuntimeError(f"Roxy 已打开环境但未返回 Selenium/调试地址，请检查 ROXY_OPEN_PATH 或接口响应: {result}")
+            raise RuntimeError(f"Roxy The environment was opened but no Selenium/debug address was returned, check ROXY_OPEN_PATH or the API response: {result}")
         if self._proxy_pool_target:
             result = dict(result)
             result["proxy_pool_target"] = self._proxy_pool_target
@@ -604,9 +604,9 @@ class RoxyBrowserClient:
                 params=body if str(_cfg.ROXY_CLOSE_METHOD).upper() == "GET" else None,
                 json_body=body if str(_cfg.ROXY_CLOSE_METHOD).upper() != "GET" else None,
             )
-            logger.info("[Roxy] 已关闭环境：%s", profile_id)
+            logger.info("[Roxy] Closed environment:%s", profile_id)
         except Exception as exc:
-            logger.warning("[Roxy] 关闭环境失败：%s", exc)
+            logger.warning("[Roxy] Failed to close environment:%s", exc)
 
     def delete_profile(self, profile_id: str) -> None:
         if not profile_id:
@@ -624,12 +624,12 @@ class RoxyBrowserClient:
                 params=body if method.upper() == "GET" else None,
                 json_body=body if method.upper() != "GET" else None,
             )
-            logger.info("[Roxy] 已删除环境：%s", profile_id)
+            logger.info("[Roxy] Deleted environment:%s", profile_id)
         except Exception as exc:
-            logger.warning("[Roxy] 删除环境失败：%s", exc)
+            logger.warning("[Roxy] Failed to delete environment:%s", exc)
 
     def cleanup_profile(self, opened: RoxyOpenResult | None) -> None:
-        """任务结束清理：关闭窗口；一号一环境时删除本轮创建的 Profile。"""
+        """Cleanup at task end: close the window; with one environment per account, delete the Profile created this round."""
         keep_open = bool(getattr(_cfg, "ROXY_KEEP_BROWSER_OPEN", False))
         try:
             if not opened or not opened.profile_id:
@@ -643,9 +643,9 @@ class RoxyBrowserClient:
                 and bool(opened.created_by_run)
             )
             if should_delete:
-                # 删除前尽量确保已关闭；若 keep_open=True 则不删除，便于调试保留现场。
+                # Make sure it is closed before deleting where possible; if keep_open=True do not delete, keeping the scene for debugging.
                 if keep_open:
-                    logger.info("[Roxy] ROXY_KEEP_BROWSER_OPEN=True，跳过删除环境：%s", opened.profile_id)
+                    logger.info("[Roxy] ROXY_KEEP_BROWSER_OPEN=True, skipping environment deletion:%s", opened.profile_id)
                     return
                 self.delete_profile(opened.profile_id)
         finally:
@@ -656,18 +656,18 @@ class RoxyBrowserClient:
         relay, self._proxy_pool_relay = self._proxy_pool_relay, None
         if relay is not None:
             relay.close()
-            # last_error 是本轮历史错误，不能在成功任务收尾时再次当作当前故障告警。
-            # 未恢复的连接失败已在发生处带 destination 输出 WARNING。
+            # last_error is a historical error of this round and must not be raised again as a current fault when a successful task wraps up.
+            # Unrecovered connection failures were already output as WARNING with the destination where they occurred.
             targets = relay.traffic_snapshot().get("destinations", [])
             failed = sum(item.get("failed_connection_count", 0) for item in targets)
             retries = sum(item.get("connect_retry_count", 0) for item in targets)
             recovered = sum(item.get("recovered_connection_count", 0) for item in targets)
             if failed or retries:
-                logger.info("[Roxy] 代理链连接汇总：握手重试=%s，重试恢复=%s，失败连接=%s（失败详情见发生时的 destination 日志）",
+                logger.info("[Roxy] Proxy chain connection summary: handshake retries=%s, recovered retries=%s, failed connections=%s (see the destination logs at the time for failure details)",
                             retries, recovered, failed)
 
     def proxy_transport_snapshot(self) -> dict | None:
-        """返回本轮 Roxy 经本地代理链传输的全浏览器流量。"""
+        """Return the full browser traffic of this round transmitted by Roxy through the local proxy chain."""
         relay = self._proxy_pool_relay
         if relay is None:
             return None
@@ -690,7 +690,7 @@ class RoxyBrowserClient:
         ])
         if value:
             value = value.strip()
-            # 兼容 http://127.0.0.1:xxxx / 127.0.0.1:xxxx / :xxxx / 9222
+            # Supports http://127.0.0.1:xxxx / 127.0.0.1:xxxx / :xxxx / 9222
             value = value.replace("http://", "").replace("https://", "").strip("/")
             if value.startswith(":") and value[1:].isdigit():
                 return f"127.0.0.1{value}"

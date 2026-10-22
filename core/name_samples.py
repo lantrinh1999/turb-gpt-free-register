@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""用户资料显示名样本。
+"""User profile display name samples.
 
-只生成英文字母和空格，避免触发 OpenAI name_invalid_chars。
+Generate only English letters and spaces, to avoid triggering OpenAI name_invalid_chars.
 """
 from __future__ import annotations
 
@@ -72,9 +72,9 @@ MIDDLE_NAMES = [
 
 
 def random_display_name() -> str:
-    """生成更真实的英文显示名。
+    """Generate more realistic English display names.
 
-    大多数返回 First Last；少量返回 First Middle Last，仍只包含字母和空格。
+    Most return First Last; a few return First Middle Last, still containing only letters and spaces.
     """
     first = random.choice(FIRST_NAMES)
     last = random.choice(LAST_NAMES)

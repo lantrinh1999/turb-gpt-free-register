@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""本地 AT 过期巡检；仅失效账号调用查活（同会话自动查套餐）。"""
+"""Local AT expiry inspection; the liveness check (which also checks the plan in the same session) is only called for invalid accounts."""
 from __future__ import annotations
 
 import logging
@@ -22,7 +22,7 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="account-inspec
 
 
 def token_needs_refresh(token: str, now: float | None = None) -> bool:
-    """只读取 JWT exp，不访问 API；缺失/格式错误也按失效处理。"""
+    """Only the JWT exp is read, the API is not accessed; missing/malformed ones are also treated as invalid."""
     if not isinstance(token, str):
         return True
     token = normalize_token(token)
@@ -45,22 +45,22 @@ def _check_live(account: dict, executor: ThreadPoolExecutor) -> dict:
         trigger="inspection", return_future=True, executor=executor,
     )
     if not queued.get("accepted"):
-        return {"ok": False, "status": "rejected", "error": queued.get("error") or "查活入队被拒绝"}
+        return {"ok": False, "status": "rejected", "error": queued.get("error") or "Liveness check enqueue was rejected"}
     return queued["future"].result()
 
 
 def validate_workers(workers: int) -> int:
     if type(workers) is not int or not 1 <= workers <= MAX_WORKERS:
-        raise ValueError(f"巡检线程数必须为 1–{MAX_WORKERS} 的整数")
+        raise ValueError(f"The number of inspection threads must be an integer from 1 to {MAX_WORKERS}")
     return workers
 
 
 class InspectionStopped(RuntimeError):
-    """持久化任务已结束，旧 worker 不再执行后续阶段。"""
+    """The persisted task has finished; the old worker no longer runs later stages."""
 
 
 def _run(run: dict) -> None:
-    # 每个 ID 只进入一次共享迭代器；领取与统计各自加锁。
+    # Each ID enters the shared iterator only once; claiming and statistics are locked separately.
     account_ids = list(dict.fromkeys(run["account_ids"]))
     run["account_ids"] = account_ids
     run["total_count"] = len(account_ids)
@@ -74,7 +74,7 @@ def _run(run: dict) -> None:
     def persist(failure=None):
         saved = db.save_account_inspection(run, failure=failure) if failure is not None else db.save_account_inspection(run)
         if not saved:
-            raise InspectionStopped("巡检任务已结束或被中断")
+            raise InspectionStopped("The inspection task has finished or was interrupted")
 
     def record(*, failure=None, **counts):
         with stats_lock:
@@ -84,7 +84,7 @@ def _run(run: dict) -> None:
             try:
                 persist(failure)
             except BaseException:
-                # 明细落库失败时不能让 finally 单独保存已经增加的失败计数。
+                # When writing the detail row to the database fails, the finally block must not save the failure count that has already been incremented on its own.
                 run.update(previous)
                 raise
 
@@ -96,8 +96,8 @@ def _run(run: dict) -> None:
         if str(account.get("live_check_status") or "").strip().lower() == "deactivated":
             record(skipped_count=1, deactivated_skipped_count=1, failure=dict(
                 account_id=account_id, email=account.get("email", ""), status="deactivated_skipped",
-                error="账号已标记为已废，本次巡检跳过，不执行 AT 检查、查活及查套餐。" +
-                      (" 原因：" + str(account["live_check_error"]) if account.get("live_check_error") else ""),
+                error="The account is already marked as dead, this inspection skips it and does not run the AT check, liveness check or plan check." +
+                      (" Reason:" + str(account["live_check_error"]) if account.get("live_check_error") else ""),
             ))
             return
         invalid = token_needs_refresh(account.get("access_token", ""))
@@ -107,7 +107,7 @@ def _run(run: dict) -> None:
         try:
             live_result = _check_live(account, stage_executor)
         except Exception as exc:
-            logger.exception("巡检查活异常 account_id=%s", account_id)
+            logger.exception("Inspection liveness check error account_id=%s", account_id)
             live_result = {"ok": False, "status": "error", "error": f"{type(exc).__name__}: {str(exc)[:1500]}"}
         live_ok = bool(live_result.get("ok"))
         counts = {"live_success_count" if live_ok else "live_failed_count": 1}
@@ -116,7 +116,7 @@ def _run(run: dict) -> None:
             counts["plan_success_count" if plan_ok else "plan_failed_count"] = 1
         failure = None if live_ok else dict(account_id=account_id, email=account.get("email", ""),
                                             status=live_result.get("status") or "failed",
-                                            error=live_result.get("error") or "查活失败，未返回具体原因")
+                                            error=live_result.get("error") or "Liveness check failed, no specific reason returned")
         record(failure=failure, **counts)
 
     def worker(stage_executor):
@@ -130,8 +130,8 @@ def _run(run: dict) -> None:
             try:
                 inspect_account(account_id, stage_executor)
             except BaseException:
-                # 一个 worker 发生存储/执行故障后，不应让其他 worker 继续领取整份清单。
-                # 已在执行中的账号仍完成收尾，避免遗留会话和队列占用。
+                # After one worker hits a storage/execution fault, other workers should not keep claiming the whole list.
+                # Accounts already being processed still finish up, to avoid leaving behind sessions and queue occupation.
                 stopped.set()
                 raise
 
@@ -139,8 +139,8 @@ def _run(run: dict) -> None:
         workers = validate_workers(run.get("workers", DEFAULT_WORKERS))
         run["status"] = "running"
         persist()
-        # 独立阶段线程池，不受手动查活固定线程数限制；仍复用统一账号占用与限流。
-        # 阶段执行与等待它的巡检 worker 分池，避免线程池饥饿死锁。
+        # Independent stage thread pool, not limited by the fixed thread count of the manual liveness check; it still reuses the unified account occupation and rate limiting.
+        # Stage execution and the inspection workers waiting for it use separate pools, to avoid thread-pool starvation deadlock.
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspection-stage") as stages:
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="inspection-worker") as pool:
                 futures = [pool.submit(worker, stages) for _ in range(min(workers, len(account_ids)))]
@@ -150,7 +150,7 @@ def _run(run: dict) -> None:
     except InspectionStopped as exc:
         run.update(status="interrupted", error=str(exc))
     except Exception as exc:
-        logger.exception("账号巡检异常")
+        logger.exception("Account inspection error")
         run.update(status="failed", error=f"{type(exc).__name__}: {str(exc)[:200]}")
     finally:
         run["finished_at"] = datetime.now().isoformat(timespec="seconds")
@@ -159,7 +159,7 @@ def _run(run: dict) -> None:
 
 @contextmanager
 def startup_recovery_guard():
-    """同库巡检仍持有进程锁时，其他实例不得把它及其阶段任务恢复为失败。"""
+    """While an inspection on the same database still holds the process lock, other instances must not restore it and its stage tasks to failed."""
     lease = acquire_inspection_lease()
     try:
         yield lease is not None
@@ -180,22 +180,22 @@ def _release_cancelled_inspection(future, run, lease):
         return
     try:
         cancelled = dict(run, status="interrupted", finished_at=datetime.now().isoformat(timespec="seconds"),
-                         error="巡检在开始执行前被取消")
+                         error="The inspection was cancelled before it started executing")
         db.save_account_inspection(cancelled)
     except Exception:
-        logger.exception("写入巡检取消状态失败")
+        logger.exception("Failed to write the inspection cancelled state")
     finally:
         lease.close()
 
 
 def _recover_orphaned_inspections() -> None:
-    # 调用方必须持有进程锁；此时不会有执行中的巡检，可以清理异常退出遗留状态。
+    # The caller must hold the process lock; there is then no running inspection, so state left by an abnormal exit can be cleaned up.
     db.recover_interrupted_account_inspections(
-        error="巡检执行器已退出或任务异常中断，已释放任务占用；统计保留已完成部分")
+        error="The inspection executor has exited or the task was interrupted abnormally; the task occupation has been released and the statistics keep the completed part")
 
 
 def list_inspections(limit: int = 50, offset: int = 0) -> dict:
-    # 不依赖重启：最后一次数据库写入失败时，下一次轮询也能解除虚假的忙碌状态。
+    # Does not depend on a restart: if the last database write failed, the next poll can also clear the false busy state.
     lease = acquire_inspection_lease()
     try:
         if lease is not None:
@@ -211,11 +211,11 @@ def start_inspection(workers: int = DEFAULT_WORKERS, archived: str | bool = "0")
     if type(archived) is bool:
         archived = "only" if archived else "0"
     if not isinstance(archived, str) or archived not in ("0", "only", "all"):
-        raise ValueError("归档范围必须为 0（未归档）、only（已归档）或 all（全部）")
+        raise ValueError("The archive scope must be 0 (not archived), only (archived) or all (everything)")
     lease = acquire_inspection_lease()
     if lease is None:
         active = db.list_account_inspections()["active"]
-        return active or {"status": "queued", "error": "巡检正在启动或收尾，请稍后重试"}, False
+        return active or {"status": "queued", "error": "The inspection is starting or finishing up, please retry later"}, False
     submitted = False
     try:
         _recover_orphaned_inspections()

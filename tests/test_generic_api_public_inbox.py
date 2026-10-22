@@ -35,7 +35,7 @@ class _Session:
                 "id": "msg_01",
                 "receivedAt": "2026-09-06T12:00:00.000Z",
                 "subject": "ChatGPT の一時的な認証コード",
-                # 该站点日文邮件 verificationCodes 可能为空，但页面 preview 已有验证码。
+                # On this site the Japanese emails may have an empty verificationCodes, but the page preview already contains the verification code.
                 "verificationCodes": [],
                 "preview": "この一時検証コードを入力して続行してください: 739201 ChatGPT",
                 "fromAddress": "service@example.com",

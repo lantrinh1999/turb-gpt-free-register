@@ -61,7 +61,7 @@ class RoxyLocalAssetCacheTests(unittest.TestCase):
             self.assertEqual(cache.recorded, 1)
             self.assertTrue(Path(cache._entry_path(url)).exists())
 
-            # 已存在且未过期的 URL 不应再次覆盖，也不能再次计入“本轮新增”。
+            # A URL that already exists and has not expired must not be overwritten again, nor counted again in “new this round”.
             cache._store({
                 "url": url,
                 "status": 200,
@@ -169,7 +169,7 @@ class RoxyLocalAssetCacheTests(unittest.TestCase):
             }, base64.b64encode(b"export default 1").decode("ascii"))
             cache._send = lambda method, params=None: 1
 
-            # Chromium 某些版本在 Request stage 不返回 networkId。
+            # Chromium in some versions does not return networkId at the Request stage.
             cache._handle_paused({
                 "requestId": "fetch-only-id",
                 "resourceType": "Script",

@@ -1,6 +1,6 @@
-"""本地存储基准：使用临时数据库，不请求网络、不修改正式账号。
+"""Local storage benchmark: uses a temporary database, makes no network requests and does not modify real accounts.
 
-运行：.venv/bin/python tests/benchmark_account_inspection.py
+Run:.venv/bin/python tests/benchmark_account_inspection.py
 """
 import json
 import sys

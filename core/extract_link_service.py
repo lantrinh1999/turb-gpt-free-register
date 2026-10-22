@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Plus 试用提链后台队列。"""
+"""Plus trial link extraction background queue."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 try:
     from curl_cffi import requests as curl_requests
-except Exception:  # WebUI 环境未装 curl_cffi 时使用标准库兜底
+except Exception:  # WebUI Fall back to the standard library when curl_cffi is not installed
     curl_requests = None
 
 from config import extract_link as cfg
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 def _runtime_setting(name: str, default=None):
     """
-    提链配置多数保存在 .env。服务模块会在 WebUI 启动时较早 import，
-    因此每次实际读取时都重新加载 .env，避免“页面已保存但当前进程仍读到空值”。
+    Most link extraction settings are stored in .env. The service module is imported early when the WebUI starts,
+    so .env is reloaded on every actual read, to avoid the page having saved the value while the current process still reads an empty one.
     """
     try:
         from config.env_loader import load_env
@@ -53,21 +53,21 @@ SUPPORTED_LINK_TYPES = {"pix", "upi", "kakao_pay", "ideal"}
 def _link_type(value: str | None = None) -> str:
     t = str(value or _runtime_setting("EXTRACT_LINK_TYPE", "pix") or "pix").strip().lower()
     if t not in SUPPORTED_LINK_TYPES:
-        raise ValueError("提链类型无效，仅支持 pix / upi / kakao_pay / ideal")
+        raise ValueError("Invalid link extraction type, only supports pix / upi / kakao_pay / ideal")
     return t
 
 
 def _api_base() -> str:
     base = str(_runtime_setting("EXTRACT_LINK_API_BASE", "") or "").strip().rstrip("/")
     if not base:
-        raise ValueError("EXTRACT_LINK_API_BASE 为空")
+        raise ValueError("EXTRACT_LINK_API_BASE is empty")
     return base
 
 
 def _cdk(value: str | None = None) -> str:
     cdk = str(value or _runtime_setting("EXTRACT_LINK_CDK", "") or "").strip()
     if not cdk:
-        raise ValueError("EXTRACT_LINK_CDK/CDK 为空")
+        raise ValueError("EXTRACT_LINK_CDK/CDK is empty")
     return cdk
 
 
@@ -130,7 +130,7 @@ def _create_extract_job(*, token: str, link_type: str, cdk: str) -> dict:
             with urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8", "replace") or "{}")
             if not isinstance(data, dict) or not data.get("job_id"):
-                raise RuntimeError(f"提链服务未返回 job_id: {data}")
+                raise RuntimeError(f"Link extraction service did not return job_id: {data}")
             return data
         resp = s.post(f"{base}/api/extract", json=payload, timeout=timeout)
         try:
@@ -140,7 +140,7 @@ def _create_extract_job(*, token: str, link_type: str, cdk: str) -> dict:
         if resp.status_code < 200 or resp.status_code >= 300:
             raise RuntimeError(data.get("error") or f"HTTP {resp.status_code}")
         if not isinstance(data, dict) or not data.get("job_id"):
-            raise RuntimeError(f"提链服务未返回 job_id: {data}")
+            raise RuntimeError(f"Link extraction service did not return job_id: {data}")
         return data
     finally:
         try:
@@ -189,7 +189,7 @@ def _iter_sse_events(*, job_id: str, cdk: str):
             return
         resp = s.get(url, timeout=timeout, stream=True)
         if resp.status_code < 200 or resp.status_code >= 300:
-            raise RuntimeError(f"监听提链事件失败 HTTP {resp.status_code}: {(resp.text or '')[:300]}")
+            raise RuntimeError(f"Failed to listen for link extraction events HTTP {resp.status_code}: {(resp.text or '')[:300]}")
         event = "message"
         data_lines: list[str] = []
         for raw in resp.iter_lines():
@@ -232,7 +232,7 @@ def _iter_sse_events(*, job_id: str, cdk: str):
 
 
 def _extract_error_message(data) -> str:
-    """尽量从提链服务返回的任意错误结构中提取用户可读原因。"""
+    """Extract a user-readable reason from any error structure returned by the link extraction service as far as possible."""
     if data is None:
         return ""
     if isinstance(data, str):
@@ -259,10 +259,10 @@ def _format_failure_reason(exc: Exception, logs: list[str] | None = None, last_e
     reason = f"{type(exc).__name__}: {str(exc)}".strip()
     if (not str(exc).strip()) and logs:
         reason = str(logs[-1])
-    if last_event and "提链事件流结束但未返回 result" in reason:
+    if last_event and "link extraction event stream ended without returning result" in reason:
         extracted = _extract_error_message(last_event.get("data"))
         if extracted:
-            reason = f"提链事件流结束但未返回 result；最后事件 {last_event.get('event')}: {extracted}"
+            reason = f"link extraction event stream ended without returning result; last event {last_event.get('event')}: {extracted}"
     return reason[:500]
 
 
@@ -271,7 +271,7 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
     last_event = None
     try:
         if not db.mark_account_extract_running(account_id):
-            return {"ok": False, "error": "账号已删除或提链状态已被重置"}
+            return {"ok": False, "error": "Account deleted or link extraction state was reset"}
         job = _create_extract_job(token=access_token, link_type=link_type, cdk=cdk)
         job_id = str(job.get("job_id") or "")
         db.update_account_extract(account_id, {
@@ -279,7 +279,7 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
             "status": "running",
             "job_id": job_id,
             "link_type": link_type,
-            "message": "提链任务已创建，等待结果",
+            "message": "Link extraction task created, waiting for result",
             "cdk_remaining": job.get("cdk_remaining"),
         })
         for event, data in _iter_sse_events(job_id=job_id, cdk=cdk):
@@ -301,14 +301,14 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
                     result = {}
                 final = {"ok": True, "status": "success", "job_id": job_id, "link_type": link_type, "result": result, "logs": logs}
                 db.update_account_extract(account_id, final)
-                logger.info("[提链] 成功: %s type=%s job=%s", email, link_type, job_id)
+                logger.info("[Link extraction] Success: %s type=%s job=%s", email, link_type, job_id)
                 return final
             elif event == "error":
                 msg = _extract_error_message(data)
-                raise RuntimeError(msg or "提链任务失败")
+                raise RuntimeError(msg or "Link extraction task failed")
             elif event == "done":
                 break
-        raise RuntimeError(f"提链事件流结束但未返回 result: {last_event}")
+        raise RuntimeError(f"link extraction event stream ended without returning result: {last_event}")
     except Exception as exc:
         reason = _format_failure_reason(exc, logs=logs, last_event=last_event)
         result = {
@@ -321,8 +321,8 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
         try:
             db.update_account_extract(account_id, result)
         except Exception:
-            logger.exception("[提链] 写入失败状态异常: account_id=%s", account_id)
-        logger.exception("[提链] 失败: %s", email)
+            logger.exception("[Link extraction] Error writing failed status: account_id=%s", account_id)
+        logger.exception("[Link extraction] Failed: %s", email)
         return result
     finally:
         _QUEUE_SLOTS.release()
@@ -330,13 +330,13 @@ def _run_extract(*, account_id: int, email: str, access_token: str, link_type: s
 
 def enqueue_account_extract(*, account_id: int, email: str, access_token: str, trigger: str = "manual", link_type: str | None = None, cdk: str | None = None) -> dict:
     if not _QUEUE_SLOTS.acquire(blocking=False):
-        return {"accepted": False, "busy": False, "error": "提链队列已满"}
+        return {"accepted": False, "busy": False, "error": "Link extraction queue is full"}
     try:
         lt = _link_type(link_type)
         code = _cdk(cdk)
         if not db.claim_account_extract(account_id, trigger=trigger, link_type=lt):
             _QUEUE_SLOTS.release()
-            return {"accepted": False, "busy": True, "error": "该账号正在提链中"}
+            return {"accepted": False, "busy": True, "error": "Link extraction is already in progress for this account"}
         fut = _EXECUTOR.submit(_run_extract, account_id=account_id, email=email, access_token=access_token, link_type=lt, cdk=code, trigger=trigger)
         return {"accepted": True, "busy": False, "future": fut, "link_type": lt}
     except Exception:

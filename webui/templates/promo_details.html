@@ -38,7 +38,7 @@
   @media (max-width: 560px) { #promoDetailsDialog .promo-field { grid-template-columns: 96px minmax(0, 1fr); gap: 8px; } #promoDetailsDialog .promo-dialog-head { padding: 18px; } #promoDetailsContent { padding: 14px; } }
 </style>
 <dialog id="promoDetailsDialog" aria-labelledby="promoDetailsTitle">
-  <div class="promo-dialog-head"><div class="promo-dialog-title"><span class="promo-dialog-icon">✦</span><h3 id="promoDetailsTitle">可用优惠详情</h3><form method="dialog" style="margin-left:auto"><button class="promo-dialog-close" type="submit" aria-label="关闭">×</button></form></div><p class="promo-dialog-subtitle">最近一次查套餐返回的活动信息，不代表已开通套餐</p></div>
+  <div class="promo-dialog-head"><div class="promo-dialog-title"><span class="promo-dialog-icon">✦</span><h3 id="promoDetailsTitle">Available Promo Details</h3><form method="dialog" style="margin-left:auto"><button class="promo-dialog-close" type="submit" aria-label="stop">×</button></form></div><p class="promo-dialog-subtitle">Campaign info returned by the most recent plan check; it does not mean a plan is active</p></div>
   <div id="promoDetailsContent"></div>
 </dialog>
 <script>
@@ -47,7 +47,7 @@ document.addEventListener('click', (event) => {
   if (!button) return;
   let campaigns;
   try { campaigns = JSON.parse(button.dataset.promoDetails); }
-  catch (_) { showToast('优惠详情数据无效，请重新查询套餐'); return; }
+  catch (_) { showToast('Promo details data is invalid, please query the plan again'); return; }
   const content = document.getElementById('promoDetailsContent');
   content.replaceChildren();
   for (const [type, campaign] of Object.entries(campaigns)) {
@@ -57,12 +57,12 @@ document.addEventListener('click', (event) => {
     section.appendChild(heading);
     const meta = campaign.metadata || {};
     const fields = [
-      ['活动 ID', campaign.id], ['标题', meta.title], ['说明', meta.summary],
-      ['套餐', meta.plan_name], ['优惠类型', meta.promotion_type_label || meta.promotion_type],
-      ['折扣比例', meta.discount?.percentage != null ? meta.discount.percentage + '%' : null],
-      ['优惠时长', meta.duration ? [meta.duration.num_periods, meta.duration.period].filter(v => v != null).join(' ') : null],
-      ['优惠结束后自动续费', meta.no_auto_renewal_at_discount_end === false ? '是' : meta.no_auto_renewal_at_discount_end === true ? '否' : null],
-      ['支付处理方', meta.processor],
+      ['Campaign ID', campaign.id], ['Title', meta.title], ['Description', meta.summary],
+      ['Plan', meta.plan_name], ['Discount Type', meta.promotion_type_label || meta.promotion_type],
+      ['Discount Percentage', meta.discount?.percentage != null ? meta.discount.percentage + '%' : null],
+      ['Promo Duration', meta.duration ? [meta.duration.num_periods, meta.duration.period].filter(v => v != null).join(' ') : null],
+      ['Auto-Renew After Promo Ends', meta.no_auto_renewal_at_discount_end === false ? 'Yes' : meta.no_auto_renewal_at_discount_end === true ? 'No' : null],
+      ['Payment Processor', meta.processor],
     ];
     for (const [label, value] of fields) {
       if (value == null || value === '') continue;
@@ -75,7 +75,7 @@ document.addEventListener('click', (event) => {
     }
     const details = document.createElement('details');
     const summary = document.createElement('summary');
-    summary.textContent = '查看全部原始字段';
+    summary.textContent = 'View All Raw Fields';
     const pre = document.createElement('pre');
     pre.textContent = JSON.stringify(campaign, null, 2);
     details.append(summary, pre);

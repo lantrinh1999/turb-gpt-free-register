@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Sentinel Runner 适配层
-通过 subprocess 调用项目根目录的 sentinel-runner.js，
-让 Node.js 在 vm 沙箱中真实运行 sdk.js，生成可通过校验的 sentinel-token。
+Sentinel Runner adapter layer
+Invoke the project-root sentinel-runner.js via subprocess,
+so that Node.js really runs sdk.js inside a vm sandbox and generates a sentinel-token that can pass validation.
 
-工作原理：
-1. Python 端先调用 sentinel.openai.com/backend-api/sentinel/req 拿到 challenge JSON
-2. 把 challenge 写入临时文件
-3. 调用 node sentinel-runner.js --challenge-file <临时文件> ...
-4. 捕获 stdout 即为 openai-sentinel-token 的 value
+How it works:
+1. Python side first calls sentinel.openai.com/backend-api/sentinel/req to obtain the challenge JSON
+2. Write the challenge to a temp file
+3. Call node sentinel-runner.js --challenge-file <temp file> ...
+4. Capture stdout, which is the openai-sentinel-token value
 """
 import json
 import logging
@@ -45,14 +45,14 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# 项目根目录（core 的上一级）
+# Project root directory (parent of core)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Node 资源放在项目根的 sentinel/ 子目录下
+# Node resources live in the sentinel/ subdirectory of the project root
 _SENTINEL_DIR = _PROJECT_ROOT / "sentinel"
 _RUNNER_PATH = _SENTINEL_DIR / "sentinel-runner.js"
 _SDK_PATH = _SENTINEL_DIR / "sdk.js"
 
-# 各 flow 对应的 page-url（与浏览器实际页面一致，影响 sdk.js 指纹生成）
+# page-url for each flow (consistent with the actual browser page, affects sdk.js fingerprint generation)
 _FLOW_PAGE_URL = {
     "username_password_create": "https://auth.openai.com/create-account/password",
     "email_otp_validate": "https://auth.openai.com/email-verification",
@@ -60,14 +60,14 @@ _FLOW_PAGE_URL = {
     "oauth_create_account": "https://auth.openai.com/about-you",
 }
 
-# Node 子进程超时（秒）。sdk.js 内部可能要做 PoW，留充裕一点
+# Node Subprocess timeout (seconds). sdk.js may run PoW internally, so leave plenty of margin
 _RUNNER_TIMEOUT = 60
 
 
 def _resolve_node_executable() -> str:
     """
-    解析 Node 可执行文件名。Windows 下默认 node.exe，类 Unix 为 node。
-    允许通过环境变量 NODE_EXECUTABLE 覆盖。
+    Resolve the Node executable name. Defaults to node.exe on Windows, node on Unix-like systems.
+    Can be overridden through the NODE_EXECUTABLE environment variable.
     """
     override = os.environ.get("NODE_EXECUTABLE")
     if override:
@@ -76,11 +76,11 @@ def _resolve_node_executable() -> str:
 
 
 def _ensure_runner_environment() -> None:
-    """启动前的强制检查：runner.js / sdk.js 必须存在。"""
+    """Mandatory pre-launch check: runner.js / sdk.js must exist."""
     if not _RUNNER_PATH.exists():
-        raise FileNotFoundError(f"找不到 sentinel-runner.js: {_RUNNER_PATH}")
+        raise FileNotFoundError(f"Cannot find sentinel-runner.js: {_RUNNER_PATH}")
     if not _SDK_PATH.exists():
-        raise FileNotFoundError(f"找不到 sdk.js: {_SDK_PATH}")
+        raise FileNotFoundError(f"Cannot find sdk.js: {_SDK_PATH}")
 
 
 def generate_sentinel_token(
@@ -97,28 +97,28 @@ def generate_sentinel_token(
     cookie: str | None = None,
 ) -> str:
     """
-    把 sentinel.openai.com 返回的 challenge 喂给 sdk.js，生成最终 sentinel-token 字符串。
+    Feed the challenge returned by sentinel.openai.com to sdk.js to generate the final sentinel-token string.
 
     Args:
-        challenge: sentinel/req 返回的完整 JSON（含 token / proofofwork / turnstile / so 字段）
-        flow: 流程标识，例如 username_password_create / authorize_continue / oauth_create_account
-        device_id: oai-did，必须与 Python 端 BrowserSession 持有的同一个值
-        user_agent: 必须与 Python 端请求 UA 完全一致；默认读取 config.USER_AGENT
-        page_url: 当前所在页面 URL（影响 referer / location 指纹）；默认按 flow 推断
+        challenge: sentinel/req full JSON returned (including token / proofofwork / turnstile / so fields)
+        flow: Flow identifier, e.g. username_password_create / authorize_continue / oauth_create_account
+        device_id: oai-did, must be the same value held by the Python-side BrowserSession
+        user_agent: Must match the Python-side request UA exactly; defaults to reading config.USER_AGENT
+        page_url: URL of the current page (affects the referer / location fingerprint); inferred from flow by default
 
     Returns:
-        openai-sentinel-token 头的完整字符串值（runner 的 stdout 原样返回，已是 JSON 字符串）
+        openai-sentinel-token header full string value (runner stdout returned as is, already a JSON string)
 
     Raises:
-        FileNotFoundError: runner.js 或 sdk.js 缺失
-        RuntimeError: Node 子进程异常或返回非零退出码
+        FileNotFoundError: runner.js or sdk.js is missing
+        RuntimeError: Node subprocess error or non-zero exit code
     """
     _ensure_runner_environment()
 
     if not flow:
-        raise ValueError("flow 不能为空")
+        raise ValueError("flow cannot be empty")
     if not device_id:
-        raise ValueError("device_id 不能为空")
+        raise ValueError("device_id cannot be empty")
 
     profile = browser_profile or {}
     browser_family = str(profile.get("browser_family") or "chrome")
@@ -154,8 +154,8 @@ def generate_sentinel_token(
     sec_ch_ua_bitness = str(profile.get("sec_ch_ua_bitness", SEC_CH_UA_BITNESS))
     sec_ch_ua_model = str(profile.get("sec_ch_ua_model", SEC_CH_UA_MODEL))
     build_id = str(profile.get("build_id", OPENAI_BUILD_ID))
-    # Auth 页面 Sentinel token 的 documentElement 通常没有 data-build；
-    # ChatGPT 页面 prepare/finalize 的 p 才带前端 build。
+    # Auth page Sentinel token documentElement usually has no data-build;
+    # ChatGPT page prepare/finalize p is what carries the front-end build.
     runner_build_id = "" if page_url is None and flow in {
         "email_otp_validate", "authorize_continue", "oauth_create_account", "username_password_create"
     } else build_id
@@ -168,15 +168,15 @@ def generate_sentinel_token(
         flow, "https://auth.openai.com/create-account/password"
     )
 
-    # dx 是用发起 sentinel/req 时的 p 混淆的。该 proof 只在本地传给 runner，
-    # 不应作为 challenge 的额外字段暴露给 SDK。
+    # dx is obfuscated with the p used when sentinel/req was initiated. This proof is only passed to the runner locally,
+    # and should not be exposed to the SDK as an extra field of the challenge.
     challenge_proof = str(challenge.get("_request_p") or "") if isinstance(challenge, dict) else ""
     challenge_payload = (
         {k: v for k, v in challenge.items() if k != "_request_p"}
         if isinstance(challenge, dict) else challenge
     )
 
-    # 把 challenge 写入临时文件，避免命令行长度 / 转义问题
+    # Write the challenge to a temp file, to avoid command-line length / escaping problems
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
         suffix=".json",
@@ -208,15 +208,15 @@ def generate_sentinel_token(
             "--user-agent-data-platform", user_agent_data_platform,
             "--request-idle-callback", "1" if request_idle_callback else "0",
             "--sdk", str(_SDK_PATH),
-            # challenge 请求的初始 p[5] 都来自版本化 SDK；最终提交头则由
-            # Auth 页包装 SDK 生成：密码/资料页为 backend-api，OTP 页为版本化地址。
+            # challenge request initial p[5] all come from the versioned SDK; the final submitted header is generated by the
+            # Auth page wrapper SDK: backend-api for password/profile pages, a versioned address for the OTP page.
             "--script-src", (
                 f"https://sentinel.openai.com/sentinel/{SENTINEL_SV}/sdk.js"
                 if flow == "email_otp_validate"
                 else "https://sentinel.openai.com/backend-api/sentinel/sdk.js"
             ),
             "--build-id", runner_build_id,
-            # 与 config.browser / core.sentinel.py 中的指纹默认值保持一致
+            # Keep consistent with the fingerprint defaults in config.browser / core.sentinel.py
             "--width", str(screen_width),
             "--height", str(screen_height),
             "--avail-width", str(screen_avail_width),
@@ -249,14 +249,14 @@ def generate_sentinel_token(
             "--cookie", runner_cookie,
         ]
 
-        logger.info(f"[SentinelRunner] 调用 Node 生成 token, flow={flow}")
-        logger.debug(f"[SentinelRunner] 命令: {' '.join(cmd)}")
+        logger.info(f"[SentinelRunner] Calling Node to generate token, flow={flow}")
+        logger.debug(f"[SentinelRunner] Command: {' '.join(cmd)}")
 
-        # 关键：禁用 sentinel.config.json 自动发现（避免外部配置干扰）
+        # Key point: disable automatic discovery of sentinel.config.json (avoid interference from external config)
         env = os.environ.copy()
         env.pop("SENTINEL_CONFIG", None)
-        env["SENTINEL_CONFIG"] = "__none__"  # 故意指向不存在的文件，跳过 fallback 列表
-        env["TZ"] = timezone_iana  # 让 Node VM 里的 Date.toString() 与 Python p 指纹时区一致
+        env["SENTINEL_CONFIG"] = "__none__"  # Deliberately point to a non-existent file, to skip the fallback list
+        env["TZ"] = timezone_iana  # Make Date.toString() inside the Node VM consistent with the timezone of the Python p fingerprint
 
         try:
             proc = subprocess.run(
@@ -270,19 +270,19 @@ def generate_sentinel_token(
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
-                f"sentinel-runner.js 执行超时（>{_RUNNER_TIMEOUT}s），flow={flow}"
+                f"sentinel-runner.js execution timed out (>{_RUNNER_TIMEOUT}s),flow={flow}"
             ) from exc
         except FileNotFoundError as exc:
             raise RuntimeError(
-                "未找到 Node 可执行文件，请确认已安装 Node.js 并加入 PATH，"
-                "或通过 NODE_EXECUTABLE 环境变量指定绝对路径。"
+                "Node executable not found, please make sure Node.js is installed and added to PATH,"
+                "or specify the absolute path via the NODE_EXECUTABLE environment variable."
             ) from exc
 
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
             stdout = (proc.stdout or "").strip()
             raise RuntimeError(
-                f"sentinel-runner.js 退出码 {proc.returncode}\n"
+                f"sentinel-runner.js exit code {proc.returncode}\n"
                 f"stderr: {stderr}\n"
                 f"stdout: {stdout}"
             )
@@ -290,38 +290,38 @@ def generate_sentinel_token(
         token_text = (proc.stdout or "").strip()
         if not token_text:
             raise RuntimeError(
-                f"sentinel-runner.js 输出为空, stderr: {(proc.stderr or '').strip()}"
+                f"sentinel-runner.js output is empty, stderr: {(proc.stderr or '').strip()}"
             )
 
-        # 简单合法性校验：必须是合法 JSON 且包含关键字段
+        # Simple validity check: must be valid JSON and contain the key fields
         try:
             parsed = json.loads(token_text)
         except json.JSONDecodeError as exc:
             raise RuntimeError(
-                f"runner 输出不是合法 JSON: {token_text[:200]}"
+                f"runner output is not valid JSON: {token_text[:200]}"
             ) from exc
 
         for required_key in ("p", "c", "id", "flow"):
             if required_key not in parsed:
                 raise RuntimeError(
-                    f"runner 输出缺少字段 {required_key}: {token_text[:200]}"
+                    f"runner output is missing field {required_key}: {token_text[:200]}"
                 )
 
-        # 详细诊断：打印输出 JSON 的所有顶层字段名 + 值长度
+        # Detailed diagnostics: print all top-level field names of the output JSON + value lengths
         field_summary = {
             k: (len(v) if isinstance(v, str) else type(v).__name__)
             for k, v in parsed.items()
         }
         logger.info(
-            f"[SentinelRunner] token 生成成功, flow={flow}, "
-            f"包含 turnstile={'t' in parsed and bool(parsed.get('t'))}, "
-            f"包含 so={bool(parsed.get('_so') or parsed.get('so'))}, "
-            f"字段: {field_summary}"
+            f"[SentinelRunner] token generation succeeded, flow={flow}, "
+            f"contains turnstile={'t' in parsed and bool(parsed.get('t'))}, "
+            f"contains so={bool(parsed.get('_so') or parsed.get('so'))}, "
+            f"field: {field_summary}"
         )
         return token_text
 
     finally:
-        # 清理临时文件
+        # Clean up temp files
         try:
             os.unlink(tmp.name)
         except OSError:

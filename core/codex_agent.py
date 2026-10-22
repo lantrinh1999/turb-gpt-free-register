@@ -1,14 +1,14 @@
 """
-Codex Agent Identity 自动注册脚本
-by 久雾
+Codex Agent Identity auto-registration script
+by Jiuwu
 
-流程：
-1. 通过 ChatGPT session JWT 获取账号信息
-2. 生成 Ed25519 密钥对
-3. 在 auth.openai.com 注册 agent
-4. 生成 Codex CLI 可用的 auth.json
+Flow:
+1. Get account info via the ChatGPT session JWT
+2. Generate an Ed25519 key pair
+3. Register on auth.openai.com as an agent
+4. Generate a Codex CLI-compatible auth.json
 
-依赖：curl_cffi, cryptography
+Dependencies:curl_cffi, cryptography
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from cryptography.hazmat.primitives.serialization import (
 
 
 # ============================================================
-#  常量
+#  Constants
 # ============================================================
 
 AUTHAPI_BASE = "https://auth.openai.com/api/accounts"
@@ -51,21 +51,21 @@ USER_AGENT = (
     f"Chrome/{CHROME_VERSION}.0.0.0 Safari/537.36"
 )
 
-# Codex CLI agent 版本信息
+# Codex CLI agent version info
 AGENT_VERSION = "0.138.0-alpha.6"
 AGENT_HARNESS_ID = "codex-cli"
 RUNNING_LOCATION = "local"
 
 
 # ============================================================
-#  日志
+#  log
 # ============================================================
 
 logger = logging.getLogger(__name__)
 
 
 def _log(step: str, msg: str, level: str = "INFO") -> None:
-    """统一走 logging，避免 WebUI/任务日志里混入 ANSI 彩色 stdout。"""
+    """Use logging uniformly, to avoid ANSI-colored stdout leaking into WebUI/task logs."""
     text = f"[CodexAgent][{step}] {msg}"
     if level in {"WARN", "WARNING"}:
         logger.warning(text)
@@ -86,18 +86,18 @@ def _fingerprint(value: str, length: int = 12) -> str:
 
 
 # ============================================================
-#  Ed25519 密钥对生成
+#  Ed25519 key pair generation
 # ============================================================
 
 def generate_ed25519_keypair() -> tuple[str, str]:
     """
-    生成 Ed25519 密钥对。
+    Generate an Ed25519 key pair.
 
     :return: (private_key_pkcs8_base64, public_key_ssh)
     """
     private_key = Ed25519PrivateKey.generate()
 
-    # PKCS8 DER 格式私钥 → base64
+    # PKCS8 DER format private key → base64
     pkcs8_der = private_key.private_bytes(
         encoding=Encoding.DER,
         format=PrivateFormat.PKCS8,
@@ -105,14 +105,14 @@ def generate_ed25519_keypair() -> tuple[str, str]:
     )
     private_key_b64 = base64.b64encode(pkcs8_der).decode()
 
-    # 原始公钥字节
+    # Raw public key bytes
     public_key = private_key.public_key()
     pub_bytes = public_key.public_bytes(
         encoding=Encoding.Raw,
         format=PublicFormat.Raw,
     )
 
-    # 构造 SSH 公钥格式: ssh-ed25519 base64(blob)
+    # Build the SSH public key format: ssh-ed25519 base64(blob)
     ssh_header = b"ssh-ed25519"
     blob = bytearray()
     blob.extend(len(ssh_header).to_bytes(4, "big"))
@@ -126,23 +126,23 @@ def generate_ed25519_keypair() -> tuple[str, str]:
 
 
 # ============================================================
-#  JWT 解码（不验证签名，仅提取 claims）
+#  JWT decoding (signature not verified, only extracts claims)
 # ============================================================
 
 def decode_jwt_claims(jwt_token: str) -> dict[str, Any]:
     """
-    解码 JWT payload（不验证签名）。
+    Decode the JWT payload (signature not verified).
 
-    :param jwt_token: JWT 字符串
+    :param jwt_token: JWT string
     :return: claims dict
     """
     parts = jwt_token.split(".")
     if len(parts) != 3:
         raise ValueError("Invalid JWT format")
 
-    # JWT payload 是 base64url 编码
+    # JWT payload is base64url encoded
     payload_b64 = parts[1]
-    # 补齐 padding
+    # Add padding
     padding = 4 - len(payload_b64) % 4
     if padding != 4:
         payload_b64 += "=" * padding
@@ -152,15 +152,15 @@ def decode_jwt_claims(jwt_token: str) -> dict[str, Any]:
 
 
 # ============================================================
-#  Session 获取
+#  Session retrieval
 # ============================================================
 
 def get_session_from_cookies(cookies: dict[str, str]) -> dict[str, Any]:
     """
-    使用 cookies 调用 /api/auth/session 获取 accessToken 和账号信息。
+    Call /api/auth/session with cookies to get the accessToken and account info.
 
-    :param cookies: chatgpt.com 的 cookies dict
-    :return: session 数据
+    :param cookies: chatgpt.com session cookies dict
+    :return: session data
     """
     r = requests.get(
         f"{CHATGPT_BASE}/api/auth/session",
@@ -175,10 +175,10 @@ def get_session_from_cookies(cookies: dict[str, str]) -> dict[str, Any]:
 
 def get_session_from_access_token(access_token: str) -> dict[str, Any]:
     """
-    如果已有 JWT access token，直接解码获取信息。
+    If a JWT access token is already available, decode it directly to get the info.
 
     :param access_token: ChatGPT session JWT
-    :return: 包含 accessToken, accountId, email, userId, planType 的 dict
+    :return: Containing accessToken, accountId, email, userId, planType dict
     """
     claims = decode_jwt_claims(access_token)
     auth_info = claims.get("https://api.openai.com/auth", {})
@@ -194,7 +194,7 @@ def get_session_from_access_token(access_token: str) -> dict[str, Any]:
 
 
 def _agent_headers(access_token: str, env: Any | None = None) -> dict[str, str]:
-    """构造 Agent API 请求头；有 BrowserSession 时使用该账号独立指纹画像。"""
+    """Build the Agent API request headers; when a BrowserSession is present, use that account independent fingerprint profile."""
     if env is not None and hasattr(env, "_get_common_headers"):
         headers = env._get_common_headers()
     else:
@@ -221,7 +221,7 @@ def _agent_headers(access_token: str, env: Any | None = None) -> dict[str, str]:
 
 
 def _agent_post(url: str, *, access_token: str, payload: dict[str, Any], env: Any | None = None, timeout: int = 15):
-    """使用独立 BrowserSession 或默认 curl_cffi 发起 Agent API POST。"""
+    """Send the Agent API POST using an independent BrowserSession or the default curl_cffi."""
     headers = _agent_headers(access_token, env=env)
     if env is not None and hasattr(env, "session"):
         return env.session.post(url, headers=headers, json=payload, timeout=timeout)
@@ -229,7 +229,7 @@ def _agent_post(url: str, *, access_token: str, payload: dict[str, Any], env: An
 
 
 # ============================================================
-#  Agent 注册
+#  Agent registration
 # ============================================================
 
 def register_agent(
@@ -240,10 +240,10 @@ def register_agent(
     display_name: str | None = None,
 ) -> str:
     """
-    在 auth.openai.com 注册 agent。
+    Register an agent on auth.openai.com.
 
     :param access_token: ChatGPT session JWT
-    :param public_key_ssh: SSH 格式的 Ed25519 公钥
+    :param public_key_ssh: SSH format Ed25519 public key
     :return: agent_runtime_id
     """
     name = str(display_name or "").strip() or _random_agent_display_name()
@@ -252,7 +252,7 @@ def register_agent(
             "agent_version": AGENT_VERSION,
             "agent_harness_id": AGENT_HARNESS_ID,
             "running_location": RUNNING_LOCATION,
-            # OpenAI Agent 场景也使用本轮随机名称，避免固定同一个展示名。
+            # OpenAI Agent scenarios also use this round random name, to avoid always reusing the same display name.
             "display_name": name,
             "agent_name": name,
         },
@@ -270,9 +270,9 @@ def register_agent(
         payload=payload,
     )
 
-    # 兼容 OpenAI 接口严格校验未知字段的情况：如果命名字段不被接受，回退到原始协议。
+    # Compatible with OpenAI strict validation of unknown fields: if the named field is not accepted, fall back to the original protocol.
     if r.status_code == 400 and any(x in (r.text or "").lower() for x in ("unknown", "unrecognized", "extra", "invalid")):
-        _log("Step 3", f"OpenAI Agent 注册接口不接受名称字段，回退原始 payload: {r.text[:180]}", "WARN")
+        _log("Step 3", f"OpenAI Agent the registration endpoint does not accept the name field, falling back to the original payload: {r.text[:180]}", "WARN")
         r = _agent_post(
             f"{AUTHAPI_BASE}/v1/agent/register",
             access_token=access_token,
@@ -300,7 +300,7 @@ def register_agent(
 
 
 # ============================================================
-#  Task 注册（验证密钥对可用性）
+#  Task registration (verify the key pair is usable)
 # ============================================================
 
 def register_task(
@@ -311,20 +311,20 @@ def register_task(
     timeout: int = 15,
 ) -> str:
     """
-    在 auth.openai.com 注册 task（验证密钥对可用性）。
-    Codex CLI 启动时会自动执行此步骤。
+    Register a task on auth.openai.com (verify the key pair is usable).
+    Codex CLI this step runs automatically on startup.
 
-    :param access_token: ChatGPT session JWT（仅用于验证，实际 Codex CLI 用密钥签名）
-    :param agent_runtime_id: agent 运行时 ID
-    :param private_key_pkcs8_b64: PKCS8 base64 私钥
+    :param access_token: ChatGPT session JWT(for verification only; the actual Codex CLI signs with the key)
+    :param agent_runtime_id: agent runtime ID
+    :param private_key_pkcs8_b64: PKCS8 base64 private key
     :return: encrypted_task_id
     """
-    # 加载私钥
+    # Load the private key
     pkcs8_der = base64.b64decode(private_key_pkcs8_b64)
     pem = b"-----BEGIN PRIVATE KEY-----\n" + base64.encodebytes(pkcs8_der) + b"-----END PRIVATE KEY-----\n"
     private_key = load_pem_private_key(pem, password=None)
 
-    # 签名 payload: {agent_runtime_id}:{timestamp}
+    # Sign payload: {agent_runtime_id}:{timestamp}
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     payload = f"{agent_runtime_id}:{timestamp}"
     signature = private_key.sign(payload.encode())
@@ -349,11 +349,11 @@ def register_task(
 
 
 # ============================================================
-#  auth.json 生成
+#  auth.json Generate
 # ============================================================
 
 def _random_agent_display_name() -> str:
-    """生成随机 Agent 名称，避免 sub2api 账号名直接暴露邮箱前缀。"""
+    """Generate a random Agent name, so that the sub2api account name does not directly expose the email prefix."""
     adjectives = [
         "Amber", "Blue", "Cedar", "Delta", "Echo", "Falcon", "Golden", "Harbor",
         "Ivory", "Jade", "Lunar", "Nova", "Orion", "Pine", "Quartz", "River",
@@ -379,7 +379,7 @@ def generate_auth_json(
     display_name: str | None = None,
 ) -> dict[str, Any]:
     """
-    生成 Codex CLI 的 auth.json。
+    Generate the Codex CLI auth.json.
 
     :return: auth.json dict
     """
@@ -399,7 +399,7 @@ def generate_auth_json(
 
 
 # ============================================================
-#  sub2api 对接
+#  sub2api integration
 # ============================================================
 
 def build_sub2api_account_entry(
@@ -407,10 +407,10 @@ def build_sub2api_account_entry(
     *,
     proxy_key: str | None = None,
 ) -> dict[str, Any]:
-    """把 Codex Agent Identity auth.json 转成 sub2api accounts[] 条目。"""
+    """Convert a Codex Agent Identity auth.json into a sub2api accounts[] entry."""
     identity = auth_json.get("agent_identity") if isinstance(auth_json, dict) else None
     if not isinstance(identity, dict):
-        raise ValueError("auth_json 缺少 agent_identity")
+        raise ValueError("auth_json missing agent_identity")
 
     agent_runtime_id = str(identity.get("agent_runtime_id") or "").strip()
     agent_private_key = str(identity.get("agent_private_key") or "").strip()
@@ -420,7 +420,7 @@ def build_sub2api_account_entry(
     display_name = email or str(identity.get("name") or identity.get("display_name") or "").strip() or f"agent-{agent_runtime_id[:8]}"
     plan_type = str(identity.get("plan_type") or "free").strip() or "free"
     if not agent_runtime_id or not agent_private_key:
-        raise ValueError("agent_identity 缺少 agent_runtime_id/agent_private_key")
+        raise ValueError("agent_identity missing agent_runtime_id/agent_private_key")
 
     entry = {
         "name": display_name,
@@ -478,24 +478,24 @@ def upsert_sub2api_account(
     *,
     proxy_key: str | None = None,
 ) -> dict[str, Any]:
-    """把 Agent Token 追加/更新到 sub2api.json。"""
+    """Append/update the Agent Token in sub2api.json."""
     path = os.fspath(output_path)
     data: dict[str, Any]
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             loaded = json.load(f)
         if not isinstance(loaded, dict):
-            raise ValueError("sub2api 配置文件根节点必须是对象")
+            raise ValueError("sub2api config file root must be an object")
         data = loaded
     else:
         data = {}
 
     accounts = data.setdefault("accounts", [])
     if not isinstance(accounts, list):
-        raise ValueError("sub2api 配置中的 accounts 必须是数组")
+        raise ValueError("sub2api accounts in the config must be an array")
     proxies = data.setdefault("proxies", [])
     if not isinstance(proxies, list):
-        raise ValueError("sub2api 配置中的 proxies 必须是数组")
+        raise ValueError("sub2api proxies in the config must be an array")
     if proxy_key and not proxies:
         data["proxies"] = [{"proxy_key": str(proxy_key)}]
 
@@ -506,7 +506,7 @@ def upsert_sub2api_account(
         if isinstance(existing, dict) and key and _sub2api_dedupe_key(existing) == key:
             merged = dict(existing)
             merged.update(incoming)
-            # 保留已人工调整的调度参数/代理键。
+            # Keep manually adjusted scheduling parameters/proxy keys.
             for keep in ("concurrency", "priority", "rate_multiplier", "auto_pause_on_expired", "proxy_key"):
                 if keep in existing and (keep != "proxy_key" or not proxy_key):
                     merged[keep] = existing[keep]
@@ -544,21 +544,21 @@ def upload_sub2api_account(
     proxy_key: str | None = None,
     timeout: float = 20.0,
 ) -> dict[str, Any]:
-    """通过 sub2api HTTP API 直接上传/导入 Agent Token。
+    """Upload/import the Agent Token directly through the sub2api HTTP API.
 
-    标准 Wei-Shaw/sub2api 使用：
+    Standard Wei-Shaw/sub2api uses:
       POST /api/v1/admin/accounts/import/codex-session
       {"contents":["<auth.json>"],"update_existing":true,...}
 
     payload_mode:
-      - codex_session_import: sub2api 原生 Codex Session/Agent Identity 导入接口
-      - account:  直接 POST 单个 account 对象
+      - codex_session_import: sub2api Native Codex Session/Agent Identity import endpoint
+      - account:  POST a single account object directly
       - accounts: POST {"accounts": [account]}
       - config:   POST {"accounts": [account], "proxies": [...]}
     """
     url = str(api_url or "").strip()
     if not url:
-        raise ValueError("SUB2API_API_BASE 为空，无法上传到 sub2api")
+        raise ValueError("SUB2API_API_BASE is empty, cannot upload to sub2api")
 
     mode = str(payload_mode or "accounts").strip().lower()
     incoming: dict[str, Any] | None = None
@@ -601,7 +601,7 @@ def upload_sub2api_account(
     except Exception:
         body = {"text": text[:1000]}
     if status < 200 or status >= 300:
-        raise RuntimeError(f"sub2api 上传失败 HTTP {status}: {text[:800]}")
+        raise RuntimeError(f"sub2api upload failed HTTP {status}: {text[:800]}")
 
     return {
         "ok": True,
@@ -620,7 +620,7 @@ def upload_sub2api_account(
 
 
 # ============================================================
-#  完整流程
+#  Full flow
 # ============================================================
 
 def create_codex_agent_identity(
@@ -631,17 +631,17 @@ def create_codex_agent_identity(
     timeout: int = 15,
 ) -> dict[str, Any]:
     """
-    完整流程：从 ChatGPT session JWT 创建 Codex Agent Identity auth.json。
+    Full flow: create a Codex Agent Identity auth.json from the ChatGPT session JWT.
 
-    :param access_token: ChatGPT session JWT（从 /api/auth/session 获取的 accessToken）
-    :param output_path: 可选的 auth.json 输出路径；不传时只返回内存对象
-    :param verify_task: 是否验证 task 注册（可选）
+    :param access_token: ChatGPT session JWT(accessToken obtained from /api/auth/session)
+    :param output_path: Optional auth.json output path; when omitted only the in-memory object is returned
+    :param verify_task: Whether to verify task registration (optional)
     :return: auth.json dict
     """
-    _banner("Codex Agent Identity 注册开始")
+    _banner("Codex Agent Identity registration started")
 
-    # Step 1: 解码 JWT 获取账号信息
-    _log("Step 1", "解码 JWT 获取账号信息...")
+    # Step 1: Decode the JWT to get account info
+    _log("Step 1", "Decode the JWT to get account info...")
     session = get_session_from_access_token(access_token)
     account_id = session["accountId"]
     chatgpt_user_id = session["userId"]
@@ -649,36 +649,36 @@ def create_codex_agent_identity(
     plan_type = session["planType"]
 
     if not account_id or not chatgpt_user_id:
-        raise RuntimeError(f"JWT 缺少必要字段: account_id={account_id}, user_id={chatgpt_user_id}")
+        raise RuntimeError(f"JWT is missing required fields: account_id={account_id}, user_id={chatgpt_user_id}")
 
     _log("Step 1", f"account_id={account_id}", "OK")
     _log("Step 1", f"user_id={chatgpt_user_id}", "OK")
     _log("Step 1", f"email={email}", "OK")
     _log("Step 1", f"plan_type={plan_type}", "OK")
 
-    # Step 2: 生成 Ed25519 密钥对
-    _log("Step 2", "生成 Ed25519 密钥对...")
+    # Step 2: Generate an Ed25519 key pair
+    _log("Step 2", "Generate an Ed25519 key pair...")
     private_key_b64, public_key_ssh = generate_ed25519_keypair()
-    _log("Step 2", "Ed25519 私钥已生成（不输出私钥内容）", "OK")
+    _log("Step 2", "Ed25519 private key generated (private key contents not printed)", "OK")
     _log("Step 2", f"public_key_fingerprint={_fingerprint(public_key_ssh)}", "OK")
 
-    # Step 3: 注册 agent
+    # Step 3: registration agent
     agent_display_name = _random_agent_display_name()
-    _log("Step 3", f"在 auth.openai.com 注册 agent，display_name={agent_display_name}...")
+    _log("Step 3", f"Registering agent on auth.openai.com,display_name={agent_display_name}...")
     agent_runtime_id = register_agent(access_token, public_key_ssh, env=env, timeout=timeout, display_name=agent_display_name)
     _log("Step 3", f"agent_runtime_id={agent_runtime_id}", "OK")
 
-    # Step 4: 验证 task 注册（可选）
+    # Step 4: Verify task registration (optional)
     if verify_task:
-        _log("Step 4", "验证 task 注册...")
+        _log("Step 4", "Verify task registration...")
         try:
             task_id = register_task(access_token, agent_runtime_id, private_key_b64, env=env, timeout=timeout)
             _log("Step 4", f"task_id_fingerprint={_fingerprint(task_id)}", "OK")
         except Exception as e:
-            _log("Step 4", f"验证失败（不影响 auth.json）: {e}", "WARN")
+            _log("Step 4", f"Verification failed (auth.json is not affected): {e}", "WARN")
 
-    # Step 5: 生成 auth.json
-    _log("Step 5", "生成 auth.json...")
+    # Step 5: Generate auth.json
+    _log("Step 5", "Generate auth.json...")
     auth_json = generate_auth_json(
         agent_runtime_id=agent_runtime_id,
         private_key_pkcs8_b64=private_key_b64,
@@ -691,28 +691,28 @@ def create_codex_agent_identity(
     )
 
     if output_path:
-        _log("Step 5", "已忽略本地输出路径，凭证由 SQLite 持久化", "OK")
+        _log("Step 5", "Local output path ignored; credentials are persisted by SQLite", "OK")
     else:
-        _log("Step 5", "auth.json 已返回内存对象，由 SQLite 持久化", "OK")
+        _log("Step 5", "auth.json returned as an in-memory object, persisted by SQLite", "OK")
 
     return auth_json
 
 
 # ============================================================
-#  入口
+#  Entry point
 # ============================================================
 
 def main() -> None:
     """
-    使用方式：
+    Usage:
 
-    1. 直接传入 JWT：
+    1. Pass the JWT directly:
        python codex_agent.py --token "eyJhbGci..."
 
-    2. 传入 JSON 文件（包含 accessToken）：
+    2. Pass a JSON file (containing accessToken):
        python codex_agent.py --file session.json
 
-    3. 交互式输入：
+    3. Interactive input:
        python codex_agent.py
     """
 
@@ -721,11 +721,11 @@ def main() -> None:
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 
-    parser = argparse.ArgumentParser(description="Codex Agent Identity 自动注册")
+    parser = argparse.ArgumentParser(description="Codex Agent Identity auto-registration")
     parser.add_argument("--token", type=str, help="ChatGPT session JWT (accessToken)")
-    parser.add_argument("--file", type=str, help="包含 accessToken 的 JSON 文件路径")
-    parser.add_argument("--output", "-o", type=str, default=None, help="可选输出路径；默认仅返回并由 SQLite 保存")
-    parser.add_argument("--no-verify", action="store_true", help="跳过 task 注册验证")
+    parser.add_argument("--file", type=str, help="Path to a JSON file containing accessToken")
+    parser.add_argument("--output", "-o", type=str, default=None, help="Optional output path; by default the result is only returned and saved by SQLite")
+    parser.add_argument("--no-verify", action="store_true", help="Skip task registration verification")
     args = parser.parse_args()
 
     access_token = None
@@ -737,13 +737,13 @@ def main() -> None:
             data = json.load(f)
             access_token = data.get("accessToken") or data.get("access_token")
     else:
-        # 交互式输入
-        print("请输入 ChatGPT session JWT (accessToken)：")
-        print("（从 chatgpt.com /api/auth/session 获取）")
+        # Interactive input
+        print("Enter the ChatGPT session JWT (accessToken):")
+        print("(obtained from chatgpt.com /api/auth/session)")
         access_token = input("> ").strip()
 
     if not access_token:
-        print("错误：未提供 access_token")
+        print("Error: missing access_token")
         sys.exit(1)
 
     create_codex_agent_identity(

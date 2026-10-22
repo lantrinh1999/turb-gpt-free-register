@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CloudMail/Cloud Mail API 邮箱客户端。"""
+"""CloudMail/Cloud Mail API email client."""
 from __future__ import annotations
 
 import logging
@@ -22,7 +22,7 @@ REQUEST_TIMEOUT = 20
 
 
 class CloudMailError(RuntimeError):
-    """CloudMail/Cloud Mail 服务请求或邮箱取码失败。"""
+    """CloudMail/Cloud Mail service request or email code retrieval failed."""
 
 
 @dataclass
@@ -43,7 +43,7 @@ def _cache_key(email: str) -> str:
 def _base_url(value: str | None = None) -> str:
     base = str(value if value is not None else getattr(_email_cfg, "CLOUDMAIL_API_BASE", "") or "").strip().rstrip("/")
     if not base:
-        raise CloudMailError("CloudMail API 地址未配置，请填写 CLOUDMAIL_API_BASE（例如 https://你的worker自定义域）。")
+        raise CloudMailError("CloudMail API address is not configured, fill in CLOUDMAIL_API_BASE (for example https://your-worker-custom-domain).")
     if not re.match(r"^https?://", base, re.I):
         base = "https://" + base
     return base
@@ -52,7 +52,7 @@ def _base_url(value: str | None = None) -> str:
 def _token() -> str:
     token = str(getattr(_email_cfg, "CLOUDMAIL_AUTH_TOKEN", "") or "").strip()
     if not token:
-        raise CloudMailError("CloudMail Authorization Token 未配置，请填写 CLOUDMAIL_AUTH_TOKEN。")
+        raise CloudMailError("CloudMail Authorization Token is not configured, fill in CLOUDMAIL_AUTH_TOKEN.")
     return token
 
 
@@ -82,15 +82,15 @@ def _extract_token(payload: dict) -> str:
         token = str(item or "").strip()
         if token:
             return token
-    raise CloudMailError(f"CloudMail 生成 Token 成功但响应中未找到 token: {str(payload)[:200]}")
+    raise CloudMailError(f"CloudMail Token generated successfully but not found in the response token: {str(payload)[:200]}")
 
 
 def gen_token(email: str | None = None, password: str | None = None, path: str | None = None, base_url: str | None = None) -> str:
-    """用 CloudMail 管理员邮箱/密码生成 Authorization Token。"""
+    """Generate an Authorization Token with the CloudMail admin email/password."""
     email = str(email if email is not None else getattr(_email_cfg, "CLOUDMAIL_ADMIN_EMAIL", "") or "").strip()
     password = str(password if password is not None else getattr(_email_cfg, "CLOUDMAIL_PASSWORD", "") or "").strip()
     if not email or not password:
-        raise CloudMailError("CloudMail 管理员邮箱或密码为空")
+        raise CloudMailError("CloudMail admin email or password is empty")
 
     last_error = ""
     for token_path in _token_path_candidates(path):
@@ -110,17 +110,17 @@ def gen_token(email: str | None = None, password: str | None = None, path: str |
         if resp.status_code < 400 and code in (200, "200", None):
             try:
                 token = _extract_token(payload)
-                logger.info("[CloudMail] 生成 token 成功：path=%s", token_path)
+                logger.info("[CloudMail] token generated successfully: path=%s", token_path)
                 return token
             except CloudMailError as exc:
                 last_error = str(exc)
                 continue
         message = payload.get("message") if isinstance(payload, dict) else ""
         last_error = f"{token_path}: HTTP {resp.status_code}; code={code}; {message or str(payload)[:160]}"
-    raise CloudMailError(f"CloudMail 生成 Token 失败: {last_error}")
+    raise CloudMailError(f"CloudMail Token generation failed: {last_error}")
 
 
-# 兼容旧内部调用名。
+# Compatible with the old internal call name.
 def login(username: str | None = None, password: str | None = None, path: str | None = None, base_url: str | None = None) -> str:
     return gen_token(email=username, password=password, path=path, base_url=base_url)
 
@@ -131,7 +131,7 @@ def _domains() -> list[str]:
     if not out:
         out = fetch_domains()
     if not out:
-        raise CloudMailError("CloudMail 邮箱域名列表为空，且未能从平台自动获取。")
+        raise CloudMailError("CloudMail email domain list is empty and could not be fetched automatically from the platform.")
     return out
 
 
@@ -145,17 +145,17 @@ def _request(path: str, body: dict | None = None):
             timeout=REQUEST_TIMEOUT,
         )
     except requests.RequestException as exc:
-        raise CloudMailError(f"CloudMail 请求失败 ({path}): {type(exc).__name__}: {exc}") from exc
+        raise CloudMailError(f"CloudMail Request failed ({path}): {type(exc).__name__}: {exc}") from exc
 
     try:
         payload = resp.json()
     except ValueError as exc:
-        raise CloudMailError(f"CloudMail 响应不是 JSON ({path}): HTTP {resp.status_code}") from exc
+        raise CloudMailError(f"CloudMail response is not JSON ({path}): HTTP {resp.status_code}") from exc
 
     code = payload.get("code") if isinstance(payload, dict) else None
     if resp.status_code >= 400 or code not in (200, "200"):
         message = payload.get("message") if isinstance(payload, dict) else ""
-        raise CloudMailError(f"CloudMail 请求失败 ({path}): HTTP {resp.status_code}; code={code}; {message or str(payload)[:200]}")
+        raise CloudMailError(f"CloudMail Request failed ({path}): HTTP {resp.status_code}; code={code}; {message or str(payload)[:200]}")
     return payload.get("data")
 
 
@@ -170,17 +170,17 @@ def _request_raw(method: str, path: str, *, body: dict | None = None, token: str
         else:
             resp = requests.post(url, json=body or {}, headers=headers, timeout=REQUEST_TIMEOUT)
     except requests.RequestException as exc:
-        raise CloudMailError(f"CloudMail 请求失败 ({path}): {type(exc).__name__}: {exc}") from exc
+        raise CloudMailError(f"CloudMail Request failed ({path}): {type(exc).__name__}: {exc}") from exc
 
     try:
         payload = resp.json()
     except ValueError as exc:
-        raise CloudMailError(f"CloudMail 响应不是 JSON ({path}): HTTP {resp.status_code}") from exc
+        raise CloudMailError(f"CloudMail response is not JSON ({path}): HTTP {resp.status_code}") from exc
 
     code = payload.get("code") if isinstance(payload, dict) else None
     if resp.status_code >= 400 or code not in (200, "200", None):
         message = payload.get("message") if isinstance(payload, dict) else ""
-        raise CloudMailError(f"CloudMail 请求失败 ({path}): HTTP {resp.status_code}; code={code}; {message or str(payload)[:200]}")
+        raise CloudMailError(f"CloudMail Request failed ({path}): HTTP {resp.status_code}; code={code}; {message or str(payload)[:200]}")
     return payload
 
 
@@ -232,18 +232,18 @@ def _login_token() -> str:
     email = str(getattr(_email_cfg, "CLOUDMAIL_ADMIN_EMAIL", "") or "").strip()
     password = str(getattr(_email_cfg, "CLOUDMAIL_PASSWORD", "") or "").strip()
     if not email or not password:
-        raise CloudMailError("CloudMail 管理员邮箱或密码为空，无法登录获取域名列表")
+        raise CloudMailError("CloudMail admin email or password is empty, cannot log in to fetch the domain list")
     payload = _request_raw("POST", "/api/login", body={"email": email, "password": password})
     token = _extract_token(payload)
-    logger.info("[CloudMail] 管理员登录成功，可用于获取隐藏域名列表")
+    logger.info("[CloudMail] admin login succeeded, can be used to fetch the hidden domain list")
     return token
 
 
 def fetch_domains(force: bool = False) -> list[str]:
-    """从 CloudMail 平台获取可用邮箱域名列表。
+    """Fetch the available email domain list from the CloudMail platform.
 
-    优先读取公开网站配置 `/api/setting/websiteConfig`；如果站点开启了登录页隐藏域名，
-    再用管理员账号登录并读取 `/api/setting/query`。
+    Prefer reading the public website config `/api/setting/websiteConfig`; if the site hides domains on the login page,
+    then log in with the admin account and read `/api/setting/query`.
     """
     global _DOMAIN_CACHE
     now = time.monotonic()
@@ -261,20 +261,20 @@ def fetch_domains(force: bool = False) -> list[str]:
             domains = _extract_domains(payload)
             if domains:
                 _DOMAIN_CACHE = (now, domains)
-                logger.info("[CloudMail] 已从平台获取可用域名：%s", ",".join(domains))
+                logger.info("[CloudMail] Fetched available domains from the platform:%s", ",".join(domains))
                 return list(domains)
-            errors.append(f"{path}: 响应中没有 domainList")
+            errors.append(f"{path}: response has no domainList")
         except Exception as exc:
             errors.append(f"{path}: {type(exc).__name__}: {exc}")
 
-    raise CloudMailError("CloudMail 自动获取域名失败：" + "；".join(errors))
+    raise CloudMailError("CloudMail failed to fetch domains automatically:" + ";".join(errors))
 
 
 def _random_local_part(length: int | None = None) -> str:
     length = int(length or getattr(_email_cfg, "CLOUDMAIL_RANDOM_LOCAL_LENGTH", 12) or 12)
     length = max(6, min(32, length))
     alphabet = string.ascii_lowercase + string.digits
-    # 首字符用字母，减少邮箱服务商对纯数字/特殊前缀的兼容问题。
+    # Start with a letter to reduce compatibility issues with email providers for purely numeric/special prefixes.
     return random.choice(string.ascii_lowercase) + "".join(secrets.choice(alphabet) for _ in range(length - 1))
 
 
@@ -293,9 +293,9 @@ def pick_account() -> CloudMailAccount:
     domain = email.rsplit("@", 1)[1]
     if bool(getattr(_email_cfg, "CLOUDMAIL_AUTO_ADD_USER", True)):
         _add_user(email)
-        logger.info("[CloudMail] 已添加随机邮箱用户: %s", email)
+        logger.info("[CloudMail] Added random email user: %s", email)
     else:
-        logger.info("[CloudMail] 已生成随机邮箱: %s（未调用 addUser）", email)
+        logger.info("[CloudMail] Generated random email: %s (addUser not called)", email)
     account = CloudMailAccount(email=email, domain=domain)
     _CONTEXT_CACHE[_cache_key(email)] = account
     return account
@@ -311,7 +311,7 @@ def get_account_context(email: str) -> CloudMailAccount | None:
 
 def release_account(email: str, status: str = "available", note: str | None = None) -> None:
     _CONTEXT_CACHE.pop(_cache_key(email), None)
-    logger.info("[CloudMail] 已释放邮箱上下文: %s（status=%s, note=%s）", email, status, note or "")
+    logger.info("[CloudMail] Released email context: %s (status=%s, note=%s)", email, status, note or "")
 
 
 def _parse_time(raw) -> float | None:
@@ -324,7 +324,7 @@ def _parse_time(raw) -> float | None:
     text = str(raw).strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
         try:
-            # 文档标注 createTime 为 UTC。
+            # The docs state createTime is UTC.
             return datetime.strptime(text.replace("Z", ""), fmt).replace(tzinfo=timezone.utc).timestamp()
         except ValueError:
             continue
@@ -353,7 +353,7 @@ def fetch_latest_otp(
 ) -> str:
     target = str(email or "").strip()
     if not target:
-        raise CloudMailError("CloudMail 取码缺少邮箱地址")
+        raise CloudMailError("CloudMail code retrieval is missing the email address")
 
     wait_seconds = int(max_wait if max_wait is not None else _email_cfg.OTP_MAX_WAIT)
     interval = max(1, int(poll_interval if poll_interval is not None else _email_cfg.OTP_POLL_INTERVAL))
@@ -362,9 +362,9 @@ def fetch_latest_otp(
     best_otp: str | None = None
     best_timestamp = float("-inf")
     settle_until: float | None = None
-    last_error = "收件箱为空或尚未出现新的 OpenAI 验证码"
+    last_error = "Inbox is empty or no new OpenAI verification code has appeared yet"
 
-    logger.info("[CloudMail] 开始轮询邮箱 %s，最长 %ss", target, wait_seconds)
+    logger.info("[CloudMail] Start polling email %s, for at most %ss", target, wait_seconds)
     while time.monotonic() <= deadline:
         try:
             mails = _request(
@@ -379,7 +379,7 @@ def fetch_latest_otp(
                 },
             )
             if not isinstance(mails, list):
-                raise CloudMailError("CloudMail 邮件查询响应 data 不是数组")
+                raise CloudMailError("CloudMail email query response data is not an array")
             for mail in sorted(mails, key=lambda item: _parse_time((item or {}).get("createTime")) or float("-inf"), reverse=True):
                 if not isinstance(mail, dict):
                     continue
@@ -397,7 +397,7 @@ def fetch_latest_otp(
                     best_otp = otp
                     best_timestamp = candidate_time
                     settle_until = time.monotonic() + settle
-                    logger.info("[CloudMail] 锁定 OTP 候选，等待 %ss 确认", settle)
+                    logger.info("[CloudMail] Locked OTP candidate, waiting %ss for confirmation", settle)
 
             now = time.monotonic()
             if best_otp and settle_until is not None and now >= settle_until:
@@ -414,4 +414,4 @@ def fetch_latest_otp(
 
     if best_otp:
         return best_otp
-    raise CloudMailError(f"等待 CloudMail 验证码超时: {target}; {last_error}")
+    raise CloudMailError(f"Timed out waiting for CloudMail verification code: {target}; {last_error}")

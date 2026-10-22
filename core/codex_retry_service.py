@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Codex 授权补跑服务，供账号页和注册任务队列共同使用。"""
+"""Codex authorization rerun service, shared by the accounts page and the registration task queue."""
 import ctypes
 import logging
 import threading
@@ -19,7 +19,7 @@ _RESERVED_AT: dict[str, float] = {}
 
 
 class CodexRetryStopped(Exception):
-    """用户手动停止 Codex 补跑。"""
+    """User manually stopped the Codex rerun."""
 
 
 def _thread_alive(thread_id: int | None) -> bool:
@@ -44,7 +44,7 @@ def log_path(email: str) -> Path:
 
 
 def reserve(email: str) -> bool:
-    """进程内防止同一账号被重复补跑。"""
+    """Prevent the same account from being rerun repeatedly within the process."""
     key = (email or "").strip().lower()
     if not key:
         return False
@@ -59,13 +59,13 @@ def reserve(email: str) -> bool:
                 status = str((acc or {}).get("codex_status") or "").lower()
             except Exception:
                 status = ""
-            # 修复“实际已停止/线程已结束，但进程内占位未释放”导致无法再次补跑。
-            # 用户点停止后，部分浏览器/短信等待步骤可能不会立刻退出，UI 已是 stopped 但进程占位仍在。
-            # 这种场景允许清理占位后重新补跑；旧线程仍保留 stop_requested，会在检查点退出。
+            # Fix the inability to rerun again when the task is actually stopped / the thread has ended but the in-process placeholder was not released.
+            # After the user clicks stop, some browser/SMS waiting steps may not exit immediately; the UI is already stopped but the process placeholder remains.
+            # In this case the placeholder may be cleaned up and the rerun restarted; the old thread still keeps stop_requested and will exit at a checkpoint.
             terminal_status = status in {"stopped", "failed", "success", "deactivated", "skipped", "cancelled"}
             if ((not alive) and (status != "retrying" or age > 15 * 60)) or (terminal_status and (stop_req or age > 30)):
                 logger.warning(
-                    "[Codex 补跑] 清理脏占位：email=%s status=%s thread_id=%s alive=%s stop_requested=%s age=%.1fs",
+                    "[Codex rerun] Cleaning stale placeholder: email=%s status=%s thread_id=%s alive=%s stop_requested=%s age=%.1fs",
                     email, status or "-", thread_id or "-", alive, stop_req, age,
                 )
                 _clear_state_locked(key)
@@ -96,11 +96,11 @@ def is_stop_requested(email: str) -> bool:
 
 def check_stop_requested(email: str) -> None:
     if is_stop_requested(email):
-        raise CodexRetryStopped("用户手动停止 Codex 补跑")
+        raise CodexRetryStopped("User manually stopped the Codex rerun")
 
 
 def _async_raise(thread_id: int, exc_type: type[BaseException]) -> bool:
-    """向指定 Python 线程注入异常，用于尽快中断阻塞中的补跑流程。"""
+    """Inject an exception into the given Python thread to interrupt a blocked rerun flow as soon as possible."""
     if not thread_id:
         return False
     res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
@@ -116,27 +116,27 @@ def _async_raise(thread_id: int, exc_type: type[BaseException]) -> bool:
 
 
 def request_stop(email: str) -> dict:
-    """请求停止单个 Codex 补跑。运行中会注入停止异常；排队中会在启动前退出。"""
+    """Request to stop a single Codex rerun. A running one gets a stop exception injected; a queued one exits before starting."""
     key = (email or "").strip().lower()
     if not key:
-        return {"ok": False, "error": "email 为空", "status": 400}
+        return {"ok": False, "error": "email is empty", "status": 400}
     with _RETRYING_LOCK:
         retrying = key in _RETRYING
         thread_id = _RUNNING_THREADS.get(key)
         _STOP_REQUESTED.add(key)
     if not retrying:
-        db.update_account_codex_status(email, "stopped", "用户手动停止（未发现运行中的补跑）")
-        return {"ok": True, "message": "未发现运行中的补跑，已标记为已停止", "state": "stopped", "running": False}
+        db.update_account_codex_status(email, "stopped", "User manually stopped (no running rerun found)")
+        return {"ok": True, "message": "No running rerun found, marked as stopped", "state": "stopped", "running": False}
 
     injected = bool(thread_id and _async_raise(int(thread_id), CodexRetryStopped))
-    db.update_account_codex_status(email, "stopped", "用户手动停止 Codex 补跑")
-    # 如果没有可注入的存活线程，立即释放进程内占位，避免 UI 显示已停止但再次补跑仍 409。
+    db.update_account_codex_status(email, "stopped", "User manually stopped the Codex rerun")
+    # If there is no live thread to inject into, release the in-process placeholder immediately, to avoid the UI showing stopped while a new rerun still returns 409.
     with _RETRYING_LOCK:
         if not _thread_alive(thread_id):
             _clear_state_locked(key)
     if injected:
-        # 异常注入通常会很快让线程进入 finally/release；若浏览器/CDP/短信等待阻塞导致线程
-        # 短时间内仍未退出，延迟清理占位，避免 UI 已显示“已停止”但再次补跑仍 409。
+        # Exception injection usually makes the thread enter finally/release quickly; if browser/CDP/SMS waiting blocks the thread
+        # from exiting within a short time, clean up the placeholder with a delay, to avoid the UI showing stopped while a new rerun still returns 409.
         def _delayed_release() -> None:
             time.sleep(5)
             with _RETRYING_LOCK:
@@ -147,7 +147,7 @@ def request_stop(email: str) -> dict:
                     except Exception:
                         status = ""
                     if status == "stopped":
-                        logger.warning("[Codex 补跑] 停止后延迟释放占位：email=%s thread_id=%s", email, thread_id or "-")
+                        logger.warning("[Codex rerun] Delayed placeholder release after stop: email=%s thread_id=%s", email, thread_id or "-")
                         _clear_state_locked(key)
 
         threading.Thread(target=_delayed_release, name=f"codex-stop-release-{key}", daemon=True).start()
@@ -156,10 +156,10 @@ def request_stop(email: str) -> dict:
         p.parent.mkdir(parents=True, exist_ok=True)
         from datetime import datetime as _dt
         with p.open("a", encoding="utf-8") as f:
-            f.write(f"{_dt.now().strftime('%H:%M:%S')} [WARNING] [Codex 补跑] 用户手动停止，已发送停止信号 injected={injected}\n")
+            f.write(f"{_dt.now().strftime('%H:%M:%S')} [WARNING] [Codex rerun] User manually stopped, stop signal sent injected={injected}\n")
     except Exception:
-        logger.exception("写入 Codex 停止日志失败")
-    return {"ok": True, "message": "已发送停止信号", "state": "stopped", "running": True, "injected": injected}
+        logger.exception("Failed to write the Codex stop log")
+    return {"ok": True, "message": "Stop signal sent", "state": "stopped", "running": True, "injected": injected}
 
 
 def run_worker(
@@ -169,10 +169,10 @@ def run_worker(
     clear_log: bool = True,
     target_log_path: str | Path | None = None,
 ) -> dict:
-    """执行一次 Codex 补跑。调用前必须先 reserve，结束时会自动 release。"""
+    """Run a Codex rerun once. reserve must be called first, and release happens automatically at the end."""
     fh: logging.FileHandler | None = None
     root_logger = logging.getLogger()
-    result: dict = {"status": "failed", "ok": False, "message": "Codex 补跑未返回结果"}
+    result: dict = {"status": "failed", "ok": False, "message": "Codex rerun returned no result"}
     key = (email or "").strip().lower()
     try:
         with _RETRYING_LOCK:
@@ -203,55 +203,55 @@ def run_worker(
             from config import codex as codex_cfg
             from config import roxybrowser as roxy_cfg
             logger.info(
-                "[Codex 补跑] 已热加载配置：CODEX_OAUTH_DRIVER=%s ROXY_OPEN_HEADLESS=%s ROXY_KEEP_BROWSER_OPEN=%s",
+                "[Codex rerun] Config hot-reloaded:CODEX_OAUTH_DRIVER=%s ROXY_OPEN_HEADLESS=%s ROXY_KEEP_BROWSER_OPEN=%s",
                 getattr(codex_cfg, "CODEX_OAUTH_DRIVER", ""),
                 getattr(roxy_cfg, "ROXY_OPEN_HEADLESS", ""),
                 getattr(roxy_cfg, "ROXY_KEEP_BROWSER_OPEN", ""),
             )
         except Exception as exc:
-            logger.warning("[Codex 补跑] 配置热加载失败，将继续使用当前内存配置：%s: %s", type(exc).__name__, exc)
+            logger.warning("[Codex rerun] Config hot reload failed, continuing with the current in-memory config:%s: %s", type(exc).__name__, exc)
 
         if batch_label:
-            logger.info("[Codex 补跑] 批量任务：%s", batch_label)
-        logger.info("[Codex 补跑] 开始：%s", email)
-        logger.info("[Codex 补跑] 阶段说明：获取授权地址 → 登录邮箱 → 邮箱 OTP → 手机验证 → 捕获 callback → 提交/保存凭证")
+            logger.info("[Codex rerun] Batch task:%s", batch_label)
+        logger.info("[Codex rerun] Started:%s", email)
+        logger.info("[Codex rerun] Stages: get authorization URL → log in to email → email OTP → phone verification → capture callback → submit/save credentials")
         check_stop_requested(email)
         result = run_codex_oauth(email, force=True)
         check_stop_requested(email)
         logger.info(
-            "[Codex 补跑] 结果：status=%s ok=%s file=%s callback=%s",
+            "[Codex rerun] Result:status=%s ok=%s file=%s callback=%s",
             result.get("status"), result.get("ok"), result.get("file_path"), result.get("callback_url"),
         )
         result_status = result.get("status", "failed")
         if result.get("ok"):
             db.update_account_codex_status(email, "success", None)
-            logger.info("[Codex 补跑] %s 成功", email)
+            logger.info("[Codex rerun] %s succeeded", email)
         elif result_status == "deactivated":
             db.update_account_codex_status(email, "deactivated", result.get("message"))
-            logger.warning("[Codex 补跑] %s 账号已废: %s", email, result.get("message"))
+            logger.warning("[Codex rerun] %s account deactivated: %s", email, result.get("message"))
         else:
             db.update_account_codex_status(email, result_status, result.get("message"))
-            logger.warning("[Codex 补跑] %s 失败: %s", email, result.get("message"))
+            logger.warning("[Codex rerun] %s failed: %s", email, result.get("message"))
         return result
     except CodexRetryStopped as exc:
-        result = {"status": "stopped", "ok": False, "message": str(exc) or "用户手动停止 Codex 补跑"}
+        result = {"status": "stopped", "ok": False, "message": str(exc) or "User manually stopped the Codex rerun"}
         db.update_account_codex_status(email, "stopped", result["message"])
-        logger.warning("[Codex 补跑] %s 已停止: %s", email, result["message"])
+        logger.warning("[Codex rerun] %s stopped: %s", email, result["message"])
         return result
     except Exception as exc:
         if is_stop_requested(email):
-            result = {"status": "stopped", "ok": False, "message": "用户手动停止 Codex 补跑"}
+            result = {"status": "stopped", "ok": False, "message": "User manually stopped the Codex rerun"}
             db.update_account_codex_status(email, "stopped", result["message"])
-            logger.warning("[Codex 补跑] %s 已停止", email)
+            logger.warning("[Codex rerun] %s stopped", email)
             return result
         result = {"status": "failed", "ok": False, "message": f"{type(exc).__name__}: {exc}"}
         db.update_account_codex_status(email, "failed", result["message"])
-        logger.exception("[Codex 补跑] %s 异常", email)
-        logger.error("[Codex 补跑] 已结束：异常失败")
+        logger.exception("[Codex rerun] %s error", email)
+        logger.error("[Codex rerun] Finished: failed with an error")
         return result
     finally:
         try:
-            logger.info("[Codex 补跑] 结束：%s", email)
+            logger.info("[Codex rerun] Finished:%s", email)
             if fh is not None:
                 root_logger.removeHandler(fh)
                 fh.close()

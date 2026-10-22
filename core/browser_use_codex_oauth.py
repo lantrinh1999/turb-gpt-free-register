@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""通过 Browser Use Cloud + Playwright 执行 Codex OAuth 授权。"""
+"""Run the Codex OAuth authorization through Browser Use Cloud + Playwright."""
 from __future__ import annotations
 
 import logging
@@ -59,7 +59,7 @@ def _log_timing_enabled() -> bool:
 
 
 def _bu_delay(kind: str, seconds: float | None = None) -> None:
-    """Browser Use 专用轻量延迟。fast mode 下只保留极短 DOM 稳定等待。"""
+    """Browser Use Dedicated lightweight delay. In fast mode only a very short DOM settle wait is kept."""
     if _fast_mode():
         if seconds is None:
             seconds = {
@@ -80,12 +80,12 @@ class _StepTimer:
         self.label = label
         self.t0 = time.perf_counter()
         if _log_timing_enabled():
-            logger.info("[Codex][BrowserUse][耗时] %s 开始", label)
+            logger.info("[Codex][BrowserUse][timing] %s started", label)
 
     def done(self, extra: str = "") -> None:
         if _log_timing_enabled():
             cost = time.perf_counter() - self.t0
-            logger.info("[Codex][BrowserUse][耗时] %s 完成 %.2fs%s", self.label, cost, (" " + extra) if extra else "")
+            logger.info("[Codex][BrowserUse][timing] %s finished %.2fs%s %.2fs%s", self.label, cost, (" " + extra) if extra else "")
 
 
 
@@ -124,10 +124,10 @@ def _extract_callback_url_from_page(page) -> str:
         ) or []
         for url in urls:
             if _is_callback_url(str(url)):
-                logger.info("[Codex][BrowserUse] 已从页面性能记录提取 callback URL：%s", str(url)[:160])
+                logger.info("[Codex][BrowserUse] Extracted the callback URL from the page performance records:%s", str(url)[:160])
                 return str(url)
     except Exception as exc:
-        logger.debug("[Codex][BrowserUse] 提取 callback URL 失败：%s", exc)
+        logger.debug("[Codex][BrowserUse] Failed to extract the callback URL:%s", exc)
     return ""
 
 
@@ -156,7 +156,7 @@ def _wait_for_callback(context, page, timeout: int | None = None) -> str:
         try:
             current = str(page.url or "")
             if current != last_url:
-                logger.debug("[Codex][BrowserUse] 当前 URL: %s", current)
+                logger.debug("[Codex][BrowserUse] current URL: %s", current)
                 last_url = current
             callback = _extract_callback_url_from_context(context, page)
             if callback:
@@ -164,11 +164,11 @@ def _wait_for_callback(context, page, timeout: int | None = None) -> str:
         except Exception:
             pass
         time.sleep(0.25 if _fast_mode() else 0.5)
-    raise RuntimeError(f"等待 Codex callback 超时，最后 URL={last_url}")
+    raise RuntimeError(f"Timed out waiting for the Codex callback, last URL={last_url}")
 
 
 def _wait_for_fresh_email_otp(otp_provider, email: str, after_ts: float, used_codes: set[str] | None = None, timeout: int = 90) -> str:
-    """获取一个未提交过的邮箱 OTP，避免重发后复用旧码。"""
+    """Get an email OTP that has not been submitted yet, to avoid reusing an old code after a resend."""
     used_codes = {str(x) for x in (used_codes or set()) if x}
     end = time.time() + timeout
     last_code = ""
@@ -180,8 +180,8 @@ def _wait_for_fresh_email_otp(otp_provider, email: str, after_ts: float, used_co
                 return code
         time.sleep(1 if _fast_mode() else 2)
     if last_code:
-        raise RuntimeError(f"等待邮箱 OTP 超时，最后只拿到已使用验证码：{last_code}")
-    raise RuntimeError("等待邮箱 OTP 超时")
+        raise RuntimeError(f"Timed out waiting for the email OTP, only already used codes were received at last:{last_code}")
+    raise RuntimeError("Timed out waiting for the email OTP")
 
 
 
@@ -196,13 +196,13 @@ def _all_frames(page):
 
 
 def _wait_auth_page_ready(page, timeout: int = 8) -> None:
-    """等待 auth.openai.com 登录页真正渲染；Browser Use/CDP 有时 domcontentloaded 后 body 仍为空。"""
+    """Wait until the auth.openai.com login page has really rendered; with Browser Use/CDP the body is sometimes still empty after domcontentloaded."""
     end = time.time() + timeout
     last_url = ""
     while time.time() < end:
         try:
             last_url = _page_url(page)
-            # 任意 frame 出现 input/button/body 文本即认为可操作
+            # Consider the page operable as soon as input/button/body text appears in any frame
             for frame in _all_frames(page):
                 try:
                     if frame.locator("input, button, textarea, [role='button']").count() > 0:
@@ -218,7 +218,7 @@ def _wait_auth_page_ready(page, timeout: int = 8) -> None:
         except Exception:
             pass
         time.sleep(0.25 if _fast_mode() else 0.6)
-    logger.warning("[Codex][BrowserUse] 登录页等待渲染超时，最后 URL=%s", last_url or "-")
+    logger.warning("[Codex][BrowserUse] Timed out waiting for the login page to render, last URL=%s", last_url or "-")
 
 
 def _visible_locator_any_frame(page, selectors: list[str], timeout_ms: int = 1000):
@@ -290,7 +290,7 @@ def _fill_first_any_frame(page, selectors: list[str], value: str, timeout_ms: in
 
 
 def _js_fill_email_fallback(page, email: str) -> bool:
-    """最后兜底：在所有 frame 里扫描可见 input，填第一个疑似邮箱/用户名输入框。"""
+    """Last resort: scan all frames for visible inputs and fill the first one that looks like an email/username box."""
     script = r"""
     (email) => {
       const isVisible = (el) => {
@@ -426,7 +426,7 @@ def _fill_email_fast(page, email: str) -> bool:
     return False
 
 def _click_email_entry_if_present(page) -> None:
-    # OAuth 登录页在不同地区会先显示“Continue with email/メールで続行”等入口。
+    # OAuth Depending on the region, the login page first shows an entry such as "Continue with email" (also in Japanese and Chinese).
     if _click_email_entry_fast(page):
         time.sleep(0.3)
         return
@@ -491,11 +491,11 @@ def _submit_visible_form_or_enter(page) -> bool:
         return False
 
 def _fill_email_for_codex(page, email: str) -> None:
-    # 页面已渲染时优先快速处理，避免 Browser Use/CDP 的长 timeout 叠加导致卡几十秒。
-    # 先不等 selector，直接 JS 扫描可见 input；页面已渲染时最快。
+    # When the page has already rendered, handle it quickly first, so the long timeouts of Browser Use/CDP do not pile up and stall for tens of seconds.
+    # Do not wait for the selector first, scan visible inputs directly with JS; fastest when the page has rendered.
     if not _fill_email_fast(page, email):
         _click_email_entry_if_present(page)
-        # 点击邮箱入口后立即再尝试一次。
+        # Try once more right after clicking the email entry.
         _fill_email_fast(page, email)
     selectors = [
         "input[type='email']",
@@ -523,7 +523,7 @@ def _fill_email_for_codex(page, email: str) -> None:
     if not ok:
         ok = _js_fill_email_fallback(page, email)
     if not ok:
-        # 最后再给 React/hydration 一小段时间，不再等很久。
+        # Finally give React/hydration a short while, no longer waiting for long.
         end = time.time() + 4
         while time.time() < end and not ok:
             ok = _fill_email_fast(page, email) or _fill_first_any_frame(page, selectors, email, timeout_ms=800)
@@ -531,7 +531,7 @@ def _fill_email_for_codex(page, email: str) -> None:
                 break
             time.sleep(0.25)
     if not ok:
-        raise RuntimeError("找不到邮箱输入框；" + _current_state_for_log(page))
+        raise RuntimeError("Cannot find the email input;" + _current_state_for_log(page))
 
     clicked = _click_first_any_frame(
         page,
@@ -570,7 +570,7 @@ def _looks_email_otp_page(page) -> bool:
 
 
 def _install_account_dead_response_tracker(page) -> dict:
-    """监听浏览器里的 email-otp/validate 响应，用于识别账号已废。"""
+    """Listen to the email-otp/validate responses in the browser, used to recognize dead accounts."""
     tracker = {"code": "", "text": ""}
     try:
         def _on_response(resp):
@@ -587,7 +587,7 @@ def _install_account_dead_response_tracker(page) -> dict:
                 if code:
                     tracker["code"] = code
                     tracker["text"] = text[:500]
-                    logger.warning("[Codex][BrowserUse] email-otp/validate 响应识别账号已废：%s", code)
+                    logger.warning("[Codex][BrowserUse] email-otp/validate Account recognized as dead from the response:%s", code)
             except Exception:
                 pass
         page.on("response", _on_response)
@@ -621,8 +621,8 @@ def _wait_after_email_submit(page, timeout: int = 45, dead_tracker: dict | None 
 
 def _maybe_click_passwordless_after_email(page, email: str, timeout: int = 18) -> None:
     """
-    Codex OAuth 提交邮箱后也可能跳到 /log-in/password 或 /create-account/password。
-    优先点击“使用一次性验证码/one-time code”入口，进入邮箱验证码页。
+    Codex OAuth After submitting the email it may also jump to /log-in/password or /create-account/password.
+    Prefer clicking the "use a one-time code" entry to reach the email verification code page.
     """
     end = time.time() + timeout
     last_url = ""
@@ -631,26 +631,26 @@ def _maybe_click_passwordless_after_email(page, email: str, timeout: int = 18) -
         try:
             if _looks_email_otp_page(page):
                 if clicked:
-                    logger.info("[Codex][BrowserUse] 一次性验证码入口已进入邮箱验证码页")
+                    logger.info("[Codex][BrowserUse] Entered the email verification code page through the one-time code entry")
                 return
             if _looks_next_step_after_login(page):
                 return
             url = _page_url(page)
             if url != last_url:
-                logger.info("[Codex][BrowserUse] 提交邮箱后检测密码/OTP 跳转：url=%s", url or "-")
+                logger.info("[Codex][BrowserUse] Detected the password/OTP jump after submitting the email:url=%s", url or "-")
                 last_url = url
             lower = str(url or "").lower()
             if "/password" in lower or "auth.openai.com" in lower:
                 if _click_passwordless_signup_if_present(page):
                     clicked = True
-                    logger.info("[Codex][BrowserUse] 已点击一次性验证码入口：email=%s", email)
+                    logger.info("[Codex][BrowserUse] Clicked the one-time code entry:email=%s", email)
                     _bu_delay("form")
                     continue
         except Exception as exc:
-            logger.debug("[Codex][BrowserUse] 密码页一次性验证码入口探测失败：%s", str(exc)[:140])
+            logger.debug("[Codex][BrowserUse] Probing the one-time code entry on the password page failed:%s", str(exc)[:140])
         time.sleep(0.4)
     if clicked:
-        logger.info("[Codex][BrowserUse] 已点击一次性验证码入口，未立即检测到 OTP 页，继续后续 OTP 轮询")
+        logger.info("[Codex][BrowserUse] Clicked the one-time code entry, the OTP page was not detected immediately, continuing with the OTP polling")
 
 
 def _account_password_for_email(email: str) -> str:
@@ -716,7 +716,7 @@ def _fill_mfa_challenge_if_present(page, email: str, timeout: int = 15) -> bool:
                     page.keyboard.press("Enter")
                 except Exception:
                     pass
-            logger.info("[Codex][BrowserUse] 已填写并提交 MFA 验证码：%s", email)
+            logger.info("[Codex][BrowserUse] Filled in and submitted the MFA verification code:%s", email)
             wait_end = time.time() + 12
             while time.time() < wait_end:
                 if not _looks_mfa_challenge_page(page):
@@ -724,13 +724,13 @@ def _fill_mfa_challenge_if_present(page, email: str, timeout: int = 15) -> bool:
                 time.sleep(0.4)
             return True
         except Exception as exc:
-            logger.debug("[Codex][BrowserUse] MFA challenge 处理失败：%s", str(exc)[:160])
+            logger.debug("[Codex][BrowserUse] MFA challenge handling failed:%s", str(exc)[:160])
             time.sleep(0.5)
     return False
 
 
 def _fill_login_password_if_present(page, email: str, timeout: int = 18) -> str | None:
-    """Codex OAuth 若账号有密码，优先在登录密码页输入密码。返回 next_step / email_otp / None。"""
+    """Codex OAuth If the account has a password, enter it on the login password page first. Returns next_step / email_otp / None."""
     password = _account_password_for_email(email)
     if not password:
         return None
@@ -760,7 +760,7 @@ def _fill_login_password_if_present(page, email: str, timeout: int = 18) -> str 
             timeout_ms=8000,
         )
         if not ok:
-            logger.info("[Codex][BrowserUse] 登录密码页未找到输入框，继续等待")
+            logger.info("[Codex][BrowserUse] No input box found on the login password page, continuing to wait")
             time.sleep(0.5)
             continue
         time.sleep(1.6)
@@ -781,7 +781,7 @@ def _fill_login_password_if_present(page, email: str, timeout: int = 18) -> str 
                 page.keyboard.press("Enter")
             except Exception:
                 pass
-        logger.info("[Codex][BrowserUse] 已填写并提交登录密码：%s", email)
+        logger.info("[Codex][BrowserUse] Filled in and submitted the login password:%s", email)
         wait_end = time.time() + 12
         while time.time() < wait_end:
             if _looks_mfa_challenge_page(page):
@@ -802,9 +802,9 @@ def _fill_login_password_if_present(page, email: str, timeout: int = 18) -> str 
 
 def _fill_email_and_otp(page, email: str, otp_provider, auth_url: str, dead_tracker: dict | None = None) -> None:
     otp_after_ts = time.time()
-    logger.info("[Codex][BrowserUse] 打开授权地址")
-    logger.info("[Codex][BrowserUse] 完整授权地址: %s", auth_url)
-    _t_goto = _StepTimer("打开授权页")
+    logger.info("[Codex][BrowserUse] Opening the authorization URL")
+    logger.info("[Codex][BrowserUse] Full authorization URL: %s", auth_url)
+    _t_goto = _StepTimer("Open authorization page")
     page.goto(auth_url, wait_until="domcontentloaded", timeout=_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
     try:
         page.wait_for_load_state("load", timeout=5000)
@@ -816,59 +816,59 @@ def _fill_email_and_otp(page, email: str, otp_provider, auth_url: str, dead_trac
     _maybe_accept_cookies(page)
 
     try:
-        _t_email = _StepTimer("填写并提交邮箱")
+        _t_email = _StepTimer("Fill in and submit the email")
         _fill_email_for_codex(page, email)
         _t_email.done()
-        logger.info("[Codex][BrowserUse] 已提交邮箱：%s", email)
+        logger.info("[Codex][BrowserUse] Submitted the email:%s", email)
         pw_result = _fill_login_password_if_present(page, email, timeout=18)
         if pw_result == "next_step":
             if _looks_mfa_challenge_page(page):
                 _fill_mfa_challenge_if_present(page, email, timeout=15)
-            logger.info("[Codex][BrowserUse] 账号已用密码完成登录，直接进入后续步骤")
+            logger.info("[Codex][BrowserUse] The account has logged in with its password, going straight to the following steps")
             return
         if pw_result != "email_otp":
             if _looks_mfa_challenge_page(page):
                 _fill_mfa_challenge_if_present(page, email, timeout=15)
-                logger.info("[Codex][BrowserUse] 密码后进入 MFA 验证，已完成 2FA")
+                logger.info("[Codex][BrowserUse] Entered the MFA verification after the password, completed 2FA")
                 return
             _maybe_click_passwordless_after_email(page, email, timeout=18)
     except Exception as exc:
         if _looks_next_step_after_login(page):
-            logger.info("[Codex][BrowserUse] 未检测到邮箱输入框，但页面已进入后续授权步骤：%s", _current_state_for_log(page))
+            logger.info("[Codex][BrowserUse] No email input box detected, but the page has entered the following authorization steps:%s", _current_state_for_log(page))
             return
-        logger.error("[Codex][BrowserUse] 未检测到邮箱输入框，当前页面状态：%s", _current_state_for_log(page))
-        raise RuntimeError(f"Codex BrowserUse 授权页未出现邮箱输入框：{str(exc)[:220]}") from exc
+        logger.error("[Codex][BrowserUse] No email input box detected, current page state:%s", _current_state_for_log(page))
+        raise RuntimeError(f"Codex BrowserUse The email input box did not appear on the authorization page:{str(exc)[:220]}") from exc
 
     used_codes: set[str] = set()
 
     def _restart_email_otp_flow(reason: str) -> None:
-        """Codex Auth 上直接点 resend 可能触发服务端 500；改为重开授权地址并重新提交邮箱。"""
+        """Codex Auth Clicking resend directly on the page may trigger a server 500; instead reopen the authorization URL and submit the email again."""
         nonlocal otp_after_ts
-        logger.info("[Codex][BrowserUse] 重新触发邮箱 OTP：%s", reason)
+        logger.info("[Codex][BrowserUse] Re-triggering the email OTP:%s", reason)
         otp_after_ts = time.time()
         try:
             page.goto(auth_url, wait_until="domcontentloaded", timeout=_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
             _bu_delay("navigate")
             _maybe_accept_cookies(page)
             if _looks_email_otp_page(page) or _looks_next_step_after_login(page):
-                logger.info("[Codex][BrowserUse] 重开授权后已在 OTP/下一步页面：%s", _current_state_for_log(page))
+                logger.info("[Codex][BrowserUse] After reopening the authorization we are already on the OTP/next-step page:%s", _current_state_for_log(page))
                 return
             _fill_email_for_codex(page, email)
-            logger.info("[Codex][BrowserUse] 已重新提交邮箱触发 OTP")
+            logger.info("[Codex][BrowserUse] Resubmitted the email to trigger the OTP")
             pw_result = _fill_login_password_if_present(page, email, timeout=12)
             if pw_result == "next_step":
                 if _looks_mfa_challenge_page(page):
                     _fill_mfa_challenge_if_present(page, email, timeout=15)
-                logger.info("[Codex][BrowserUse] 重新提交邮箱后已用密码完成登录，进入后续步骤")
+                logger.info("[Codex][BrowserUse] After resubmitting the email the account logged in with its password, going to the following steps")
                 return
             if pw_result != "email_otp":
                 if _looks_mfa_challenge_page(page):
                     _fill_mfa_challenge_if_present(page, email, timeout=15)
-                    logger.info("[Codex][BrowserUse] 重新提交邮箱后进入 MFA 验证，已完成 2FA")
+                    logger.info("[Codex][BrowserUse] After resubmitting the email it entered the MFA verification, completed 2FA")
                     return
                 _maybe_click_passwordless_after_email(page, email, timeout=12)
         except Exception as exc:
-            logger.warning("[Codex][BrowserUse] 重新提交邮箱失败，继续按当前页面轮询：%s", str(exc)[:180])
+            logger.warning("[Codex][BrowserUse] Resubmitting the email failed, continuing to poll on the current page:%s", str(exc)[:180])
         _bu_delay("api")
 
     for attempt in range(1, 4):
@@ -877,8 +877,8 @@ def _fill_email_and_otp(page, email: str, otp_provider, auth_url: str, dead_trac
             if any(x in _page_url(page).lower() for x in ("phone", "workspace", "consent", "localhost:1455")):
                 return
             time.sleep(0.4)
-        logger.info("[Codex][BrowserUse] 等待邮箱 OTP：%s（%s/3）", email, attempt)
-        _t_otp_wait = _StepTimer("等待邮箱 OTP")
+        logger.info("[Codex][BrowserUse] Waiting for the email OTP: %s (%s/3)", email, attempt)
+        _t_otp_wait = _StepTimer("Waiting for the email OTP")
         try:
             code = _wait_for_fresh_email_otp(otp_provider, email, after_ts=otp_after_ts, used_codes=used_codes, timeout=90)
             _t_otp_wait.done()
@@ -887,16 +887,16 @@ def _fill_email_and_otp(page, email: str, otp_provider, auth_url: str, dead_trac
             if attempt >= 3:
                 raise
             logger.warning(
-                "[Codex][BrowserUse] 一直未收到邮箱 OTP，点击“重新发送电子邮件”后继续等待（下一轮 %s/3）：%s: %s",
+                "[Codex][BrowserUse] No email OTP has been received for a long time, clicking 'resend email' and continuing to wait (next round %s/3):%s: %s",
                 attempt + 1,
                 type(exc).__name__,
                 str(exc)[:180],
             )
-            _restart_email_otp_flow("等待验证码超时，避免点击 resend 导致 500")
+            _restart_email_otp_flow("Timed out waiting for the verification code, avoiding clicking resend which causes 500")
             continue
         used_codes.add(str(code))
-        logger.info("[Codex][BrowserUse] 邮箱 OTP 收到：%s", code)
-        _t_otp_submit = _StepTimer("提交邮箱 OTP")
+        logger.info("[Codex][BrowserUse] Email OTP received:%s", code)
+        _t_otp_submit = _StepTimer("Submitting the email OTP")
         _clear_otp_inputs(page)
         _type_otp(page, code)
         _bu_delay("otp_input")
@@ -917,18 +917,18 @@ def _fill_email_and_otp(page, email: str, otp_provider, auth_url: str, dead_trac
         )
         outcome = _wait_after_email_submit(page, timeout=30 if _fast_mode() else 45, dead_tracker=dead_tracker)
         _t_otp_submit.done(f"state={outcome}")
-        logger.info("[Codex][BrowserUse] 邮箱 OTP 提交后状态：%s", outcome)
+        logger.info("[Codex][BrowserUse] State after submitting the email OTP:%s", outcome)
         if _looks_mfa_challenge_page(page):
             _fill_mfa_challenge_if_present(page, email, timeout=15)
             return
         if str(outcome).startswith("deactivated:"):
             error_code = str(outcome).split(":", 1)[1] or "account_deactivated"
-            raise AccountUnusableError(f"账号已废（{error_code}）", error_code=error_code)
+            raise AccountUnusableError(f"Account is dead ({error_code})", error_code=error_code)
         if outcome in ("accepted", "callback", "unknown"):
             return
         if attempt >= 3:
-            raise RuntimeError("Codex 邮箱验证码连续错误/过期")
-        _restart_email_otp_flow("验证码错误/过期或页面未跳转，避免点击 resend 导致 500")
+            raise RuntimeError("Codex Email verification code wrong/expired repeatedly")
+        _restart_email_otp_flow("Verification code wrong/expired or the page did not move on, avoiding clicking resend which causes 500")
 
 
 def _select_sms_channel(page) -> None:
@@ -1053,7 +1053,7 @@ def _has_visible_phone_code_input(page) -> bool:
     if loc is None:
         return False
     body = _body_snippet(page, 800).lower()
-    # 避免误把邮箱 OTP 页残留输入框当成短信页。
+    # Avoid mistaking a leftover input box on the email OTP page for the SMS page.
     if any(x in body for x in ("phone", "sms", "text message", "手机", "短信", "電話", "携帯")):
         return True
     url = _page_url(page).lower()
@@ -1061,7 +1061,7 @@ def _has_visible_phone_code_input(page) -> bool:
 
 
 def _wait_after_phone_send(page, timeout: int = 18) -> str:
-    """提交手机号后的状态：code_page / rejected / still_form / callback / unknown。"""
+    """State after submitting the phone number: code_page / rejected / still_form / callback / unknown."""
     end = time.time() + timeout
     last_state = ""
     while time.time() < end:
@@ -1070,7 +1070,7 @@ def _wait_after_phone_send(page, timeout: int = 18) -> str:
             return "callback"
         err = _phone_error_text(page)
         if err:
-            logger.warning("[Codex][BrowserUse] 手机号提交后页面错误提示：%s", err[:240])
+            logger.warning("[Codex][BrowserUse] Page error message after submitting the phone number:%s", err[:240])
             return "rejected"
         if _has_visible_phone_code_input(page):
             return "code_page"
@@ -1078,8 +1078,8 @@ def _wait_after_phone_send(page, timeout: int = 18) -> str:
         state = f"url={url} phone_value={phone_value!r} body={_body_snippet(page, 220)!r}"
         last_state = state
         time.sleep(0.7)
-    logger.warning("[Codex][BrowserUse] 提交手机号后未确认进入短信页，最后状态：%s", last_state)
-    # 仍然停留在可见手机号输入框，基本就是没发出去/按钮没点中/页面拒绝但未识别。
+    logger.warning("[Codex][BrowserUse] After submitting the phone number, entering the SMS page was not confirmed, last state:%s", last_state)
+    # Still stuck on the visible phone number input box: basically it was not sent / the button was not hit / the page rejected it but this was not recognized.
     if _read_phone_input_value(page):
         return "still_form"
     return "unknown"
@@ -1107,7 +1107,7 @@ def _wait_phone_form_ready(page, timeout: int = 12) -> bool:
 
 
 def _dismiss_phone_country_dropdown(page) -> None:
-    # OpenAI 的国家码 combobox 有时会保持展开，挡住/吃掉 Continue 点击。
+    # OpenAI The country-code combobox sometimes stays expanded and blocks / swallows the Continue click.
     try:
         page.keyboard.press("Escape")
         time.sleep(0.15)
@@ -1127,7 +1127,7 @@ def _dismiss_phone_country_dropdown(page) -> None:
 
 def _click_phone_continue(page) -> bool:
     _dismiss_phone_country_dropdown(page)
-    # 先用 JS 点可见的主按钮，避免 Playwright locator 被 country listbox/portal 干扰。
+    # Click the visible primary button with JS first, so the Playwright locator is not disturbed by the country listbox/portal.
     script = r"""
     () => {
       const isVisible = (el) => {
@@ -1202,10 +1202,10 @@ def _clear_phone_inputs(page) -> None:
 def _fill_phone(page, phone: str) -> str:
     phone_e164 = _phone_e164(phone)
     if not phone_e164:
-        raise RuntimeError(f"手机号为空/格式无效：{phone!r}")
-    logger.info("[Codex][BrowserUse] 准备填写手机号 E.164：%s", phone_e164)
+        raise RuntimeError(f"Phone number is empty / has an invalid format:{phone!r}")
+    logger.info("[Codex][BrowserUse] About to fill in the phone number E.164:%s", phone_e164)
     if not _wait_phone_form_ready(page, timeout=8):
-        raise RuntimeError("找不到手机号输入框；" + _current_state_for_log(page))
+        raise RuntimeError("Cannot find the phone number input box;" + _current_state_for_log(page))
     selectors = [
         "input[type='tel']",
         "input[name*='phone' i]",
@@ -1221,20 +1221,20 @@ def _fill_phone(page, phone: str) -> str:
     if not ok:
         ok = _force_set_phone_value(page, phone_e164)
     if not ok:
-        raise RuntimeError("找不到手机号输入框；" + _current_state_for_log(page))
+        raise RuntimeError("Cannot find the phone number input box;" + _current_state_for_log(page))
 
     actual = _read_phone_input_value(page)
     if _phone_digits(actual) != _phone_digits(phone_e164):
         logger.warning(
-            "[Codex][BrowserUse] 手机号输入校验不一致，尝试强制重填：expected=%s actual=%r",
+            "[Codex][BrowserUse] Phone number input check mismatch, trying to force a refill:expected=%s actual=%r",
             phone_e164,
             actual,
         )
         _force_set_phone_value(page, phone_e164)
         actual = _read_phone_input_value(page)
     if _phone_digits(actual) != _phone_digits(phone_e164):
-        raise RuntimeError(f"手机号未正确写入页面：expected={phone_e164}, actual={actual!r}")
-    logger.info("[Codex][BrowserUse] 页面手机号输入值：%r", actual)
+        raise RuntimeError(f"The phone number was not written to the page correctly:expected={phone_e164}, actual={actual!r}")
+    logger.info("[Codex][BrowserUse] Phone number value in the page input:%r", actual)
 
     _select_sms_channel(page)
     if not _click_phone_continue(page):
@@ -1305,13 +1305,13 @@ def _try_click_change_phone(page) -> bool:
 
 
 def _ensure_add_phone_form(page, *, reason: str = "") -> bool:
-    """确保当前回到 add-phone 手机号输入页；换号前调用，避免先取号后才发现页面空白。"""
+    """Make sure we are back on the add-phone phone number input page; call before switching numbers, so we do not find a blank page only after taking a number."""
     if _wait_phone_form_ready(page, timeout=2):
         return True
 
-    logger.info("[Codex][BrowserUse] 准备回到手机号输入页：reason=%s url=%s", reason or "retry", _page_url(page) or "-")
+    logger.info("[Codex][BrowserUse] About to go back to the phone number input page:reason=%s url=%s", reason or "retry", _page_url(page) or "-")
 
-    # 如果在短信验证码页，优先点击 change/back 或浏览器后退，保留 auth transaction state。
+    # If on the SMS verification code page, prefer clicking change/back or the browser back button, keeping the auth transaction state.
     try:
         if _try_click_change_phone(page):
             if _wait_phone_form_ready(page, timeout=8):
@@ -1326,7 +1326,7 @@ def _ensure_add_phone_form(page, *, reason: str = "") -> bool:
     except Exception:
         pass
 
-    # 直接打开 add-phone。有时 body 会短暂为空，所以 reload + wait。
+    # Open add-phone directly. The body is sometimes briefly empty, so reload + wait.
     for i in range(2):
         try:
             page.goto("https://auth.openai.com/add-phone", wait_until="domcontentloaded", timeout=_timeout_ms(getattr(_cfg, "BROWSER_USE_NAVIGATION_TIMEOUT", 90)))
@@ -1343,13 +1343,13 @@ def _ensure_add_phone_form(page, *, reason: str = "") -> bool:
             if _wait_phone_form_ready(page, timeout=8):
                 return True
         except Exception as exc:
-            logger.info("[Codex][BrowserUse] 打开 add-phone 尝试 %s 失败：%s", i + 1, str(exc)[:160])
+            logger.info("[Codex][BrowserUse] Opening add-phone attempt %s failed:%s", i + 1, str(exc)[:160])
 
-    logger.warning("[Codex][BrowserUse] 无法回到手机号输入页：%s", _current_state_for_log(page))
+    logger.warning("[Codex][BrowserUse] Cannot go back to the phone number input page:%s", _current_state_for_log(page))
     return False
 
 def _do_phone_verification_if_present(page) -> None:
-    # 给页面一点时间从邮箱 OTP 后跳到手机号页；没有就跳过。
+    # Give the page a little time to jump from the email OTP to the phone number page; skip if it does not.
     end = time.time() + 20
     while time.time() < end:
         if _is_callback_url(_page_url(page)):
@@ -1360,7 +1360,7 @@ def _do_phone_verification_if_present(page) -> None:
             return
         time.sleep(0.5)
     if not _has_phone_prompt(page):
-        logger.info("[Codex][BrowserUse] 未检测到手机号验证页，跳过")
+        logger.info("[Codex][BrowserUse] Phone number verification page not detected, skipping")
         return
 
     http = sms_provider._http()
@@ -1369,28 +1369,28 @@ def _do_phone_verification_if_present(page) -> None:
     for attempt in range(1, max_retries + 1):
         activation_id = None
         try:
-            _t_phone_ready = _StepTimer(f"手机页准备 attempt={attempt}")
+            _t_phone_ready = _StepTimer(f"phone page ready attempt={attempt}")
             if not _ensure_add_phone_form(page, reason=f"attempt-{attempt}"):
-                raise RuntimeError("无法回到手机号输入页，暂不取新号")
+                raise RuntimeError("Cannot go back to the phone number input page, not taking a new number for now")
             _t_phone_ready.done()
-            logger.info("[Codex][BrowserUse] 需要手机验证，开始取号（%s/%s）", attempt, max_retries)
+            logger.info("[Codex][BrowserUse] Phone verification required, starting to take a number (%s/%s)", attempt, max_retries)
             activation_id, phone = sms_provider.acquire_number(http)
-            logger.info("[Codex][BrowserUse] 已取号：%s activation=%s", phone, activation_id)
-            _t_phone_send = _StepTimer(f"填写并提交手机号 attempt={attempt}")
+            logger.info("[Codex][BrowserUse] Number taken:%s activation=%s", phone, activation_id)
+            _t_phone_send = _StepTimer(f"Fill in and submit the phone number attempt={attempt}")
             phone_e164 = _fill_phone(page, phone)
             _bu_delay("form")
             send_state = _wait_after_phone_send(page, timeout=12 if _fast_mode() else 18)
             _t_phone_send.done(f"state={send_state}")
-            logger.info("[Codex][BrowserUse] 手机号提交后状态：%s phone=%s", send_state, phone_e164)
+            logger.info("[Codex][BrowserUse] State after submitting the phone number:%s phone=%s", send_state, phone_e164)
             if send_state == "callback":
                 return
             if send_state != "code_page":
-                raise RuntimeError(f"提交手机号后未确认发送短信/进入验证码页：state={send_state}, page={_current_state_for_log(page)}")
+                raise RuntimeError(f"After submitting the phone number, sending the SMS / entering the verification code page was not confirmed:state={send_state}, page={_current_state_for_log(page)}")
             sms_provider.set_status(activation_id, 1, http=http)
-            _t_sms = _StepTimer(f"等待手机短信 attempt={attempt}")
+            _t_sms = _StepTimer(f"Waiting for the phone SMS attempt={attempt}")
             sms_code = sms_provider.wait_for_sms_code(activation_id, http)
             _t_sms.done()
-            logger.info("[Codex][BrowserUse] 手机 OTP 收到：%s", sms_code)
+            logger.info("[Codex][BrowserUse] Phone OTP received:%s", sms_code)
             _clear_otp_inputs(page)
             _type_otp(page, sms_code)
             _bu_delay("otp_input")
@@ -1400,14 +1400,14 @@ def _do_phone_verification_if_present(page) -> None:
                 timeout_ms=8000,
             )
             outcome = _wait_after_phone_otp(page, timeout=30)
-            logger.info("[Codex][BrowserUse] 手机 OTP 提交后状态：%s", outcome)
+            logger.info("[Codex][BrowserUse] State after submitting the phone OTP:%s", outcome)
             if outcome in ("accepted", "callback", "unknown"):
                 sms_provider.complete(activation_id, http)
                 return
-            raise RuntimeError(f"手机验证码未通过：{outcome}")
+            raise RuntimeError(f"Phone verification code did not pass:{outcome}")
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {str(exc)[:220]}"
-            logger.warning("[Codex][BrowserUse] 手机验证失败（%s/%s）：%s", attempt, max_retries, last_error)
+            logger.warning("[Codex][BrowserUse] Phone verification failed (%s/%s):%s", attempt, max_retries, last_error)
             if activation_id:
                 try:
                     sms_provider.cancel(activation_id, http)
@@ -1422,7 +1422,7 @@ def _do_phone_verification_if_present(page) -> None:
             except Exception:
                 pass
             time.sleep(min(1 + attempt, 4))
-    raise RuntimeError(f"手机验证失败，已重试 {max_retries} 次：{last_error}")
+    raise RuntimeError(f"Phone verification failed, retried {max_retries} times:{last_error}")
 
 
 def _finish_consent_workspace(context, page) -> str:
@@ -1458,14 +1458,14 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
     if not force and not proto._cfg.ENABLE_CODEX_AUTO:
         return proto._codex_result(status="skipped", message="ENABLE_CODEX_AUTO=False")
     if not email:
-        return proto._codex_result(status="skipped", message="email 为空")
+        return proto._codex_result(status="skipped", message="email is empty")
     if otp_provider is None:
         from core.email_provider import wait_for_otp as otp_provider
 
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:
-        return proto._codex_result(status="failed", email=email, message="缺少 playwright，请执行 pip install playwright")
+        return proto._codex_result(status="failed", email=email, message="playwright is missing, please run pip install playwright")
 
     provider = str(cloud_provider or "browser_use").strip().lower()
     if provider in ("skyvern", "sv"):
@@ -1477,7 +1477,7 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
         client = BrowserUseClient()
 
     _set_log_provider_label(provider_label)
-    _t_all = _StepTimer(f"Codex {provider_label} 全流程")
+    _t_all = _StepTimer(f"Codex {provider_label} full flow")
     session_info = client.open_session()
     browser = None
     context = None
@@ -1499,10 +1499,10 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
             state = proto._generate_state()
             auth_url = proto._build_authorize_url(state, code_challenge, prompt="login")
         else:
-            raise RuntimeError(f"[Codex][BrowserUse] 不支持的 CODEX_AUTH_URL_SOURCE={auth_source!r}")
+            raise RuntimeError(f"[Codex][BrowserUse] unsupported CODEX_AUTH_URL_SOURCE={auth_source!r}")
 
         logger.info(
-            "[Codex][%s] 开始授权：%s proxyCountry=%s profileId=%s local_proxy_arg=%s",
+            "[Codex][%s] Starting authorization:%s proxyCountry=%s profileId=%s local_proxy_arg=%s",
             provider_label,
             email,
             session_info.proxy_country_code or "-",
@@ -1510,7 +1510,7 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
             "yes" if proxy else "no",
         )
         with sync_playwright() as p:
-            _t_cdp = _StepTimer("连接 Browser Use CDP")
+            _t_cdp = _StepTimer("Connecting to Browser Use CDP")
             connect_kwargs = {}
             if provider in ("skyvern", "sv") and hasattr(client, "cdp_headers"):
                 connect_kwargs["headers"] = client.cdp_headers()
@@ -1524,12 +1524,12 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
 
             _fill_email_and_otp(page, email, otp_provider, auth_url, dead_tracker=dead_tracker)
             _do_phone_verification_if_present(page)
-            logger.info("[Codex][BrowserUse] 手机验证处理完成/无需处理，等待授权确认和 callback")
-            _t_callback = _StepTimer("等待 consent/workspace/callback")
+            logger.info("[Codex][BrowserUse] Phone verification handled / not needed, waiting for the authorization confirmation and callback")
+            _t_callback = _StepTimer("Waiting for consent/workspace/callback")
             callback_url = _finish_consent_workspace(context, page)
             _t_callback.done()
             code = proto._extract_code(callback_url, state)
-            logger.info("[Codex][BrowserUse] 已捕获 callback code：%s...", code[:24])
+            logger.info("[Codex][BrowserUse] Captured the callback code:%s...", code[:24])
 
             if auth_source == "cpa":
                 submit_payload = proto._submit_cpa_callback(callback_url)
@@ -1581,15 +1581,15 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
             _t_all.done("success")
             return proto._codex_result(status="success", ok=True, email=email, file_path=str(path), callback_url=callback_url)
     except AccountUnusableError as exc:
-        logger.warning("[Codex][BrowserUse] 账号已废：%s，%s", email, exc.error_code)
+        logger.warning("[Codex][BrowserUse] Account is dead: %s,%s", email, exc.error_code)
         return proto._codex_result(
             status="deactivated",
             email=email,
-            message=f"账号已废（{exc.error_code or 'account_deactivated'}）",
+            message=f"Account is dead ({exc.error_code or 'account_deactivated'})",
         )
     except Exception as exc:
-        logger.error("[Codex][BrowserUse] 授权失败：%s: %s", type(exc).__name__, exc)
-        logger.debug("[Codex][BrowserUse] 失败详情", exc_info=True)
+        logger.error("[Codex][BrowserUse] Authorization failed:%s: %s", type(exc).__name__, exc)
+        logger.debug("[Codex][BrowserUse] failure details", exc_info=True)
         return proto._codex_result(status="failed", email=email, message=f"{type(exc).__name__}: {str(exc)[:300]}")
     finally:
         keep_open = bool(getattr(_cfg, "BROWSER_USE_KEEP_BROWSER_OPEN", False))
@@ -1614,7 +1614,7 @@ def _run_browser_use_codex_oauth_once(email: str, otp_provider=None, proxy: str 
 
 
 def _has_running_asyncio_loop() -> bool:
-    """当前线程如果已有 asyncio/Playwright 事件循环，不能再启动 sync_playwright。"""
+    """If the current thread already has an asyncio/Playwright event loop, sync_playwright cannot be started again."""
     try:
         import asyncio
         loop = asyncio.get_event_loop()
@@ -1624,14 +1624,14 @@ def _has_running_asyncio_loop() -> bool:
 
 
 def _run_in_isolated_thread(fn, *args, **kwargs):
-    """在独立线程执行同步 Playwright 流程。
+    """Run the synchronous Playwright flow in a separate thread.
 
-    BrowserUse 注册流程本身已经处于 `with sync_playwright()` 内，注册成功后如果
-    立刻自动跑 Codex BrowserUse，会在同一线程里再次进入 sync_playwright，从而触发：
+    BrowserUse The registration flow itself is already inside `with sync_playwright()`; if Codex BrowserUse is run automatically
+    right after a successful registration, sync_playwright would be entered again in the same thread, which triggers:
       It looks like you are using Playwright Sync API inside the asyncio loop.
 
-    这里复用父线程名启动子线程，保证 registration_service 的按 threadName 日志过滤
-    仍能把 Codex 日志写入同一个任务日志文件。
+    The parent thread name is reused here to start the child thread, so the threadName-based log filter of registration_service
+    can still write the Codex logs into the same task log file.
     """
     result_box = {}
     error_box = {}
@@ -1640,7 +1640,7 @@ def _run_in_isolated_thread(fn, *args, **kwargs):
     def _target():
         try:
             result_box["value"] = fn(*args, **kwargs)
-        except BaseException as exc:  # noqa: BLE001 - 需要跨线程回传
+        except BaseException as exc:  # noqa: BLE001 - needs to be passed back across threads
             error_box["error"] = exc
 
     t = threading.Thread(target=_target, name=parent_thread_name, daemon=False)
@@ -1652,7 +1652,7 @@ def _run_in_isolated_thread(fn, *args, **kwargs):
 
 
 def _run_browser_use_codex_oauth_impl(email: str, otp_provider=None, proxy: str | None = None, force: bool = False, cloud_provider: str = "browser_use") -> dict:
-    """Browser Use Codex OAuth 入口；CPA callback 409 timeout 时重新开启一轮授权。"""
+    """Browser Use Codex OAuth entry point; when the CPA callback hits a 409 timeout, start a new round of authorization."""
     from core import codex_oauth as proto
 
     max_rounds = 2
@@ -1660,7 +1660,7 @@ def _run_browser_use_codex_oauth_impl(email: str, otp_provider=None, proxy: str 
     for round_no in range(1, max_rounds + 1):
         if round_no > 1:
             logger.warning(
-                "[Codex][BrowserUse] CPA callback 返回 Timeout waiting for OAuth callback，重新开启第 %s/%s 轮 Codex 授权：%s",
+                "[Codex][BrowserUse] CPA callback returned Timeout waiting for OAuth callback, starting Codex authorization round %s/%s again:%s",
                 round_no,
                 max_rounds,
                 email,
@@ -1674,19 +1674,19 @@ def _run_browser_use_codex_oauth_impl(email: str, otp_provider=None, proxy: str 
             return result
     if last_result:
         last_result = dict(last_result)
-        last_result["message"] = f"CPA callback 超时，已重新授权 {max_rounds} 轮仍失败：{last_result.get('message') or ''}"
+        last_result["message"] = f"CPA callback timed out, re-authorized for {max_rounds} rounds and still failed:{last_result.get('message') or ''}"
         return last_result
-    return proto._codex_result(status="failed", email=email, message="CPA callback 超时，重新授权失败")
+    return proto._codex_result(status="failed", email=email, message="CPA callback timed out, re-authorization failed")
 
 
 def run_browser_use_codex_oauth(email: str, otp_provider=None, proxy: str | None = None, force: bool = False, cloud_provider: str = "browser_use") -> dict:
-    """Browser Use Codex OAuth 入口。
+    """Browser Use Codex OAuth entry point.
 
-    如果当前线程已经有 Playwright/asyncio loop（典型场景：BrowserUse 注册成功后
-    自动触发 Codex），则切到独立线程执行，避免 sync_playwright 嵌套报错。
+    If the current thread already has a Playwright/asyncio loop (typical case: automatically triggering Codex after
+    a successful BrowserUse registration), switch to a separate thread to avoid the nested sync_playwright error.
     """
     if _has_running_asyncio_loop():
-        logger.info("[Codex][BrowserUse] 检测到当前线程已有 Playwright/asyncio loop，切换到隔离线程执行 Codex")
+        logger.info("[Codex][BrowserUse] Detected that the current thread already has a Playwright/asyncio loop, switching to an isolated thread Codex")
         return _run_in_isolated_thread(
             _run_browser_use_codex_oauth_impl,
             email=email,

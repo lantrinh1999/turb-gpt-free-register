@@ -26,13 +26,13 @@ class ProxyChainError(ConnectionError):
 
 
 class SocksConnectError(ProxyChainError):
-    """SOCKS5 代理已返回的 CONNECT 错误，不代表账号密码错误。"""
+    """SOCKS5 A CONNECT error already returned by the proxy does not mean the account or password is wrong."""
 
     def __init__(self, code: int):
         self.code = code
-        reasons = {1: "代理服务器一般性失败", 2: "代理规则拒绝", 3: "网络不可达", 4: "目标主机不可达",
-                   5: "目标端口拒绝连接", 6: "连接 TTL 超时", 7: "不支持 CONNECT 命令", 8: "不支持目标地址类型"}
-        super().__init__(f"动态代理 CONNECT 失败（SOCKS5 code {code}：{reasons.get(code, '未知错误')}）")
+        reasons = {1: "Proxy server general failure", 2: "Proxy rule rejected", 3: "Network unreachable", 4: "Target host unreachable",
+                   5: "Target port refused the connection", 6: "Connection TTL timeout", 7: "CONNECT command not supported", 8: "Target address type not supported"}
+        super().__init__(f"Dynamic proxy CONNECT failed (SOCKS5 code {code}:{reasons.get(code, 'Unknown error')})")
 
     @property
     def retryable(self) -> bool:
@@ -44,7 +44,7 @@ def _read_exact(sock: socket.socket, size: int) -> bytes:
     while len(chunks) < size:
         chunk = sock.recv(size - len(chunks))
         if not chunk:
-            raise ConnectionError("SOCKS5 客户端提前断开")
+            raise ConnectionError("SOCKS5 client disconnected early")
         chunks.extend(chunk)
     return bytes(chunks)
 
@@ -58,7 +58,7 @@ def _read_socks_address(sock: socket.socket, atyp: int) -> tuple[str, int]:
     elif atyp == 4:
         host = socket.inet_ntop(socket.AF_INET6, _read_exact(sock, 16))
     else:
-        raise ValueError("SOCKS5 地址类型无效")
+        raise ValueError("SOCKS5 invalid address type")
     port = int.from_bytes(_read_exact(sock, 2), "big")
     return host, port
 
@@ -70,11 +70,11 @@ class ProxyChainRelay:
         self.target = parse_proxy_url(target)
         self.upstream = parse_proxy_url(upstream) if upstream else None
         if self.target.scheme not in {"http", "socks5", "socks5h"}:
-            raise ValueError("代理链目标代理必须是 http://、socks5:// 或 socks5h://")
+            raise ValueError("The proxy chain target proxy must be http://, socks5:// or socks5h://")
         if self.upstream and self.upstream.scheme == "https":
-            raise ValueError("代理链暂不支持 https:// 作为上游代理，请填写 http:// 或 socks5://")
+            raise ValueError("The proxy chain does not support https:// as an upstream proxy yet, use http:// or socks5://")
         if self.upstream and socks is None:
-            raise RuntimeError("代理链需要 PySocks，请先安装 requirements.txt 中的依赖")
+            raise RuntimeError("The proxy chain requires PySocks, install the dependencies from requirements.txt first")
         self.timeout = max(1.0, float(timeout or 15.0))
         self._listener: socket.socket | None = None
         self._stop = threading.Event()
@@ -96,11 +96,11 @@ class ProxyChainRelay:
     @property
     def proxy_url(self) -> str:
         if self._listener is None:
-            raise RuntimeError("代理链尚未启动")
+            raise RuntimeError("Proxy chain has not started yet")
         return f"http://127.0.0.1:{self._listener.getsockname()[1]}"
 
     def traffic_snapshot(self) -> dict[str, Any]:
-        """返回整个代理链隧道的实际传输字节数。"""
+        """Return the actual number of bytes transferred through the whole proxy chain tunnel."""
         with self._traffic_lock:
             upload = int(self._upload_bytes)
             download = int(self._download_bytes)
@@ -122,13 +122,13 @@ class ProxyChainRelay:
     def _destination_key(host: str, port: int) -> tuple[str, int]:
         host = str(host).strip().lower().rstrip(".")
         if not host or len(host) > 253 or any(char.isspace() or char in "/\\@?#" or ord(char) < 32 for char in host):
-            raise ValueError("代理请求目标主机无效")
+            raise ValueError("Invalid proxy request target host")
         if not 1 <= int(port) <= 65535:
-            raise ValueError("代理请求目标端口无效")
+            raise ValueError("Invalid proxy request target port")
         return host, int(port)
 
     def _destination_stats(self, destination: tuple[str, int] | None) -> dict[str, Any]:
-        """调用方持有 _traffic_lock；直接调用 _relay 的测试/工具也可归入 unknown。"""
+        """The caller holds _traffic_lock; tests/tools that call _relay directly can also be attributed to unknown."""
         host, port = destination or ("<unknown>", 0)
         return self._traffic_by_destination.setdefault((host, port), {
             "host": host, "port": port, "connection_count": 0, "failed_connection_count": 0,
@@ -233,7 +233,7 @@ class ProxyChainRelay:
         except ValueError:
             encoded = host.encode("idna")
             if len(encoded) > 255:
-                raise ValueError("SOCKS5 目标域名过长")
+                raise ValueError("SOCKS5 target domain name too long")
             return b"\x03" + bytes([len(encoded)]) + encoded + int(port).to_bytes(2, "big")
         if address.version == 4:
             return b"\x01" + address.packed + int(port).to_bytes(2, "big")
@@ -243,7 +243,7 @@ class ProxyChainRelay:
     def _read_socks_reply(sock: socket.socket) -> int:
         header = _read_exact(sock, 4)
         if header[0] != 5:
-            raise ValueError("动态代理返回了非 SOCKS5 响应")
+            raise ValueError("Dynamic proxy returned a non-SOCKS5 response")
         _read_socks_address(sock, header[3])
         return header[1]
 
@@ -261,19 +261,19 @@ class ProxyChainRelay:
                 pass
             if response.startswith(b"HTTP/"):
                 first_line = response.splitlines()[0].decode("latin1", errors="replace")
-                raise ProxyChainError(f"动态代理经本地上游返回 {first_line}，不是 SOCKS5 响应")
-            raise ProxyChainError("动态代理经本地上游返回了非 SOCKS5 响应")
+                raise ProxyChainError(f"Dynamic proxy returned {first_line} via the local upstream, not a SOCKS5 response")
+            raise ProxyChainError("Dynamic proxy returned a non-SOCKS5 response via the local upstream")
         if selected[1] == 0xFF:
-            raise ProxyChainError("动态代理不接受当前认证方式")
+            raise ProxyChainError("Dynamic proxy does not accept the current authentication method")
         if selected[1] == 2:
             username = self.target.username.encode("utf-8")
             password = self.target.password.encode("utf-8")
             remote.sendall(b"\x01" + bytes([len(username)]) + username + bytes([len(password)]) + password)
             auth = _read_exact(remote, 2)
             if auth[0] != 1 or auth[1] != 0:
-                raise PermissionError("动态代理账号密码认证失败")
+                raise PermissionError("Dynamic proxy username/password authentication failed")
         elif selected[1] != 0:
-            raise ConnectionError("动态代理选择了不支持的认证方式")
+            raise ConnectionError("Dynamic proxy chose an unsupported authentication method")
 
         remote.sendall(b"\x05\x01\x00" + self._pack_socks_address(host, port))
         reply_code = self._read_socks_reply(remote)
@@ -281,12 +281,12 @@ class ProxyChainRelay:
             raise SocksConnectError(reply_code)
 
     def _open_target_tunnel(self, host: str, port: int, method: str, destination: tuple[str, int]) -> socket.socket:
-        """仅在转发浏览器数据前重试握手；绝不重放 HTTP 请求或 TLS 数据。"""
+        """Retry the handshake only before forwarding browser data; never replay HTTP requests or TLS data."""
         for attempt in range(1, 4):
             remote = None
             try:
                 if self._stop.is_set():
-                    raise ConnectionAbortedError("代理中继正在关闭")
+                    raise ConnectionAbortedError("Proxy relay is shutting down")
                 remote = self._connect_target_through_upstream(self.target.host, self.target.port)
                 self._track(remote, True)
                 if self.target.scheme in {"socks5", "socks5h"}:
@@ -296,7 +296,7 @@ class ProxyChainRelay:
                 if attempt > 1:
                     with self._traffic_lock:
                         self._destination_stats(destination)["recovered_connection_count"] += 1
-                    logger.info("代理重连已恢复 destination=%s:%s attempts=%s", *destination, attempt)
+                    logger.info("Proxy reconnect recovered destination=%s:%s attempts=%s", *destination, attempt)
                 return remote
             except Exception as exc:
                 if remote is not None:
@@ -310,14 +310,14 @@ class ProxyChainRelay:
                 with self._traffic_lock:
                     self._destination_stats(destination)["connect_retry_count"] += 1
                 delay = 0.25 * attempt
-                logger.info("代理临时建连失败 destination=%s:%s code=%s，%.2fs 后重试（%s/3）",
+                logger.info("Proxy temporary connection failure destination=%s:%s code=%s, retrying in %.2fs (%s/3)",
                             *destination, exc.code, delay, attempt + 1)
                 if self._stop.wait(delay):
                     raise
         raise AssertionError("unreachable")
 
     def _target_http_connect(self, remote: socket.socket, host: str, port: int) -> None:
-        """经上游连接到 HTTP 目标代理，并在目标代理上建立 CONNECT 隧道。"""
+        """Connect to the HTTP target proxy via the upstream and establish a CONNECT tunnel on the target proxy."""
         destination = f"[{host}]:{port}" if ":" in host and not host.startswith("[") else f"{host}:{port}"
         headers = [
             f"CONNECT {destination} HTTP/1.1",
@@ -333,20 +333,20 @@ class ProxyChainRelay:
         while b"\r\n\r\n" not in response:
             chunk = remote.recv(4096)
             if not chunk:
-                raise ConnectionError("HTTP 目标代理提前断开")
+                raise ConnectionError("HTTP target proxy disconnected early")
             response.extend(chunk)
             if len(response) > 64 * 1024:
-                raise ValueError("HTTP 目标代理响应头过大")
+                raise ValueError("HTTP target proxy response headers too large")
         first_line = bytes(response).split(b"\r\n", 1)[0].decode("latin1", errors="replace")
         parts = first_line.split(" ", 2)
         if len(parts) < 2 or not parts[0].startswith("HTTP/"):
-            raise ProxyChainError("目标代理返回了无效的 HTTP 响应")
+            raise ProxyChainError("Target proxy returned an invalid HTTP response")
         try:
             status = int(parts[1])
         except ValueError as exc:
-            raise ProxyChainError("目标代理返回了无效的 HTTP 状态码") from exc
+            raise ProxyChainError("Target proxy returned an invalid HTTP status code") from exc
         if status != 200:
-            raise ProxyChainError(f"目标代理 CONNECT 失败（HTTP {status}）")
+            raise ProxyChainError(f"Target proxy CONNECT failed (HTTP {status})")
 
     @staticmethod
     def _read_http_request(client: socket.socket) -> tuple[str, str, bytes]:
@@ -354,14 +354,14 @@ class ProxyChainRelay:
         while b"\r\n\r\n" not in request:
             chunk = client.recv(4096)
             if not chunk:
-                raise ConnectionError("HTTP 代理客户端提前断开")
+                raise ConnectionError("HTTP proxy client disconnected early")
             request.extend(chunk)
             if len(request) > 64 * 1024:
-                raise ValueError("HTTP 代理请求头过大")
+                raise ValueError("HTTP proxy request headers too large")
         first_line = bytes(request).split(b"\r\n", 1)[0].decode("latin1", errors="replace")
         parts = first_line.split(" ", 2)
         if len(parts) != 3:
-            raise ValueError("HTTP 代理请求行无效")
+            raise ValueError("HTTP invalid proxy request line")
         return parts[0].upper(), parts[1], bytes(request)
 
     @staticmethod
@@ -373,7 +373,7 @@ class ProxyChainRelay:
             host, port_text = destination.rsplit(":", 1)
         port = int(port_text)
         if not 1 <= port <= 65535:
-            raise ValueError("HTTP 代理目标端口无效")
+            raise ValueError("HTTP invalid proxy target port")
         return host, port
 
     @staticmethod
@@ -395,7 +395,7 @@ class ProxyChainRelay:
             else:
                 parsed = urlsplit(destination)
                 if parsed.scheme != "http" or not parsed.hostname:
-                    raise ValueError("HTTP 代理请求必须使用 http:// 绝对 URL")
+                    raise ValueError("HTTP proxy requests must use an absolute http:// URL")
                 host, port = parsed.hostname, parsed.port or 80
             destination_key = self._destination_key(host, port)
             with self._traffic_lock:
@@ -407,7 +407,7 @@ class ProxyChainRelay:
                     stats["blocked_connection_count"] += 1
                     first_block = stats["blocked_connection_count"] == 1
                 if first_block:
-                    logger.info("[代理省流量] 已在连接上游前拦截 target=%s:%s（后续重试仅累计次数）", *destination_key)
+                    logger.info("[Proxy traffic saving] Intercepted before connecting upstream target=%s:%s (later retries only count attempts)", *destination_key)
                 try:
                     client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                 except OSError:
@@ -418,7 +418,7 @@ class ProxyChainRelay:
             if method == "CONNECT":
                 client.sendall(b"HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n")
                 connect_response_sent = True
-                # CONNECT 头不走目标隧道；保留同一 recv 中提前到达的 TLS 数据。
+                # CONNECT headers do not go through the target tunnel; TLS data that arrived early in the same recv is preserved.
                 initial = initial.split(b"\r\n\r\n", 1)[1]
             else:
                 header, body = initial.split(b"\r\n\r\n", 1)
@@ -428,8 +428,8 @@ class ProxyChainRelay:
                 if self.target.scheme in {"socks5", "socks5h"}:
                     lines[0] = method.encode("ascii") + b" " + path.encode("ascii") + b" " + version
                 lines = [line for line in lines if not line.lower().startswith((b"proxy-authorization:", b"proxy-connection:"))]
-                # 普通 HTTP 禁止跨目标复用同一代理连接，保证域名归因准确。
-                # Upgrade 流量仍保留 Connection/Upgrade，以便透传升级连接。
+                # Plain HTTP must not reuse the same proxy connection across targets, to keep domain attribution accurate.
+                # Upgrade traffic still keeps Connection/Upgrade so that upgraded connections pass through transparently.
                 if not any(line.lower().startswith(b"upgrade:") for line in lines):
                     lines = [line for line in lines if not line.lower().startswith(b"connection:")]
                     lines.append(b"Connection: close")
@@ -444,7 +444,7 @@ class ProxyChainRelay:
             self._relay(client, remote, destination=destination_key)
         except Exception as exc:
             if self._stop.is_set():
-                logger.debug("代理中继关闭时连接终止 destination=%s", destination_key)
+                logger.debug("Connection terminated when the proxy relay closed destination=%s", destination_key)
                 return
             detail = str(exc or "").strip()
             self._last_error = f"{type(exc).__name__}: {detail[:240]}" if detail else type(exc).__name__
@@ -452,7 +452,7 @@ class ProxyChainRelay:
                 with self._traffic_lock:
                     self._destination_stats(destination_key)["failed_connection_count"] += 1
             logger.warning(
-                "代理链连接失败 target=%s upstream=%s destination=%s error=%s",
+                "Proxy chain connection failed target=%s upstream=%s destination=%s error=%s",
                 mask_proxy_url(self.target.raw),
                 mask_proxy_url(self.upstream.raw) if self.upstream else "direct",
                 "%s:%s" % destination_key if destination_key else "unknown",
@@ -484,8 +484,8 @@ class ProxyChainRelay:
                 try:
                     data = source.recv(64 * 1024)
                 except socket.timeout:
-                    # select 与 recv 之间连接状态可能发生变化；不要因为一次
-                    # 短暂的空读就关闭整个 HTTPS 隧道。
+                    # select and recv the connection state may change; do not, because of one
+                    # brief empty read, close the whole HTTPS tunnel.
                     continue
                 if not data:
                     return
@@ -498,7 +498,7 @@ class ProxyChainRelay:
 
 
 def browser_blocked_proxy_hosts() -> tuple[str, ...]:
-    """只由本地浏览器调用；协议请求、邮箱 API 等代理链不自动套用规则。"""
+    """Called only by the local browser; protocol requests, email APIs and other proxy chains do not automatically apply the rules."""
     from config import browser as browser_cfg
     if not bool(getattr(browser_cfg, "BROWSER_DATA_SAVER_MODE", False)):
         return ()
@@ -530,7 +530,7 @@ def open_proxy_pool_proxy(
     if not target or (not upstream and not measure_transport):
         return target, None
 
-    # 保持未支持协议的既有直连行为，不能为了统计改变出口。
+    # Keep the existing direct connection behavior for unsupported protocols; the egress must not be changed for statistics.
     if not upstream and parse_proxy_url(target).scheme not in {"http", "socks5", "socks5h"}:
         return target, None
 

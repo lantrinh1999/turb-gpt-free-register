@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""浏览器注册流程的网络流量统计。
+"""Network traffic statistics for the browser registration flow.
 
-统计的是浏览器侧能观察到的 HTTP 请求/响应字节，不会读取或保存请求内容。
-Playwright 直接使用 ``Request.sizes()``；Selenium/Roxy 优先读取 Chrome
-performance log，无法读取时退回到 Resource Timing。两种方式都不包含
-TLS/IP/代理隧道等协议额外开销，因此不等同于代理服务商的计费流量。
+It counts the HTTP request/response bytes observable on the browser side and never reads or saves request content.
+Playwright Use ``Request.sizes()`` directly; Selenium/Roxy prefer reading Chrome
+performance log, and fall back to Resource Timing when it cannot be read. Neither method includes
+TLS/IP/extra protocol overhead such as proxy tunnels, so it is not equal to the traffic billed by the proxy provider.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def merge_proxy_transport_traffic(observed: dict | None, transport: dict | None, *, label: str) -> dict | None:
-    """传输层全量计数作为总量；页面明细仍保留原来的 HTTP 统计口径。"""
+    """The transport-layer full count is used as the total; the per-page detail keeps the original HTTP accounting basis."""
     if not transport or not transport.get("available"):
         return observed
     result = dict(observed or {})
@@ -36,28 +36,28 @@ def merge_proxy_transport_traffic(observed: dict | None, transport: dict | None,
     result.update(available=True, upload_bytes=upload, download_bytes=download,
                   total_bytes=upload + download, measurement_scope="proxy_transport_all_browser_targets",
                   method="local_proxy.transport", label=label,
-                  note="本地代理隧道双向传输字节，包含 TLS、启动阶段和后台请求；不含 TCP/IP 开销、重传或代理商计费差异")
+                  note="Bytes transferred in both directions through the local proxy tunnel, including TLS, the startup phase and background requests; excluding TCP/IP overhead, retransmissions or proxy-provider billing differences")
     browser_total = result["browser_observed_total_bytes"]
-    logger.info("[%s] 代理传输流量：上传 %.2f MiB，下载 %.2f MiB，总计 %.2f MiB；页面可见 %.2f MiB",
+    logger.info("[%s] Proxy transfer traffic: upload %.2f MiB, download %.2f MiB, total %.2f MiB; page-visible %.2f MiB",
                 label, upload / 1048576, download / 1048576, (upload + download) / 1048576, browser_total / 1048576)
     destinations = transport.get("destinations") or []
     consuming = sorted((item for item in destinations if _non_negative_int(item.get("total_bytes")) > 0),
                        key=lambda item: _non_negative_int(item.get("total_bytes")), reverse=True)
     if destinations:
-        logger.info("[%s] 代理目标流量归因：有消耗目标 %s 个（按隧道目标 host:port；含启动和后台流量，不能区分页面/扩展发起者）",
+        logger.info("[%s] Proxy target traffic attribution: %s targets with consumption (by tunnel target host:port; includes startup and background traffic, cannot tell page/extension initiators apart)",
                     label, len(consuming))
     for index, item in enumerate(consuming, 1):
         host = str(item.get("host") or "<unknown>")
         endpoint = f"[{host}]:{item.get('port', 0)}" if ":" in host else f"{host}:{item.get('port', 0)}"
         total = _non_negative_int(item.get("total_bytes"))
-        logger.info("[%s] [代理目标] #%s target=%s upload=%sB download=%sB total=%sB (%.2f MiB) share=%.2f%% connections=%s failed=%s retries=%s recovered=%s",
+        logger.info("[%s] [proxy target] #%s target=%s upload=%sB download=%sB total=%sB (%.2f MiB) share=%.2f%% connections=%s failed=%s retries=%s recovered=%s",
                     label, index, endpoint, item.get("upload_bytes", 0), item.get("download_bytes", 0),
                     total, total / 1048576, total * 100 / (upload + download) if upload + download else 0,
                     item.get("connection_count", 0), item.get("failed_connection_count", 0),
                     item.get("connect_retry_count", 0), item.get("recovered_connection_count", 0))
     for item in destinations:
         if _non_negative_int(item.get("blocked_connection_count")):
-            logger.info("[%s] [代理拦截] target=%s:%s blocked=%s（上游连接前拒绝，未产生代理传输流量）",
+            logger.info("[%s] [proxy block] target=%s:%s blocked=%s (rejected before the upstream connection, no proxy transfer traffic produced)",
                         label, item.get("host"), item.get("port"), item["blocked_connection_count"])
     return result
 
@@ -75,13 +75,13 @@ _RESOURCE_TYPE_ALIASES = {
 
 
 def _normalize_resource_type(value: Any) -> str:
-    """统一 Playwright/CDP/Resource Timing 的资源类型名称。"""
+    """Unify the resource type names of Playwright/CDP/Resource Timing."""
     raw = str(value or "other").strip().lower()
     return _RESOURCE_TYPE_ALIASES.get(raw, raw or "other")
 
 
 def _non_negative_int(value: Any) -> int:
-    """把 Playwright/CDP 返回的数字安全地归一化为非负整数。"""
+    """Safely normalize numbers returned by Playwright/CDP into non-negative integers."""
     try:
         value = int(float(value or 0))
     except (TypeError, ValueError, OverflowError):
@@ -90,7 +90,7 @@ def _non_negative_int(value: Any) -> int:
 
 
 def _optional_size(value: Any) -> int | None:
-    """读取可能使用 -1 表示 unknown 的尺寸字段。"""
+    """Read size fields that may use -1 for unknown."""
     if value is None:
         return None
     try:
@@ -123,11 +123,11 @@ def _iso_now() -> str:
 
 
 def _safe_url_for_log(url: Any, *, max_length: int = 600) -> str:
-    """保留 host/path/查询键，隐藏 URL 查询值，避免明细日志落敏感 token。"""
+    """Keep host/path/query keys and hide the URL query values, so the detail log never stores sensitive tokens."""
     text = str(url or "")
     if not text:
         return "-"
-    # data/blob URL 可能本身携带完整资源内容，不能原样写入日志。
+    # data/blob URL may itself carry the full resource content and must not be written to logs as is.
     if text.lower().startswith(("data:", "blob:")):
         return text.split(":", 1)[0].lower() + ":<redacted>"
     try:
@@ -138,7 +138,7 @@ def _safe_url_for_log(url: Any, *, max_length: int = 600) -> str:
                 continue
             key = part.split("=", 1)[0]
             query_keys.append(f"{key}=<redacted>")
-        # URL 中的 userinfo 也可能是代理/临时凭证；只保留 host 和 port。
+        # URL userinfo may also be a proxy/temporary credential; only host and port are kept.
         netloc = parsed.netloc
         if "@" in netloc:
             netloc = netloc.rsplit("@", 1)[-1]
@@ -150,7 +150,7 @@ def _safe_url_for_log(url: Any, *, max_length: int = 600) -> str:
 
 
 def _is_loopback_url(url: Any) -> bool:
-    """本机回环 HTTP(S)/WS(S) 资源不属于代理或公网注册流量。"""
+    """Local loopback HTTP(S)/WS(S) resources are not proxy or public-network registration traffic."""
     try:
         parsed = urlsplit(str(url or ""))
         if parsed.scheme.lower() not in {"http", "https", "ws", "wss"}:
@@ -164,7 +164,7 @@ def _is_loopback_url(url: Any) -> bool:
 
 
 def _coverage_count(value: Any) -> int:
-    """把 Profiler 覆盖率中的 count/offset 规范化为非负整数。"""
+    """Normalize the count/offset in the Profiler coverage into non-negative integers."""
     try:
         return max(0, int(float(value or 0)))
     except (TypeError, ValueError, OverflowError):
@@ -172,7 +172,7 @@ def _coverage_count(value: Any) -> int:
 
 
 def _safe_js_function_name(value: Any, *, max_length: int = 220) -> str:
-    """函数名只用于诊断日志，去掉控制字符并限制长度。"""
+    """Function names are only used in diagnostic logs; strip control characters and limit the length."""
     text = str(value or "<anonymous>")
     text = "".join(char if char >= " " and char != "\x7f" else " " for char in text)
     text = " ".join(text.split()) or "<anonymous>"
@@ -180,7 +180,7 @@ def _safe_js_function_name(value: Any, *, max_length: int = 220) -> str:
 
 
 def _is_blockable_script_url(url: Any) -> bool:
-    """只把可通过 URL 规则拦截的 HTTP(S) 脚本列为屏蔽候选。"""
+    """Only list HTTP(S) scripts that can be blocked via URL rules as block candidates."""
     try:
         parsed = urlsplit(str(url or ""))
         return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
@@ -189,7 +189,7 @@ def _is_blockable_script_url(url: Any) -> bool:
 
 
 class _TrafficAccumulator:
-    """保存流量计数；按需保存脱敏后的资源明细，不保存 Header 或请求体。"""
+    """Save traffic counters; optionally save the masked resource details, never headers or request bodies."""
 
     def __init__(self, *, label: str, method: str):
         self.label = label
@@ -223,8 +223,8 @@ class _TrafficAccumulator:
         self._request_detail_index: dict[str, int] = {}
         self._request_detail_sequence = 0
 
-        # Chrome Profiler precise coverage。默认关闭；开启时只保留函数名、调用计数、
-        # offset 和脱敏 URL，不读取函数参数、返回值或源码内容。
+        # Chrome Profiler precise coverage. Off by default; when enabled only the function names, call counts,
+        # offset and masked URLs are kept; function arguments, return values or source content are not read.
         self._js_coverage_log_enabled = bool(getattr(_browser_cfg, "BROWSER_JS_COVERAGE_LOG", False))
         try:
             coverage_max = int(getattr(_browser_cfg, "BROWSER_JS_COVERAGE_MAX_ENTRIES", 1000) or 1000)
@@ -240,11 +240,11 @@ class _TrafficAccumulator:
         self._js_coverage_functions: list[dict[str, Any]] = []
 
     def attach_data_saver(self, data_saver: Any | None) -> None:
-        """把省流量拦截器的计数附加到浏览器流量快照。"""
+        """Attach the counters of the traffic-saving interceptor to the browser traffic snapshot."""
         self._data_saver = data_saver
 
     def attach_local_asset_cache(self, cache: Any | None) -> None:
-        """让统计器把 Fetch.fulfillRequest 本地正文排除出代理下载流量。"""
+        """Let the counter exclude the local body of Fetch.fulfillRequest from the proxy download traffic."""
         self._local_asset_cache = cache
 
     def _js_coverage_mark_target_attempt(self) -> None:
@@ -279,14 +279,14 @@ class _TrafficAccumulator:
             self._js_coverage_supported = False
 
     def _ingest_js_coverage(self, payload: Any, *, target: str = "") -> None:
-        """解析 Profiler.takePreciseCoverage，只保留可用于诊断的摘要。"""
+        """Parse Profiler.takePreciseCoverage and keep only a summary useful for diagnostics."""
         if not self._js_coverage_log_enabled:
             return
         if not isinstance(payload, dict):
-            raise ValueError("Profiler 返回不是对象")
+            raise ValueError("Profiler returned a non-object")
         scripts = payload.get("result")
         if not isinstance(scripts, list):
-            raise ValueError("Profiler 返回缺少 result 列表")
+            raise ValueError("Profiler returned no result list")
 
         raw_target = str(target or "-")
         target_text = (
@@ -343,7 +343,7 @@ class _TrafficAccumulator:
                         "call_count": function_call_count,
                         "range_count": len(normalized_ranges),
                         "executed_range_count": function_executed_ranges,
-                        # 仅保存 offset/count，避免把源码或参数带进日志/快照。
+                        # Only offset/count are saved, so source code or arguments never end up in logs/snapshots.
                         "ranges": normalized_ranges,
                         "function_index": function_index,
                     }
@@ -366,7 +366,7 @@ class _TrafficAccumulator:
                 self._js_coverage_functions.extend(executed_functions)
 
     def _js_coverage_snapshot(self) -> dict[str, Any]:
-        """返回适合写入 network_traffic 的 JS 覆盖率摘要。"""
+        """Return a JS coverage summary suitable for writing into network_traffic."""
         with self._lock:
             scripts = [dict(item) for item in self._js_coverage_scripts.values()]
             functions = list(self._js_coverage_functions)
@@ -378,8 +378,8 @@ class _TrafficAccumulator:
             error = self._js_coverage_error
             max_entries = int(self._js_coverage_max_entries)
 
-        # 将覆盖率脚本和网络明细按脱敏 URL 关联，便于直接判断“未执行但下载很大”的
-        # chunk。没有开启资源明细日志时这些字段自然为 0，不影响覆盖率本身。
+        # Correlate coverage scripts and network details by masked URL, making it easy to judge directly scripts that were "never executed but downloaded a lot"
+        # chunk. When the resource detail log is not enabled these fields are naturally 0 and do not affect the coverage itself.
         traffic_by_url: dict[str, dict[str, int]] = {}
         with self._lock:
             request_details = list(self._request_details)
@@ -407,15 +407,15 @@ class _TrafficAccumulator:
             item["traffic_blocked"] = int(traffic.get("blocked", 0))
 
         scripts.sort(key=lambda item: (not bool(item.get("executed")), str(item.get("url") or "")))
-        # 同一个 URL 可能出现在多个 Page/target；只要任一 target 执行过，就不能
-        # 因另一个 target 未执行而把该 URL 误列为候选。
+        # The same URL may appear in several Pages/targets; as long as any one target executed it, it must not
+        # be listed as a candidate just because another target did not execute it.
         url_executed: dict[str, bool] = {}
         for item in scripts:
             url = str(item.get("url") or "")
             if item.get("blockable_url") and url:
                 url_executed[url] = bool(url_executed.get(url, False) or item.get("executed"))
         candidate_urls = [url for url, executed in url_executed.items() if not executed]
-        # 快照只保存脚本级摘要；逐函数 offset 只写日志，避免 extra_json 膨胀。
+        # The snapshot only stores script-level summaries; per-function offsets go to the log only, to keep extra_json from bloating.
         script_summaries = scripts[:max_entries]
         return {
             "enabled": enabled,
@@ -440,7 +440,7 @@ class _TrafficAccumulator:
             return
         report = self._js_coverage_snapshot()
         logger.info(
-            "[%s] [JS执行汇总] supported=%s collected=%s target=%s/%s scripts=%s executed_scripts=%s "
+            "[%s] [JS execution summary] supported=%s collected=%s target=%s/%s scripts=%s executed_scripts=%s "
             "candidate_scripts=%s functions=%s executed_functions=%s logged_functions=%s",
             self.label,
             report.get("supported"),
@@ -455,12 +455,12 @@ class _TrafficAccumulator:
             report.get("logged_function_count", 0),
         )
         if report.get("error"):
-            logger.info("[%s] [JS覆盖率] 采集备注：%s", self.label, report["error"])
+            logger.info("[%s] [JS coverage] collection note:%s", self.label, report["error"])
 
         scripts = list(report.get("scripts") or [])
         for index, item in enumerate(scripts, 1):
             logger.info(
-                "[%s] [JS脚本] #%s executed=%s functions=%s executed_functions=%s "
+                "[%s] [JS script] #%s executed=%s functions=%s executed_functions=%s "
                 "ranges=%s executed_ranges=%s download=%sB requests=%s scriptId=%s target=%s url=%s",
                 self.label,
                 index,
@@ -492,7 +492,7 @@ class _TrafficAccumulator:
             if len(ranges) > 20:
                 range_text += f",+{len(ranges) - 20} ranges"
             logger.info(
-                "[%s] [JS执行] #%s url=%s function=%s count=%s ranges=%s target=%s scriptId=%s",
+                "[%s] [JS executed] #%s url=%s function=%s count=%s ranges=%s target=%s scriptId=%s",
                 self.label,
                 index,
                 item.get("script_url", "-"),
@@ -511,7 +511,7 @@ class _TrafficAccumulator:
         for index, url in enumerate(report.get("candidate_scripts") or [], 1):
             item = script_by_url.get(str(url), {})
             logger.info(
-                "[%s] [JS候选] #%s 脚本本次未观察到执行范围，仅供 A/B 验证，不代表可安全屏蔽："
+                "[%s] [JS candidate] #%s no execution range observed for this script this time, for A/B verification only, does not mean it is safe to block:"
                 "download=%sB requests=%s failed=%s blocked=%s url=%s",
                 self.label,
                 index,
@@ -528,7 +528,7 @@ class _TrafficAccumulator:
             self.http_download_bytes += _non_negative_int(download)
 
     def _prepare_request_details(self) -> None:
-        """在输出明细前补齐实现层特有的信息（例如 WebSocket 帧）。"""
+        """Fill in implementation-specific information (such as WebSocket frames) before outputting the details."""
 
     @staticmethod
     def _cache_status(*, cache_status: Any = None, from_cache: Any = None) -> str:
@@ -562,7 +562,7 @@ class _TrafficAccumulator:
         size_source: str = "browser_observed",
         detail_key: Any = None,
     ) -> None:
-        """记录单个资源的脱敏明细，供 stop() 时输出分析日志。"""
+        """Record the masked details of a single resource, for the analysis log output at stop()."""
         if not self._detail_log_enabled:
             return
         try:
@@ -605,7 +605,7 @@ class _TrafficAccumulator:
                 self._request_details[existing_index] = detail
 
     def _update_request_detail(self, detail_key: Any, **updates: Any) -> None:
-        """更新已记录资源的可变字段，不读取或保存请求/响应内容。"""
+        """Update the mutable fields of an already recorded resource, without reading or saving request/response content."""
         if not self._detail_log_enabled:
             return
         key = str(detail_key)
@@ -662,8 +662,8 @@ class _TrafficAccumulator:
             totals["blocked"] += int(bool(item["blocked"]))
             totals["failed"] += int(bool(item["failed"]))
         logger.info(
-            "[%s] 浏览器资源明细汇总：消耗流量访问 %s 条，跳过零流量/拦截/本地访问 %s 条，"
-            "upload=%sB download=%sB total=%sB，按类型=%s",
+            "[%s] Browser resource detail summary: %s accesses consumed traffic, %s zero-traffic / blocked / local accesses skipped,"
+            "upload=%sB download=%sB total=%sB, by type=%s",
             self.label,
             len(details),
             len(all_details) - len(details),
@@ -681,15 +681,15 @@ class _TrafficAccumulator:
             reverse=True,
         )[: self._detail_log_max_entries]
         logger.info(
-            "[%s] 浏览器资源明细开始：按单请求总字节降序，输出 %s/%s 条"
-            "（URL 查询值已脱敏；页面 HTTP/WS 口径，不含 TLS；估算项标记 size_source）",
+            "[%s] Browser resource details begin: sorted by total bytes per request in descending order, outputting %s/%s entries"
+            "(URL query values are masked; page HTTP/WS accounting basis, TLS excluded; estimated items are marked with size_source)",
             self.label,
             len(ranked),
             len(details),
         )
         for index, item in enumerate(ranked, 1):
             logger.info(
-                "[%s] [资源明细] #%s %s %s status=%s upload=%sB download=%sB total=%sB "
+                "[%s] [resource detail] #%s %s %s status=%s upload=%sB download=%sB total=%sB "
                 "body=%sB headers=%sB failed=%s blocked=%s unfinished=%s cache=%s "
                 "mime=%s ws_upload=%sB ws_download=%sB size_source=%s url=%s",
                 self.label,
@@ -712,11 +712,11 @@ class _TrafficAccumulator:
                 item.get("size_source", "browser_observed"),
                 item["url"],
             )
-        logger.info("[%s] 浏览器资源明细结束", self.label)
+        logger.info("[%s] Browser resource details end", self.label)
 
     @staticmethod
     def _is_consuming_detail(item: dict[str, Any]) -> bool:
-        """只输出有字节消耗的公网访问；失败/未完成但已收发的访问仍保留。"""
+        """Only public-network accesses that consumed bytes are output; accesses that failed / did not complete but already sent or received data are still kept."""
         if item.get("blocked") or _is_loopback_url(item.get("url")):
             return False
         if str(item.get("url") or "").lower().startswith(("data:", "blob:")):
@@ -729,13 +729,13 @@ class _TrafficAccumulator:
             total_download = self.http_download_bytes + self.websocket_download_bytes
             total = total_upload + total_download
             note = (
-                "浏览器侧 HTTP 请求/响应字节（含可获取的请求/响应头和主体）"
-                "；另计 WebSocket 帧 payload；不含 TLS/IP/代理隧道开销"
+                "Browser-side HTTP request/response bytes (including the obtainable request/response headers and body)"
+                "; WebSocket frame payload counted separately; excluding TLS/IP/proxy tunnel overhead"
             )
             if self.method == "selenium.resource_timing_fallback":
                 note = (
-                    "Chrome Resource Timing 可见的响应传输字节；上传请求头/请求体不可见，"
-                    "另计可见的 WebSocket 帧 payload；不含 TLS/IP/代理隧道开销"
+                    "Chrome Resource Timing visible response transfer bytes; upload request headers/bodies are not visible,"
+                    "Visible WebSocket frame payload counted separately; excluding TLS/IP/proxy tunnel overhead"
                 )
             result = {
                 "available": True,
@@ -782,8 +782,8 @@ class _TrafficAccumulator:
             return
         self._reported = True
         logger.info(
-            "[%s] 注册浏览器网络流量：上传 %.2f KiB，下载 %.2f KiB，合计 %.2f KiB，"
-            "HTTP请求 %s（失败 %s，未完成 %s）",
+            "[%s] Registration browser network traffic: upload %.2f KiB, download %.2f KiB, total %.2f KiB,"
+            "HTTP requests %s (failed %s, incomplete %s)",
             self.label,
             snapshot.get("upload_bytes", 0) / 1024,
             snapshot.get("download_bytes", 0) / 1024,
@@ -794,7 +794,7 @@ class _TrafficAccumulator:
         )
         if snapshot.get("data_saver_enabled"):
             logger.info(
-                "[%s] 省流量模式实际拦截资源：%s（按类型=%s）",
+                "[%s] Resources actually blocked by traffic-saving mode: %s (by type=%s)",
                 self.label,
                 snapshot.get("data_saver_blocked_count", 0),
                 snapshot.get("data_saver_blocked_by_type", {}) or {},
@@ -802,7 +802,7 @@ class _TrafficAccumulator:
             blocked_by_url_pattern = snapshot.get("data_saver_blocked_by_url_pattern", {}) or {}
             if blocked_by_url_pattern:
                 logger.info(
-                    "[%s] 省流量模式 URL 规则命中：%s",
+                    "[%s] Traffic-saving mode URL rule hit:%s",
                     self.label,
                     blocked_by_url_pattern,
                 )
@@ -811,7 +811,7 @@ class _TrafficAccumulator:
 
 
 class PlaywrightTrafficTracker(_TrafficAccumulator):
-    """统计一个 BrowserContext 内所有 Page 的 HTTP/WebSocket 流量。"""
+    """Count the HTTP/WebSocket traffic of all Pages inside one BrowserContext."""
 
     def __init__(self, context: Any, *, label: str = "BrowserUse"):
         super().__init__(label=label, method="playwright.request.sizes")
@@ -830,15 +830,15 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
             emitter.on(event, callback)
             self._listeners.append((emitter, event, callback))
         except Exception as exc:
-            logger.debug("[%s] 注册流量监听失败 event=%s：%s", self.label, event, exc)
+            logger.debug("[%s] Failed to register the traffic listener event=%s:%s", self.label, event, exc)
 
     def _attach(self) -> None:
-        # 监听 BrowserContext，而不是只监听当前 page，确保 popup/重定向窗口也计入。
+        # Listen on the BrowserContext instead of only the current page, so popup/redirect windows are counted too.
         self._listen(self.context, "request", self._on_request)
         self._listen(self.context, "requestfinished", self._on_request_finished)
         self._listen(self.context, "requestfailed", self._on_request_failed)
-        # websocket 是 Page 事件，不是 BrowserContext 事件；对已有页面和后续 popup
-        # 都挂载监听。
+        # websocket is a Page event, not a BrowserContext event; attach the listener to existing pages and later popup
+        # pages as well.
         self._listen(self.context, "page", self._on_page)
         for page in list(getattr(self.context, "pages", []) or []):
             self._on_page(page)
@@ -848,7 +848,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
         self._start_playwright_js_coverage(page)
 
     def _start_playwright_js_coverage(self, page: Any) -> None:
-        """为每个 Chromium Page 建立独立 CDP session 并开启精确覆盖率。"""
+        """Create an independent CDP session for every Chromium Page and enable precise coverage."""
         if not self._js_coverage_log_enabled:
             return
         page_key = id(page)
@@ -873,7 +873,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
             self._js_coverage_mark_started()
         except Exception as exc:
             self._js_coverage_mark_start_failure(exc)
-            logger.debug("[%s] Page JS 精确覆盖率启动失败：%s: %s", self.label, type(exc).__name__, str(exc)[:180])
+            logger.debug("[%s] Page JS Failed to start precise coverage:%s: %s", self.label, type(exc).__name__, str(exc)[:180])
 
     def _on_request(self, request: Any) -> None:
         if self._stopped:
@@ -886,7 +886,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
 
     @staticmethod
     def _request_fallback_upload(request: Any) -> int:
-        """失败请求没有 sizes() 时，尽量估算已经发出的头/体。"""
+        """When a failed request has no sizes(), estimate the headers/body already sent as best as possible."""
         try:
             method = str(getattr(request, "method", "GET") or "GET")
         except Exception:
@@ -922,12 +922,12 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
 
     @classmethod
     def _request_metadata(cls, request: Any, *, include_response: bool = True) -> dict[str, Any]:
-        """读取 Playwright 请求的可公开元数据，不读取响应 body。
+        """Read the publicly available metadata of a Playwright request without reading the response body.
 
-        ``Request.response()`` 是同步 API，内部会等待 Playwright 事件循环。
-        在 ``requestfailed`` 回调中调用它会与正在派发的回调重入，可能把原本的
-        导航异常替换成 ``CancelledError``/``Event loop is closed``。失败请求没有
-        可用的响应状态，因此该路径必须显式跳过响应读取。
+        ``Request.response()`` is a synchronous API and internally waits on the Playwright event loop.
+        Calling it inside a ``requestfailed`` callback re-enters the callback being dispatched and may replace the original
+        navigation exception with ``CancelledError``/``Event loop is closed``. A failed request has no
+        usable response status, so this path must explicitly skip reading the response.
         """
         try:
             resource_type = getattr(request, "resource_type", "other")
@@ -957,8 +957,8 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
             except Exception:
                 pass
             try:
-                # Playwright 能明确暴露的是 Service Worker 响应；普通 HTTP
-                # 缓存命中没有稳定的 Request API，不能把未知误报成 miss。
+                # Playwright What can be exposed unambiguously is the Service Worker response; ordinary HTTP
+                # cache hits have no stable Request API, so unknown must not be reported as a miss.
                 if bool(getattr(response, "from_service_worker", False)):
                     cache_status = "service_worker"
             except Exception:
@@ -1002,8 +1002,8 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
         unfinished: bool = False,
         include_response: bool = True,
     ) -> None:
-        # 明细日志关闭时不要触碰 Request 的同步方法；尤其不能让诊断逻辑影响
-        # requestfailed/page.goto 的主流程。
+        # When the detail log is off, do not touch the synchronous methods of Request; above all the diagnostic logic must not affect the
+        # requestfailed/page.goto main flow.
         if not self._detail_log_enabled:
             return
         metadata = self._request_metadata(request, include_response=include_response)
@@ -1036,8 +1036,8 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
                 self.request_count += 1
             self._requests[key] = request
 
-        # route.abort() 的请求没有真正发出；不能在 sizes() 不可用时把它估算成
-        # 已上传的请求头，否则省下来的流量会被统计口径重新加回来。
+        # route.abort() request was not really sent; when sizes() is unavailable it must not be estimated as
+        # uploaded request headers, otherwise the traffic saved would be added back by the accounting basis.
         try:
             blocked = bool(self._data_saver and self._data_saver.was_playwright_blocked(request))
         except Exception:
@@ -1051,9 +1051,9 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
             )
             return
 
-        # Playwright 文档明确说明：failed request 上 Request.sizes() 会抛错，且
-        # 其内部先调用 response()。更关键的是这里正处于 requestfailed 事件回调，
-        # 任何等待 Playwright 的同步调用都可能触发 API 重入并破坏 page.goto()。
+        # Playwright The docs state explicitly: Request.sizes() on a failed request throws, and
+        # it calls response() internally first. More importantly, we are inside the requestfailed event callback here,
+        # and any synchronous call that waits on Playwright may re-enter the API and break page.goto().
         if failed:
             upload = self._request_fallback_upload(request)
             self._add_http(upload, 0)
@@ -1071,8 +1071,8 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
 
         values = self._request_size_values(request)
         if values is None:
-            # 极少数完成事件也可能拿不到 sizes()；此时只估算上传，且不再读取
-            # response，避免把统计异常传播给 Playwright 事件派发。
+            # In rare cases a completed event also cannot get sizes(); then only the upload is estimated and the
+            # response is not read again, to avoid propagating statistics exceptions into the Playwright event dispatch.
             upload = self._request_fallback_upload(request)
             self._add_http(upload, 0)
             with self._lock:
@@ -1212,7 +1212,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
         return unfinished
 
     def _collect_playwright_js_coverage(self) -> None:
-        """结束各 Page 的 Profiler session 并汇总覆盖率。"""
+        """End the Profiler session of every Page and aggregate the coverage."""
         if not self._js_coverage_log_enabled:
             return
         with self._lock:
@@ -1223,7 +1223,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
         with self._lock:
             no_started_target = self._js_coverage_started_target_count == 0
         if not sessions and no_started_target:
-            self._js_coverage_mark_start_failure("没有可用的 Chromium Page/CDP target")
+            self._js_coverage_mark_start_failure("no usable Chromium Page/CDP target")
         for page, session, page_url in sessions:
             try:
                 payload = session.send("Profiler.takePreciseCoverage", {})
@@ -1234,7 +1234,7 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
                 self._ingest_js_coverage(payload, target=final_page_url or page_url or "page")
             except Exception as exc:
                 self._js_coverage_mark_take_failure(exc)
-                logger.debug("[%s] 读取 Page JS 精确覆盖率失败：%s: %s", self.label, type(exc).__name__, str(exc)[:180])
+                logger.debug("[%s] Failed to read the Page JS precise coverage:%s: %s", self.label, type(exc).__name__, str(exc)[:180])
             finally:
                 for command in ("Profiler.stopPreciseCoverage", "Profiler.disable"):
                     try:
@@ -1261,8 +1261,8 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
             snapshot = self._finish_snapshot()
             self._log_snapshot(snapshot)
             return snapshot
-        # 同步 Playwright 的事件会在这里调用前完成；仍未完成的请求单独标记，
-        # 不伪造响应字节，避免把“估计值”误报成精确值。
+        # Events of synchronous Playwright are completed before this call; requests that are still unfinished are marked separately,
+        # and no response bytes are fabricated, so an "estimate" is not reported as an exact value.
         with self._lock:
             self._stopped = True
         self.unfinished_request_count = self._record_unfinished_playwright_requests()
@@ -1275,10 +1275,10 @@ class PlaywrightTrafficTracker(_TrafficAccumulator):
 
 
 class SeleniumTrafficTracker(_TrafficAccumulator):
-    """统计 Roxy/Selenium 的 Chrome performance log 流量。
+    """Count the Chrome performance log traffic of Roxy/Selenium.
 
-    Selenium 没有统一的网络事件订阅 API，ChromeDriver 会把 CDP Network
-    事件放进 performance log；本类在 checkpoint/stop 时批量取出并解析。
+    Selenium There is no unified network event subscription API; ChromeDriver puts the CDP Network
+    events into the performance log; this class takes them out in batches and parses them at checkpoint/stop.
     """
 
     def __init__(self, driver: Any, *, label: str = "Roxy"):
@@ -1293,15 +1293,15 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
         self._websocket_stats: dict[str, dict[str, Any]] = {}
         self._js_coverage_started = False
         try:
-            # 对已经连接到指纹浏览器的 debuggerAddress 也尽量开启 Network 域；
-            # 是否能读到 performance log 仍由对应的 ChromeDriver 决定。
+            # Also try to enable the Network domain on the debuggerAddress already connected to the fingerprint browser;
+            # whether the performance log can be read is still decided by the corresponding ChromeDriver.
             self.driver.execute_cdp_cmd("Network.enable", {})
         except Exception as exc:
-            logger.debug("[%s] Network.enable 失败，将尝试读取现有 performance log：%s", label, exc)
+            logger.debug("[%s] Network.enable failed, will try to read the existing performance log:%s", label, exc)
         self._start_selenium_js_coverage()
 
     def _start_selenium_js_coverage(self) -> None:
-        """在当前 Selenium/CDP target 上开启 Chrome Profiler 精确覆盖率。"""
+        """Enable Chrome Profiler precise coverage on the current Selenium/CDP target."""
         if not self._js_coverage_log_enabled:
             return
         self._js_coverage_mark_target_attempt()
@@ -1313,13 +1313,13 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
             )
             self._js_coverage_started = True
             self._js_coverage_mark_started()
-            logger.info("[%s] 已开启 JS 精确覆盖率记录（Profiler.startPreciseCoverage）", self.label)
+            logger.info("[%s] JS precise coverage recording enabled (Profiler.startPreciseCoverage)", self.label)
         except Exception as exc:
             self._js_coverage_mark_start_failure(exc)
-            logger.debug("[%s] JS 精确覆盖率启动失败：%s: %s", self.label, type(exc).__name__, str(exc)[:180])
+            logger.debug("[%s] JS Failed to start precise coverage:%s: %s", self.label, type(exc).__name__, str(exc)[:180])
 
     def _collect_selenium_js_coverage(self) -> None:
-        """读取并停止当前 Selenium target 的 Profiler 覆盖率。"""
+        """Read and stop the Profiler coverage of the current Selenium target."""
         if not self._js_coverage_log_enabled or not self._js_coverage_started:
             return
         with self._lock:
@@ -1331,7 +1331,7 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
             self._ingest_js_coverage(payload, target="selenium.current_target")
         except Exception as exc:
             self._js_coverage_mark_take_failure(exc)
-            logger.debug("[%s] 读取 JS 精确覆盖率失败：%s: %s", self.label, type(exc).__name__, str(exc)[:180])
+            logger.debug("[%s] Failed to read the JS precise coverage:%s: %s", self.label, type(exc).__name__, str(exc)[:180])
         finally:
             for command in ("Profiler.stopPreciseCoverage", "Profiler.disable"):
                 try:
@@ -1500,7 +1500,7 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
             previous = self._requests.get(request_id)
             redirect = params.get("redirectResponse")
             if previous is not None and not previous.get("finished"):
-                # 同一个 requestId 的重定向会重新触发 requestWillBeSent。
+                # A redirect of the same requestId triggers requestWillBeSent again.
                 redirect_body = (redirect or {}).get("encodedDataLength", 0) if isinstance(redirect, dict) else 0
                 if isinstance(redirect, dict):
                     previous["response"] = redirect
@@ -1682,8 +1682,8 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
                 )
                 continue
 
-            # WebSocket 握手本身已经按 HTTP 请求计入，帧 payload 在这里合并到
-            # 同一行，避免分析时漏掉注册页面的实时通道流量。
+            # WebSocket The handshake itself is already counted as an HTTP request; the frame payload is merged here into
+            # the same row, so the real-time channel traffic of the registration page is not missed in analysis.
             response = record.get("response") or {}
             cache_status = self._record_cache_status(record)
             cached = cache_status == "hit"
@@ -1713,13 +1713,13 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
             )
 
     def drain(self) -> int:
-        """读取当前 performance log 缓冲区，返回解析的记录数。"""
+        """Read the current performance log buffer and return the number of parsed records."""
         try:
             entries = self.driver.get_log("performance")
             self._log_supported = True
         except Exception as exc:
             if self._log_supported is not False:
-                logger.debug("[%s] 无法读取 performance log：%s", self.label, exc)
+                logger.debug("[%s] Cannot read the performance log:%s", self.label, exc)
             self._log_supported = False
             return 0
 
@@ -1741,7 +1741,7 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
         return parsed
 
     def _collect_resource_timing_fallback(self) -> None:
-        """performance log 不可用时统计当前文档已暴露的响应传输字节。"""
+        """performance log When unavailable, count the response transfer bytes already exposed by the current document."""
         if self._network_event_count:
             return
         script = """
@@ -1828,7 +1828,7 @@ class SeleniumTrafficTracker(_TrafficAccumulator):
             with self._lock:
                 self._stopped = True
                 unfinished_records = [record for record in self._requests.values() if not record.get("finished")]
-                # 停止前把已经从 CDP dataReceived 看到的部分响应计入；剩余未知部分不虚构。
+                # Before stopping, count the partial responses already seen from CDP dataReceived; the remaining unknown part is not invented.
                 for record in unfinished_records:
                     partial_body = 0
                     if not record.get("served_from_cache") and not record.get("partial_accounted"):

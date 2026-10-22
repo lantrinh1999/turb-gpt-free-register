@@ -16,7 +16,7 @@ class MailCodeWebUiTests(unittest.TestCase):
         fields = {f["key"]: f for f in EDITABLE_FIELDS}
         self.assertNotIn("MAILCODE_API_BASE", fields)
         self.assertEqual(fields["MAILCODE_API_KEY"]["external_url"], "https://mailcode.bzb.qzz.io")
-        self.assertEqual(fields["MAILCODE_API_KEY"]["external_label"], "打开官网")
+        self.assertEqual(fields["MAILCODE_API_KEY"]["external_label"], "Open Official Site")
         self.assertEqual(fields["MAILCODE_API_KEY"]["storage"], "env")
         self.assertTrue(fields["MAILCODE_API_KEY"]["secret"])
         self.assertIn("mailcode", fields["EMAIL_SOURCE"]["help"])
@@ -31,11 +31,11 @@ class MailCodeWebUiTests(unittest.TestCase):
         self.assertEqual(result.json["wallet"]["balance"], "1000")
         pick.assert_not_called()
 
-    @patch("core.mailcode_client.list_products", side_effect=MailCodeError("密钥不可用", status=401))
+    @patch("core.mailcode_client.list_products", side_effect=MailCodeError("Key unavailable", status=401))
     def test_catalog_reports_api_error(self, products):
         result = self.client.get("/api/mailcode/catalog")
         self.assertEqual(result.status_code, 400)
-        self.assertIn("密钥不可用", result.json["error"])
+        self.assertIn("Key unavailable", result.json["error"])
 
     def test_job_requires_mailcode_key_before_submitting(self):
         with patch.object(cfg, "USE_EMAIL_SERVICE", True), patch.object(cfg, "EMAIL_SOURCE", "mailcode"), patch.object(cfg, "MAILCODE_API_KEY", ""):

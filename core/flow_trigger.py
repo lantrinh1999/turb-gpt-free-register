@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-注册成功后的"自动触发 flow"模块。
+Module that automatically triggers the "flow" after successful registration.
 
-主流程在 main.py / registration_service.py 拿到 access_token 后调用：
+The main flow calls this after obtaining access_token in main.py / registration_service.py:
     trigger_flow(access_token)
-不论触发成功失败，注册主流程都视为成功。
+Regardless of whether the trigger succeeds, the main registration flow is considered successful.
 """
 import json
 import logging
 
-# 这是个内部 HTTP 接口（156.225.31.95），无 Cloudflare 拦截，
-# 不需要 curl_cffi 的 TLS 指纹模拟，直接用标准 requests 库。
+# This is an internal HTTP endpoint (156.225.31.95) with no Cloudflare interception,
+# so curl_cffi TLS fingerprint emulation is not needed; use the standard requests library directly.
 import requests
 
-# 用模块属性方式读 config，支持 WebUI 热加载（config.reload_all()）。
+# Read config via module attributes to support WebUI hot reload (config.reload_all()).
 from config import flow_trigger as _cfg
-from config.browser import USER_AGENT, ACCEPT_LANGUAGE  # 浏览器指纹固定，不需要热加载
+from config.browser import USER_AGENT, ACCEPT_LANGUAGE  # Browser fingerprint is fixed, no hot reload needed
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,9 @@ def _build_headers() -> dict:
 
 
 def _send_sync(access_token: str) -> dict:
-    """实际同步执行 HTTP POST，并返回可统计的结果。"""
+    """Actually execute the HTTP POST synchronously and return a result suitable for statistics."""
     if not access_token:
-        return _flow_result(status="skipped", message="access_token 为空")
+        return _flow_result(status="skipped", message="access_token is empty")
 
     body = dict(_cfg.FLOW_TRIGGER_PAYLOAD)
     body["access_token"] = access_token
@@ -71,7 +71,7 @@ def _send_sync(access_token: str) -> dict:
     except Exception as exc:
         return _flow_result(status="failed", message=f"{type(exc).__name__}: {exc}")
 
-    # 简单解析 flow_id 打个日志，触发结果不影响主流程
+    # Simply parse flow_id for logging; the trigger result does not affect the main flow
     flow_id = ""
     response_preview = (resp.text or "")[:200]
     try:
@@ -99,15 +99,15 @@ def _send_sync(access_token: str) -> dict:
 
 def trigger_flow(access_token: str) -> dict:
     """
-    触发 156.225 flow 接口并返回结果。
+    Trigger the 156.225 flow endpoint and return the result.
 
     Args:
-        access_token: 本次注册拿到的 ChatGPT access_token
+        access_token: From this registration, the ChatGPT access_token
     """
     if not _cfg.ENABLE_FLOW_TRIGGER:
         return _flow_result(status="skipped", message="ENABLE_FLOW_TRIGGER=False")
 
     if not access_token:
-        return _flow_result(status="skipped", message="access_token 为空")
+        return _flow_result(status="skipped", message="access_token is empty")
 
     return _send_sync(access_token)

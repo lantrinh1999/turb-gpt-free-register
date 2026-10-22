@@ -402,7 +402,7 @@ class BrowserTrafficTests(unittest.TestCase):
             with self.assertLogs("core.browser_traffic", level="INFO") as captured:
                 result = tracker.stop()
 
-        detail_lines = [line for line in captured.output if "[资源明细]" in line]
+        detail_lines = [line for line in captured.output if "[resource detail]" in line]
         self.assertEqual(len(detail_lines), 1)
         line = detail_lines[0]
         self.assertIn("xhr POST", line)
@@ -505,7 +505,7 @@ class BrowserTrafficTests(unittest.TestCase):
             with self.assertLogs("core.browser_traffic", level="INFO") as captured:
                 result = tracker.stop()
 
-        detail_lines = [line for line in captured.output if "[资源明细]" in line]
+        detail_lines = [line for line in captured.output if "[resource detail]" in line]
         self.assertEqual(len(detail_lines), 3)
         joined = "\n".join(detail_lines)
         self.assertIn("status=200", joined)
@@ -538,13 +538,13 @@ class BrowserTrafficTests(unittest.TestCase):
             with self.assertLogs("core.browser_traffic", level="INFO") as captured:
                 result = tracker.stop()
 
-        lines = [line for line in captured.output if "[资源明细]" in line]
+        lines = [line for line in captured.output if "[resource detail]" in line]
         self.assertEqual(len(lines), 1)
         self.assertIn("url=https://example.test/paid", lines[0])
         self.assertIn("total=300B", lines[0])
-        summary = next(line for line in captured.output if "浏览器资源明细汇总" in line)
-        self.assertIn("消耗流量访问 2 条", summary)
-        self.assertIn("跳过零流量/拦截/本地访问 4 条", summary)
+        summary = next(line for line in captured.output if "Browser resource detail summary" in line)
+        self.assertIn("2 accesses consumed traffic", summary)
+        self.assertIn("4 zero-traffic / blocked / local accesses skipped", summary)
         self.assertIn("upload=110B download=220B total=330B", summary)
         self.assertEqual(result["detail_consuming_count"], 2)
 
@@ -564,7 +564,7 @@ class BrowserTrafficTests(unittest.TestCase):
             active.emit("framereceived", b"45678")
             with self.assertLogs("core.browser_traffic", level="INFO") as captured:
                 result = tracker.stop()
-        lines = [line for line in captured.output if "[资源明细]" in line]
+        lines = [line for line in captured.output if "[resource detail]" in line]
         self.assertEqual(len(lines), 1)
         self.assertIn("total=8B", lines[0])
         self.assertIn("wss://example.test/active", lines[0])
@@ -592,10 +592,10 @@ class BrowserTrafficTests(unittest.TestCase):
         self.assertIn("Profiler.startPreciseCoverage", [command for command, _ in driver.cdp_commands])
         self.assertIn("Profiler.takePreciseCoverage", [command for command, _ in driver.cdp_commands])
         joined = "\n".join(captured.output)
-        self.assertIn("[JS执行汇总]", joined)
-        self.assertIn("[JS执行]", joined)
+        self.assertIn("[JS execution summary]", joined)
+        self.assertIn("[JS executed]", joined)
         self.assertIn("function=<anonymous>", joined)
-        self.assertIn("[JS候选]", joined)
+        self.assertIn("[JS candidate]", joined)
         self.assertIn("unused.js", joined)
         self.assertIn("token=<redacted>", joined)
         self.assertNotIn("secret", joined)
@@ -614,7 +614,7 @@ class BrowserTrafficTests(unittest.TestCase):
         self.assertEqual(coverage["script_count"], 1)
         self.assertEqual(coverage["executed_function_count"], 1)
         self.assertTrue(context.sessions[0].detached)
-        self.assertIn("[JS执行]", "\n".join(captured.output))
+        self.assertIn("[JS executed]", "\n".join(captured.output))
 
 
 if __name__ == "__main__":

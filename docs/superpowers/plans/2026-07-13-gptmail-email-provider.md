@@ -1,4 +1,4 @@
-# GPTMail 邮箱来源 Implementation Plan
+# GPTMail Email Source Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -24,7 +24,7 @@
 - Modify `core/email_provider.py`: recognize, acquire, resolve, poll, and release the `gptmail` source.
 - Modify `config/email.py`: define `GPTMAIL_API_KEY` and load it from `.env`.
 - Modify `config/env_loader.py`: register the key as a documented secret environment variable.
-- Modify `webui/config_editor.py`: expose one masked `GPTMAIL_API_KEY` setting in the existing “邮箱 / OTP” group.
+- Modify `webui/config_editor.py`: expose one masked `GPTMAIL_API_KEY` setting in the existing “Email / OTP” group.
 - Create `tests/test_gptmail_client.py`: client HTTP, missing-key, and OTP polling tests.
 - Create `tests/test_email_provider_gptmail.py`: provider routing tests.
 - Create `tests/test_gptmail_config.py`: configuration metadata and environment override tests.
@@ -57,7 +57,7 @@ class GPTMailClientTests(unittest.TestCase):
 
     def test_pick_account_requires_configured_api_key(self):
         with patch.object(gptmail_client._email_cfg, "GPTMAIL_API_KEY", ""):
-            with self.assertRaisesRegex(gptmail_client.GPTMailError, "请填写 GPTMail API Key"):
+            with self.assertRaisesRegex(gptmail_client.GPTMailError, "please fill in the GPTMail API Key"):
                 gptmail_client.pick_account()
 
     @patch("core.gptmail_client.requests.get")
@@ -129,7 +129,7 @@ class GPTMailAccount:
 def _headers() -> dict[str, str]:
     api_key = str(getattr(_email_cfg, "GPTMAIL_API_KEY", "") or "").strip()
     if not api_key:
-        raise GPTMailError("GPTMail API Key 未配置，请在 WebUI「配置 → 邮箱 / OTP」中填写 GPTMail API Key。")
+        raise GPTMailError("GPTMail API Key is not configured, please fill in the GPTMail API Key in WebUI (Config -> Email / OTP).")
     return {"Accept": "application/json", "X-API-Key": api_key}
 
 
@@ -138,13 +138,13 @@ def _get(path: str, params: dict | None = None) -> dict:
         response = requests.get(BASE_URL + path, headers=_headers(), params=params, timeout=REQUEST_TIMEOUT)
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
-        raise GPTMailError(f"GPTMail 请求失败 ({path}): {type(exc).__name__}: {exc}") from exc
+        raise GPTMailError(f"GPTMail Request failed ({path}): {type(exc).__name__}: {exc}") from exc
     if response.status_code != 200 or not isinstance(payload, dict) or payload.get("success") is not True:
         message = payload.get("error") if isinstance(payload, dict) else response.text[:160]
-        raise GPTMailError(f"GPTMail 请求失败 ({path}): HTTP {response.status_code}; {message}")
+        raise GPTMailError(f"GPTMail Request failed ({path}): HTTP {response.status_code}; {message}")
     data = payload.get("data")
     if not isinstance(data, dict):
-        raise GPTMailError(f"GPTMail 响应缺少对象 data ({path})")
+        raise GPTMailError(f"GPTMail response is missing object data ({path})")
     return data
 ```
 
@@ -262,7 +262,7 @@ git commit -m "feat: route GPTMail email source"
 
 **Interfaces:**
 - Consumes: existing `apply_env_overrides`, `SECRET_ENV_KEYS`, and `EDITABLE_FIELDS` patterns.
-- Produces: runtime `config.email.GPTMAIL_API_KEY` and one masked WebUI setting in group `邮箱 / OTP` with key `GPTMAIL_API_KEY`.
+- Produces: runtime `config.email.GPTMAIL_API_KEY` and one masked WebUI setting in group `Email / OTP` with key `GPTMAIL_API_KEY`.
 
 - [x] **Step 1: Write the failing configuration tests**
 
@@ -283,7 +283,7 @@ class GPTMailConfigTests(unittest.TestCase):
 
     def test_webui_exposes_gptmail_key_as_secret_env_field(self):
         field = next(item for item in EDITABLE_FIELDS if item["key"] == "GPTMAIL_API_KEY")
-        self.assertEqual(field["group"], "邮箱 / OTP")
+        self.assertEqual(field["group"], "Email / OTP")
         self.assertTrue(field["secret"])
         self.assertEqual(field["storage"], "env")
 ```
@@ -311,13 +311,13 @@ Add `"GPTMAIL_API_KEY": "GPTMail API Key"` to `config/env_loader.py`’s `SECRET
 
 ```python
 {
-    "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-    "label": "GPTMail API Key", "help": "选择 gptmail 邮箱来源时必填；保存在 .env，不会写入 config 源码",
+    "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "Email / OTP",
+    "label": "GPTMail API Key", "help": "Required when the gptmail email source is selected; saved in .env and not written into the config source",
     "storage": "env", "secret": True,
 },
 ```
 
-Add `GPTMAIL_API_KEY=` in the `.env.example` “邮箱 / OTP” section with a Chinese comment. Update `README.md` to list GPTMail under email sources and add a “GPTMail 临时邮箱” subsection that instructs users to set `EMAIL_SOURCE = "gptmail"` and add the key through WebUI “配置 → 邮箱 / OTP” or `.env`. Explicitly document that the key is mandatory and the service address is fixed.
+Add `GPTMAIL_API_KEY=` in the `.env.example` “Email / OTP” section with an English comment. Update `README.md` to list GPTMail under email sources and add a “GPTMail temporary email” subsection that instructs users to set `EMAIL_SOURCE = "gptmail"` and add the key through WebUI “Config -> Email / OTP” or `.env`. Explicitly document that the key is mandatory and the service address is fixed.
 
 - [x] **Step 4: Run configuration tests to verify they pass**
 

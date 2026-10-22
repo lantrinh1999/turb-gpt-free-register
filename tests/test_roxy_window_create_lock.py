@@ -13,7 +13,7 @@ class _ConcurrentFakeClient(RoxyBrowserClient):
     state_lock = threading.Lock()
 
     def __init__(self):
-        # 测试不需要建立 requests.Session。
+        # The test does not need to create a requests.Session.
         pass
 
     def _open_profile_locked(self, profile_id=None):

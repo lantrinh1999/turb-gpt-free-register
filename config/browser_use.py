@@ -1,73 +1,73 @@
 # -*- coding: utf-8 -*-
 """
-Browser Use Cloud 配置。
+Browser Use Cloud configuration.
 
-文档：
+docs:
 - https://docs.browser-use.com/cloud/browser/stealth
 - https://docs.browser-use.com/cloud/browser/playwright-puppeteer-selenium
 
-用法：
-  1. 在 config/roxybrowser.py 设置 REGISTRATION_DRIVER = "browser_use"
-  2. 在 .env 填入 BROWSER_USE_API_KEY（也可用 WebUI 密钥字段写入 .env）
-  3. 推荐先关 Codex：ENABLE_CODEX_AUTO = False
+Usage:
+  1. In config/roxybrowser.py set REGISTRATION_DRIVER = "browser_use"
+  2. Put BROWSER_USE_API_KEY in .env (it can also be written to .env through the WebUI secret field)
+  3. Recommended: turn off Codex first:ENABLE_CODEX_AUTO = False
 """
 from config.env_loader import env_str, apply_env_overrides
 
-# Browser Use API Key（Cloud Dashboard 创建；优先读 .env / 环境变量）
+# Browser Use API Key(created in the Cloud Dashboard; .env / environment variables are read first)
 BROWSER_USE_API_KEY: str = env_str("BROWSER_USE_API_KEY", "")
 
-# 连接方式：
-#   "cdp_url" = 直接用官方 CDP websocket（推荐，最简单）
-#   "sdk"     = 先调 REST 创建 session（预留；默认仍走 cdp_url）
+# Connection method:
+#   "cdp_url" = Use the official CDP websocket directly (recommended, simplest)
+#   "sdk"     = Call the REST API to create a session first (reserved; cdp_url is still used by default)
 BROWSER_USE_CONNECT_MODE: str = "cdp_url"
 
-# CDP 连接地址模板。{api_key}/{proxy_country_code}/{profile_id} 会按需替换或追加 query。
+# CDP Connect URL template. {api_key}/{proxy_country_code}/{profile_id} are substituted or appended as query parameters as needed.
 BROWSER_USE_CDP_BASE: str = "wss://connect.browser-use.com"
 
-# 可选 REST API 根地址（以后若改走显式 create/stop session 用）
+# Optional REST API root (for later use if explicit create/stop session is adopted)
 BROWSER_USE_API_BASE: str = "https://api.browser-use.com/api/v2"
 
-# 代理国家代码，两位小写，例如 jp / us / sg / de；留空则用 Browser Use 默认出口
+# Proxy country code, two lowercase letters, e.g. jp / us / sg / de; leave empty to use the Browser Use default exit
 BROWSER_USE_PROXY_COUNTRY_CODE: str = "jp"
 
-# 是否使用 Browser Use 内置代理。False 时尽量不强制 cloud proxy（仍取决于服务端默认）
+# Whether to use the built-in Browser Use proxy. When False the cloud proxy is not forced where possible (still depends on the server default)
 BROWSER_USE_USE_PROXY: bool = True
 
-# 可选：固定 Browser Use profileId，用于复用 cookies/localStorage。
-# 个人批量注册建议留空，让每次新会话更干净。
+# Optional: pin a Browser Use profileId to reuse cookies/localStorage.
+# For personal batch registration leave it empty so every new session is cleaner.
 BROWSER_USE_PROFILE_ID: str = ""
 
-# Playwright / 页面超时
+# Playwright / page timeout
 BROWSER_USE_TIMEOUT: int = 90
 BROWSER_USE_NAVIGATION_TIMEOUT: int = 90
 
-# Browser Use 云端浏览器 keepAlive / 会话存活时间（分钟）。
-# 这会作为 connect URL 的 timeout 参数传给 Browser Use，用于让远端浏览器在等待 OTP、短信、callback 时保持活跃。
-# Browser Use 当前 timeout 单位是分钟，官方上限通常为 240；代码里会 clamp 到 1~240。
+# Browser Use Cloud browser keepAlive / session lifetime (minutes).
+# It is passed to Browser Use as the timeout parameter of the connect URL, so the remote browser stays alive while waiting for OTP, SMS and the callback.
+# Browser Use The timeout unit is currently minutes and the official limit is usually 240; the code clamps it to 1~240.
 BROWSER_USE_SESSION_TIMEOUT: int = 240
 
-# 快速模式：减少 Browser Use 流程里额外 human_delay 和长等待；默认开启。
+# Fast mode: reduces extra human_delay and long waits in the Browser Use flow; on by default.
 BROWSER_USE_FAST_MODE: bool = True
 
-# 阶段耗时日志：打印 connect/goto/email/otp/phone/callback 等步骤耗时，方便定位慢点。
+# Stage timing log: prints the time spent on connect/goto/email/otp/phone/callback etc., which helps locate slow spots.
 BROWSER_USE_LOG_TIMING: bool = True
 
-# 资料页最大处理时间；超时后不再卡住，直接尝试读取 /api/auth/session 的 accessToken。
+# Maximum time spent on the profile page; after a timeout it no longer hangs and directly tries to read the accessToken from /api/auth/session.
 BROWSER_USE_PROFILE_TIMEOUT: int = 28
 SKYVERN_PROFILE_TIMEOUT: int = 45
 
-# 资料页结束/超时后读取 accessToken 的最大等待时间；取不到则任务失败。
+# Maximum wait for reading the accessToken after the profile page finishes/times out; the task fails if it cannot be obtained.
 BROWSER_USE_SESSION_ACCESS_TOKEN_TIMEOUT: int = 18
 SKYVERN_SESSION_ACCESS_TOKEN_TIMEOUT: int = 35
 
-# 任务结束后是否主动断开 CDP
+# Whether to disconnect actively after the task ends CDP
 BROWSER_USE_KEEP_BROWSER_OPEN: bool = False
 
-# 额外 CDP query 参数，会合并到 connect URL；同名字段会覆盖上面的 BROWSER_USE_SESSION_TIMEOUT。
-# 例：{"timeout": "120"}  # 单位分钟
+# Extra CDP query parameters, merged into the connect URL; a field with the same name overrides BROWSER_USE_SESSION_TIMEOUT above.
+# Example: {"timeout": "120"}  # unit: minutes
 BROWSER_USE_EXTRA_QUERY: dict = {}
 
-# 打开的起始注册页
+# Starting sign-up page to open
 BROWSER_USE_START_URL: str = "https://chatgpt.com/auth/login"
 
 # ---- .env overrides for WebUI editable fields ----

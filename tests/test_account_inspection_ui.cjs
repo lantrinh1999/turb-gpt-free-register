@@ -42,10 +42,10 @@ function harness() {
   };
 }
 (async()=>{
-  // 范围以打开弹窗时为准；启动前/期间旧 GET 不能解锁，丢弃后立即补读。
+  // The scope is determined when the dialog opens; an old GET before or during startup must not unlock it, and a re-read follows immediately after it is discarded.
   const h=harness();
   h.run('startAccountInspection()');
-  assert.equal(h.element('inspectionScopeLabel').textContent,'已归档');
+  assert.equal(h.element('inspectionScopeLabel').textContent,'Archived');
   h.run('SHOW_ARCHIVED_ACCOUNTS=false');
   const submit=h.run('submitAccountInspection({preventDefault(){}})');
   assert.deepEqual(JSON.parse(h.requests[1].options.body),{workers:4,archived:'only'});
@@ -56,9 +56,9 @@ function harness() {
   assert.equal(h.run('inspectionActive'),true);
   await h.resolve(2,empty);
   assert.equal(h.element('btnStartInspection').disabled,true);
-  assert.equal(h.requests.length,4); // 不丢失启动完成时的刷新请求。
+  assert.equal(h.requests.length,4); // Do not lose the refresh request made when startup completes.
   await h.resolve(3,active);
-  assert.match(h.element('inspectionHistoryContent').innerHTML,/已归档/);
+  assert.match(h.element('inspectionHistoryContent').innerHTML,/Archived/);
   h.run('refreshInspectionHistory()');
   await h.reject(4,new Error('network failure'));
   assert.equal(h.run('inspectionLoading'),false);
@@ -68,7 +68,7 @@ function harness() {
   h.run('refreshInspectionHistory()'); await h.resolve(6,empty);
   assert.equal(h.element('btnStartInspection').disabled,false);
   assert.equal(h.accountsReloaded,1);
-  assert.match(h.element('inspectionHistoryContent').innerHTML,/暂无巡检记录/);
+  assert.match(h.element('inspectionHistoryContent').innerHTML,/No Inspection Records/);
   h.run('refreshInspectionHistory()');
   await h.resolve(7,{active:null,total:1,items:[{
     id:8,archived:'only',status:'<img src=x>',workers:8,created_at:'2026-10-17T17:20:10',
@@ -77,11 +77,11 @@ function harness() {
     error:'<script>alert(1)</script>',
   }]});
   const markup=h.element('inspectionHistoryContent').innerHTML;
-  for(const pattern of [/44 \/ 40/,/跳过 2 个/,/width:100%/,/inspection-pill--unknown/,/&lt;script&gt;/])assert.match(markup,pattern);
+  for(const pattern of [/44 \/ 40/,/Skipped 2/,/width:100%/,/inspection-pill--unknown/,/&lt;script&gt;/])assert.match(markup,pattern);
   assert.doesNotMatch(markup,/<script>|<img/);
   assert.equal(h.element('inspectionRefresh').disabled,false);
 
-  // POST 超时不能永久卡住，也不能假定服务端未创建任务而允许盲目重提。
+  // POST A timeout must not hang forever, nor assume that the server has not created the task and allow a blind resubmission.
   const timeout=harness();await timeout.resolve(0,empty);
   timeout.run('startAccountInspection()');
   const pending=timeout.run('submitAccountInspection({preventDefault(){}})');
@@ -89,14 +89,14 @@ function harness() {
   assert.equal(timeout.run('inspectionStarting'),false);
   assert.equal(timeout.run('inspectionUncertain'),true);
   assert.equal(timeout.element('btnStartInspection').disabled,true);
-  assert.match(timeout.element('btnStartInspection').textContent,/待确认/);
+  assert.match(timeout.element('btnStartInspection').textContent,/Unconfirmed/);
   timeout.run('submitAccountInspection({preventDefault(){}})');
   assert.equal(timeout.requests.length,3);
   await timeout.resolve(2,active);
   assert.equal(timeout.run('inspectionUncertain'),false);
   assert.equal(timeout.run('inspectionActive'),true);
 
-  // 切换页码时遇到正在加载的请求，完成后应立即读取目标页。
+  // When switching pages while a request is still loading, the target page should be read immediately after it completes.
   const pages=harness();await pages.resolve(0,empty);
   pages.run('inspectionPage=2;refreshInspectionHistory()');
   pages.run('openInspectionHistory()');
@@ -105,7 +105,7 @@ function harness() {
   await pages.resolve(2,empty);
   assert.equal(pages.run('inspectionLoading'),false);
 
-  // POST 断连后的旧 GET 不得错误解除“状态待确认”。
+  // POST An old GET after a disconnect must not wrongly clear “status unconfirmed”.
   const uncertain=harness();await uncertain.resolve(0,empty);
   uncertain.run('startAccountInspection()');
   const failure=uncertain.run('submitAccountInspection({preventDefault(){}})');
@@ -118,7 +118,7 @@ function harness() {
   assert.equal(uncertain.element('btnStartInspection').disabled,false);
   assert.equal(uncertain.timers.size,0);
 
-  // 失败详情入口、按任务隔离、分页、旧响应隔离和转义。
+  // Failure details entry, per-task isolation, pagination, old-response isolation and escaping.
   assert.match(markup,/openInspectionFailures\(8\)/);
   const details=harness();await details.resolve(0,empty);
   details.run('openInspectionFailures(8)');
@@ -130,7 +130,7 @@ function harness() {
   await details.resolve(2,{task:{archived:'only'},total:21,details_available:true,items:[{
     account_id:2,email:'<img src=x>',status:'deactivated',error:'<script>alert(1)</script>',failed_at:'2026-10-18T12:00:00',
   }]});
-  assert.match(details.element('inspectionFailuresContent').innerHTML,/账号已废/);
+  assert.match(details.element('inspectionFailuresContent').innerHTML,/Account Deactivated/);
   assert.match(details.element('inspectionFailuresContent').innerHTML,/&lt;script&gt;/);
   assert.doesNotMatch(details.element('inspectionFailuresContent').innerHTML,/<script>|<img/);
   assert.equal(details.element('inspectionFailuresNext').disabled,false);
@@ -141,19 +141,19 @@ function harness() {
   assert.equal(details.element('inspectionFailuresNext').disabled,true);
   details.run('openInspectionFailures(10)');
   assert.equal(details.element('inspectionFailuresNext').disabled,true);
-  assert.doesNotMatch(details.element('inspectionFailuresSubtitle').textContent,/已归档/);
+  assert.doesNotMatch(details.element('inspectionFailuresSubtitle').textContent,/Archived/);
   await details.resolve(4,{task:{archived:'0'},total:0,details_available:false,items:[]});
-  assert.match(details.element('inspectionFailuresContent').innerHTML,/旧任务仅保留汇总/);
+  assert.match(details.element('inspectionFailuresContent').innerHTML,/Older tasks keep only summaries/);
   details.run('openInspectionFailures(11)');
   await details.expire();
-  assert.match(details.element('inspectionFailuresContent').innerHTML,/暂时无法读取/);
+  assert.match(details.element('inspectionFailuresContent').innerHTML,/Unable to read/);
   assert.equal(details.element('inspectionFailuresRefresh').disabled,false);
   details.run('refreshInspectionFailures()');
   await details.resolve(6,{task:{archived:'0'},total:0,details_available:true,items:[]});
-  assert.match(details.element('inspectionFailuresContent').innerHTML,/暂无查活失败或已废跳过记录/);
+  assert.match(details.element('inspectionFailuresContent').innerHTML,/No liveness failures or skipped deactivated accounts/);
   assert.equal(details.timers.size,0);
 
-  // 同页 DOM 不变时跳过重建；有变化保留阅读位置，翻页重置。
+  // Skip the rebuild when the DOM on the same page is unchanged; keep the reading position on changes, reset on page turn.
   details.run(`(() => {
     let markup = 'old', writes = 0;
     let wrap = {scrollLeft:0};
@@ -173,11 +173,11 @@ function harness() {
     if(wrap.scrollLeft!==0 || body.scrollTop!==0)throw Error('page scroll not reset');
   })()`);
 
-  // 一键删除已废：确认范围、启动时快照、防重复提交和选择清理。
+  // One-click delete of dead accounts: confirmation scope, snapshot at start, duplicate-submission guard and selection cleanup.
   const deletion=harness();await deletion.resolve(0,empty);
   const deleting=deletion.run('deleteDeactivatedAccounts()');
-  assert.match(deletion.confirmations[0],/已归档/);
-  assert.match(deletion.confirmations[0],/不限当前页/);
+  assert.match(deletion.confirmations[0],/Archived/);
+  assert.match(deletion.confirmations[0],/Not limited to the current page/);
   assert.deepEqual(JSON.parse(deletion.requests[1].options.body),{archived:'only'});
   deletion.run('SHOW_ARCHIVED_ACCOUNTS=false;deleteDeactivatedAccounts()');
   assert.equal(deletion.requests.length,2);
@@ -188,23 +188,23 @@ function harness() {
   const retried=deletion.run('deleteDeactivatedAccounts()');
   assert.deepEqual(JSON.parse(deletion.requests[2].options.body),{archived:'0'});
   await deletion.reject(2,new Error('offline'));await retried;
-  assert.match(deletion.toasts.at(-1),/核实/);
+  assert.match(deletion.toasts.at(-1),/verify/);
   assert.equal(deletion.element('btnDeleteDeactivatedAccounts').disabled,false);
   deletion.run('confirm=()=>false;deleteDeactivatedAccounts()');
   assert.equal(deletion.requests.length,3);
-  // 已废跳过能独立进入详情，但不冒充查活失败。
+  // A skipped dead account can enter the details independently, but does not masquerade as a liveness failure.
   deletion.run('refreshInspectionHistory()');
   await deletion.resolve(3,{active:null,total:1,items:[{id:6,status:'completed',total_count:2,
     checked_count:0,skipped_count:2,deactivated_skipped_count:2,live_failed_count:0}]});
-  assert.match(deletion.element('inspectionHistoryContent').innerHTML,/已废 2/);
-  assert.match(deletion.element('inspectionHistoryContent').innerHTML,/失败详情（2）/);
+  assert.match(deletion.element('inspectionHistoryContent').innerHTML,/deactivated 2/);
+  assert.match(deletion.element('inspectionHistoryContent').innerHTML,/Failure Details [(]2[)]/);
   deletion.run('openInspectionFailures(6)');
   await deletion.resolve(4,{task:{archived:'0'},details_available:true,total:2,
-    items:[{account_id:1,email:'dead@example.test',status:'deactivated_skipped',error:'已废跳过'}]});
-  assert.match(deletion.element('inspectionFailuresContent').innerHTML,/已废跳过/);
+    items:[{account_id:1,email:'dead@example.test',status:'deactivated_skipped',error:'Skipped [(]Deactivated[)]'}]});
+  assert.match(deletion.element('inspectionFailuresContent').innerHTML,/Skipped [(]Deactivated[)]/);
 
   const initial=harness();await initial.reject(0,new Error('offline'));
-  assert.match(initial.element('inspectionHistoryContent').innerHTML,/暂时无法读取/);
+  assert.match(initial.element('inspectionHistoryContent').innerHTML,/Unable to read/);
   assert.equal(initial.element('inspectionRefresh').disabled,false);
-  console.log('巡检 UI 验收通过：范围、旧响应隔离、GET/POST 超时、未知启动结果防重、分页补读、统计与转义。');
+  console.log('Inspection UI acceptance passed: scope, old-response isolation, GET/POST timeouts, duplicate-submission guard for unknown start results, pagination re-read, statistics and escaping.');
 })().catch(error=>{console.error(error);process.exitCode=1;});
