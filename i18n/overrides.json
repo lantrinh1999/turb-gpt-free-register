@@ -1,0 +1,15 @@
+{
+ "core/account_export.py": {
+  "注册": "Enrolling"
+ },
+ "core/browser_traffic.py": {
+  "执行": "executed"
+ },
+ "core/browser_use_codex_oauth.py": {
+  "等待": "Waiting for",
+  "连接": "Connecting to"
+ },
+ "core/codex_agent.py": {
+  "的": "session"
+ }
+}

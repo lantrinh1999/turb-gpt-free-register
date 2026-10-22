@@ -1,0 +1,641 @@
+[
+ {
+  "line": "has-text\\(|contains\\(\\.|get_by_(text|role|label|placeholder)|:text\\(|[\\\"']text=|\\[(aria-label|placeholder|title|alt|name|value)[*^$~|]?="
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "line": "\\\\D\\{0,80\\}"
+ },
+ {
+  "file": "config/email.py",
+  "segment": "用于注册的邮箱"
+ },
+ {
+  "file": "core/account_liveness.py",
+  "segment": "注册日志"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "メール|邮箱|電子郵件"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "手机号"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "电话号码"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "ワークスペース"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "認証"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "許可"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "続行|次へ|送信|继续|下一步|登录|登入"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "错误"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "过期"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "无效"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "手机号|手机|電話|携帯"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "拒"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "不支持"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "できません"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "無効"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "手机"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "短信"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "電話"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "携帯"
+ },
+ {
+  "file": "core/browser_use_codex_oauth.py",
+  "segment": "続行|送信|次へ|確認|继续|发送|下一步|验证"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "認証コード') || text.includes('確認コード') || text.includes('コード"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "验证码') || text.includes('驗證碼"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "使用一次性验证码注册"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "使用一次性验证码登录"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "使用一次性验证码"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "使用一次性驗證碼註冊"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "使用一次性驗證碼登入"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "一次性验证码"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "一次性驗證碼"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "ワンタイムコード"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "認証コード"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "続行/.test(attrs) || /continue|next|submit|create|続行"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "错误"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "过期"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "无效"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "名前|氏名|姓名"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "年齢|年龄"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "続行|次へ|完了|送信|開始|继续|下一步|完成|提交"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "誕生日"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "年齢"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "名前"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "生日"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "年龄"
+ },
+ {
+  "file": "core/browser_use_registration.py",
+  "segment": "姓名"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "号码无效"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "手机号无效"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "电话号码无效"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "无法发送"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "不能发送"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "无法向"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "发送验证码"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "发送短信"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "频繁"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "限流"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "上限"
+ },
+ {
+  "file": "core/codex_oauth.py",
+  "segment": "已被使用"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "重新发送|重新发送电子邮件|重发|再次发送|再送信|新しい|届かない"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "使用一次性验证码注册"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "使用一次性验证码登录"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "使用一次性验证码"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "使用一次性驗證碼註冊"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "使用一次性驗證碼登入"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "一次性验证码"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "一次性驗證碼"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "メールでコード"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "ワンタイムコード"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "認証コード"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "密码.*继续|密碼.*繼續|비밀번호.*계속|パスワード.*続行|パスワード.*つづける"
+ },
+ {
+  "file": "core/roxy_registration.py",
+  "segment": "続行/.test(attrs) || /continue|next|submit|create|続行"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "注册日志"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "用于注册的邮箱"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "用于注册的API邮箱"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "注册成功的邮箱"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "注册成功的"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "注册任务"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "导出状态"
+ },
+ {
+  "file": "core/db.py",
+  "segment": "用于注册的域名邮箱"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "验证码错误"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "验证码无效"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "验证码已过期"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "コードが正しく"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "無効"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "期限"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "認証コードが無効"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "号码无效"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "手机号无效"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "发送失败"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "发送失败了"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "无法发送"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "不能发送"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "无法向"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "送信できません"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "送信に失敗"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "送信できなかった"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "频繁"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "限流"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "余额不足"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "暂无可用号码"
+ },
+ {
+  "file": "core/roxy_codex_oauth.py",
+  "segment": "没有可用号码"
+ },
+ {
+  "file": "webui/config_editor.py",
+  "segment": "无"
+ },
+ {
+  "file": "webui/config_editor.py",
+  "segment": "未配置"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账号已停用"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账号已禁用"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账号已删除"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账户已停用"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账户已禁用"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "账户已删除"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "删除"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "封"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "認証コード"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "確認コード"
+ },
+ {
+  "file": "core/openai_auth.py",
+  "segment": "コード"
+ },
+ {
+  "file": "core/sms_provider.py",
+  "segment": "余额不足"
+ },
+ {
+  "file": "core/sms_provider.py",
+  "segment": "暂无号码"
+ },
+ {
+  "file": "core/sms_provider.py",
+  "segment": "每次取新号"
+ },
+ {
+  "file": "core/sms_provider.py",
+  "segment": "新号"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "代码"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "确认码"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "認証"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "コード"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "用于注册的API邮箱"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "临时"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "登录代码"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "一時的な認証コード"
+ },
+ {
+  "file": "core/generic_api_mail_client.py",
+  "segment": "一時ログインコード"
+ },
+ {
+  "file": "core/registration_service.py",
+  "segment": "无"
+ },
+ {
+  "file": "core/registration_service.py",
+  "segment": "空"
+ },
+ {
+  "file": "core/roxybrowser_client.py",
+  "segment": "无"
+ },
+ {
+  "file": "core/roxybrowser_client.py",
+  "segment": "空"
+ },
+ {
+  "file": "webui/config_editor.py",
+  "segment": "无"
+ },
+ {
+  "file": "webui/config_editor.py",
+  "segment": "空"
+ },
+ {
+  "file": "core/email_change_service.py",
+  "segment": "注册日志"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "用于注册的邮箱"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "用于注册的API邮箱"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "注册成功的邮箱"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "注册成功的"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "导出状态"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "注册日志"
+ },
+ {
+  "file": ".gitignore",
+  "segment": "用于注册的域名邮箱"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "代码"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "确认码"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "認証コード"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "検証コード"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "確認コード"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "一時検証"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "認証"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "验证"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "确认"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "コード"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "検証"
+ },
+ {
+  "file": "core/otp_utils.py",
+  "segment": "確認"
+ },
+ {
+  "file": "core/twofa_service.py",
+  "segment": "注册日志"
+ },
+ {
+  "file": "core/codex_retry_service.py",
+  "segment": "注册日志"
+ },
+ {
+  "file": "README.md",
+  "segment": "用于注册的邮箱.txt.example 用于注册的邮箱"
+ },
+ {
+  "file": "README.md",
+  "segment": "注册日志/codex-retry-邮箱"
+ },
+ {
+  "file": "README.md",
+  "segment": "注册日志/` | 注册任务日志、Codex 补跑日志"
+ }
+]
