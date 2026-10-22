@@ -11,5 +11,32 @@
  },
  "core/codex_agent.py": {
   "的": "session"
+ },
+ "tests/test_account_inspection_ui.cjs": {
+  "已废跳过": "Skipped [(]Deactivated[)]"
+ },
+ "tests/test_cf_temp_mail_client.py": {
+  "请填写": "fill in"
+ },
+ "tests/test_browser_traffic.py": {
+  "执行": "executed"
+ },
+ "tests/test_gptmail_client.py": {
+  "请填写": "fill in the"
+ },
+ "tests/test_mailcode_client.py": {
+  "超时": "Timed out"
+ },
+ "tests/test_webui_cloudflare.py": {
+  "地址": "address"
+ },
+ "tests/test_webui_remail.py": {
+  "项目": "project"
+ },
+ "webui/templates/index.html": {
+  "开关": "Switch",
+  "功能": "Feature",
+  "接码": "Code-Receiving",
+  "注册": "Registration"
  }
 }

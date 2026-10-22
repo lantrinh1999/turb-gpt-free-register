@@ -115,6 +115,27 @@ def spaced(line: str, start: int, end: int, val: str) -> str:
     return val
 
 
+def adapt_to_context(rel: str, line: str, start: int, key: str, val: str) -> str | None:
+    """Make an English value safe inside the string literal / markup it replaces into (code context only).
+
+    * the quote character that delimits the surrounding literal is swapped for the other quote
+      ("resend" inside "..." becomes 'resend'); backticks and a literal containing both are rejected;
+    * '<' is rejected inside HTML files (it would open a tag); '>' and '&' are harmless in text.
+    """
+    if rel.endswith((".html", ".htm")) and "<" in val and "<" not in key:
+        return None
+    unescaped = lambda q: len(re.findall(rf"(?<!\\){q}", line[:start]))  # noqa: E731
+    for q, other in (('"', "'"), ("'", '"')):
+        if q in val and q not in key and unescaped(q) % 2 == 1:
+            if other in val or unescaped(other) % 2 == 1 and other in line[:start]:
+                if other in val:
+                    return None
+            val = val.replace(q, other)
+    if "`" in val and "`" not in key and unescaped("`") % 2 == 1:
+        return None
+    return val
+
+
 def lookup(zh_en: dict, overrides: dict, rel: str, segment: str):
     per_file = overrides.get(rel)
     if per_file and segment in per_file:
@@ -321,11 +342,12 @@ def cmd_apply() -> int:
                 if val is None:
                     missing += 1
                     continue
-                unsafe = (FORBIDDEN_VALUE_CHARS & set(val)) - set(span.text)
-                if not span.prose and unsafe:
-                    print(f"UNSAFE {rel}: {span.text!r} -> {val!r} (code context cannot contain {sorted(unsafe)!r})")
-                    missing += 1
-                    continue
+                if not span.prose:
+                    val = adapt_to_context(rel, line, span.start, span.text, val)
+                    if val is None:
+                        print(f"UNSAFE {rel}: {span.text!r} (value cannot be placed inside this string literal)")
+                        missing += 1
+                        continue
                 new = new[: span.start] + spaced(line, span.start, span.end, val) + new[span.end :]
             if new != line:
                 lines[i] = new

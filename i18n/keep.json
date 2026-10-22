@@ -637,5 +637,21 @@
  {
   "file": "README.md",
   "segment": "注册日志/` | 注册任务日志、Codex 补跑日志"
+ },
+ {
+  "file": "tests/test_generic_api_public_inbox.py",
+  "segment": "の一時的な認証コード"
+ },
+ {
+  "file": "tests/test_generic_api_public_inbox.py",
+  "segment": "この一時検証コードを入力して続行してください"
+ },
+ {
+  "file": "tools/test_chatgpt_curl_cffi.py",
+  "segment": "注册成功的"
+ },
+ {
+  "file": "docs/UPSTREAM_SYNC.md",
+  "segment": "*"
  }
 ]
