@@ -182,7 +182,26 @@ class Span:
         return self.text
 
 
+_PROTECTED: list[str] | None = None
+
+
+def only_protected(text: str) -> bool:
+    """True when the span consists solely of whitelisted terms (i18n/protected.json) and plain ASCII."""
+    global _PROTECTED
+    if _PROTECTED is None:
+        _PROTECTED = load_json(PROTECTED_PATH, [])
+    rest = text
+    for term in _PROTECTED:
+        rest = rest.replace(term, "")
+    return not ANY_CJK_RE.search(rest)
+
+
 def find_spans(line: str, prose_start: int) -> list[Span]:
+    spans = _find_spans(line, prose_start)
+    return [sp for sp in spans if not only_protected(sp.text)]
+
+
+def _find_spans(line: str, prose_start: int) -> list[Span]:
     spans: list[Span] = []
     code = line if prose_start < 0 else line[:prose_start]
     for m in SEGMENT_RE.finditer(code):
